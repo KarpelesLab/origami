@@ -1,0 +1,16 @@
+[package]
+name = "energy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Force-field energy terms for origami."
+
+[dependencies]
+chem = { path = "../chem" }
+geom = { path = "../geom" }
+nalgebra.workspace = true
+
+[dev-dependencies]
+approx.workspace = true

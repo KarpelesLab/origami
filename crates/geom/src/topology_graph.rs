@@ -51,12 +51,15 @@ pub struct Dihedral {
     pub d: usize,
 }
 
-/// An improper torsion. `b` is the central sp² atom; the planarity is
-/// enforced on the dihedral a-b-c-d via the harmonic ω restraint.
+/// An improper torsion. **`a` is the central sp² atom** (matching CHARMM's
+/// convention where the central atom is listed first); `b`, `c`, `d` are
+/// its three substituents. The improper energy is `K (ω − ω₀)²` where ω is
+/// the standard IUPAC dihedral a-b-c-d. With central first, planar
+/// geometry gives ω = 0.
 #[derive(Debug, Clone, Copy)]
 pub struct Improper {
-    pub a: usize,
-    pub b: usize, // central
+    pub a: usize, // central
+    pub b: usize,
     pub c: usize,
     pub d: usize,
 }
@@ -268,7 +271,8 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
             (None, None, None, None)
         };
         if let (Some(ca), Some(c), Some(o), Some(next_n)) = prev_atoms {
-            impropers.push(Improper { a: ca, b: c, c: o, d: next_n });
+            // Central = C (sp² peptide-bond carbon).
+            impropers.push(Improper { a: c, b: ca, c: o, d: next_n });
         }
 
         // Aromatic / sp² side-chain centres.
@@ -280,7 +284,8 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
                     lookup(ri, "OD1"),
                     lookup(ri, "ND2"),
                 ) {
-                    impropers.push(Improper { a: cb, b: cg, c: od1, d: nd2 });
+                    // Central = CG (sp² amide C).
+                    impropers.push(Improper { a: cg, b: cb, c: od1, d: nd2 });
                 }
             }
             AminoAcid::Gln => {
@@ -290,7 +295,8 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
                     lookup(ri, "OE1"),
                     lookup(ri, "NE2"),
                 ) {
-                    impropers.push(Improper { a: cg, b: cd, c: oe1, d: ne2 });
+                    // Central = CD.
+                    impropers.push(Improper { a: cd, b: cg, c: oe1, d: ne2 });
                 }
             }
             AminoAcid::Asp => {
@@ -300,7 +306,8 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
                     lookup(ri, "OD1"),
                     lookup(ri, "OD2"),
                 ) {
-                    impropers.push(Improper { a: cb, b: cg, c: od1, d: od2 });
+                    // Central = CG (sp² carboxyl C).
+                    impropers.push(Improper { a: cg, b: cb, c: od1, d: od2 });
                 }
             }
             AminoAcid::Glu => {
@@ -310,7 +317,8 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
                     lookup(ri, "OE1"),
                     lookup(ri, "OE2"),
                 ) {
-                    impropers.push(Improper { a: cg, b: cd, c: oe1, d: oe2 });
+                    // Central = CD.
+                    impropers.push(Improper { a: cd, b: cg, c: oe1, d: oe2 });
                 }
             }
             AminoAcid::Arg => {
@@ -321,7 +329,8 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
                     lookup(ri, "NH1"),
                     lookup(ri, "NH2"),
                 ) {
-                    impropers.push(Improper { a: ne, b: cz, c: nh1, d: nh2 });
+                    // Central = CZ.
+                    impropers.push(Improper { a: cz, b: ne, c: nh1, d: nh2 });
                 }
             }
             // Aromatic rings (Phe, Tyr, Trp, His) get an improper at every
