@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "crates/chem",
     "crates/translate",
+    "crates/geom",
+    "crates/io",
     "crates/cli",
 ]
 
@@ -18,3 +20,4 @@ anyhow = "1"
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
 approx = "0.5"
+nalgebra = "0.34"

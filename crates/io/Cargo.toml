@@ -1,0 +1,13 @@
+[package]
+name = "io"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "PDB and trajectory I/O for origami."
+
+[dependencies]
+chem = { path = "../chem" }
+geom = { path = "../geom" }
+thiserror.workspace = true
