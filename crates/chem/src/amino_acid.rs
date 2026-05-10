@@ -2,7 +2,7 @@ use std::fmt;
 use std::str::FromStr;
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum AminoAcid {
     Ala,
