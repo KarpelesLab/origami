@@ -1,4 +1,4 @@
-use chem::AminoAcid;
+use chem::{classify, AminoAcid};
 use geom::{build_extended_chain, measure};
 use io::write_pdb;
 
@@ -110,6 +110,33 @@ fn phenylalanine_ring_is_planar_and_regular() {
     for (name, pt) in [("CE1", ce1), ("CE2", ce2), ("CZ", cz)] {
         let d = (pt - cg).dot(&n_plane).abs();
         assert!(d < 0.01, "{name} is {d} Å out of phenyl plane");
+    }
+}
+
+/// Every atom of every built residue must be classifiable into an AtomType.
+/// If this fails, the topology adds an atom that the classifier doesn't know
+/// about (or vice versa) — the two must stay in sync.
+#[test]
+fn every_built_atom_has_an_atom_type() {
+    for aa in AminoAcid::ALL {
+        let s = build_extended_chain(&[aa]).unwrap();
+        let r = &s.residues[0];
+        for atom in &r.atoms {
+            let cls = classify(aa, atom.name);
+            assert!(
+                cls.is_some(),
+                "{:?}: atom {:?} not classified",
+                aa, atom.name
+            );
+            // Element must agree.
+            let t = cls.unwrap();
+            assert_eq!(
+                t.element(),
+                atom.element,
+                "{:?} {:?}: classifier element {:?} != topology element {:?}",
+                aa, atom.name, t.element(), atom.element
+            );
+        }
     }
 }
 
