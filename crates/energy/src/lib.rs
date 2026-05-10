@@ -12,6 +12,7 @@ pub mod forces_gb;
 pub mod forces_nonbonded;
 pub mod gb;
 pub mod nonbonded;
+pub mod powersasa;
 pub mod sasa;
 pub mod units;
 
