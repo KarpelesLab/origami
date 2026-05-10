@@ -15,6 +15,7 @@ path = "src/main.rs"
 chem = { path = "../chem" }
 translate = { path = "../translate" }
 geom = { path = "../geom" }
+energy = { path = "../energy" }
 io = { path = "../io" }
 anyhow.workspace = true
 clap.workspace = true

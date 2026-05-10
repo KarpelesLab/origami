@@ -8,6 +8,7 @@
 pub mod bonded;
 pub mod gb;
 pub mod nonbonded;
+pub mod sasa;
 pub mod units;
 
 pub use bonded::{
@@ -15,6 +16,7 @@ pub use bonded::{
 };
 pub use gb::{gb_energy, GbBreakdown};
 pub use nonbonded::{nonbonded_energy, NonbondedBreakdown, DEFAULT_CUTOFF_A};
+pub use sasa::{sasa_energy, sasa_energy_with_dots, SasaBreakdown};
 
 /// Convenience aggregator returned by the bonded-energy entry point.
 #[derive(Debug, Default, Clone, Copy)]

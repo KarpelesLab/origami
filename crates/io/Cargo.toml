@@ -11,3 +11,6 @@ description = "PDB and trajectory I/O for origami."
 chem = { path = "../chem" }
 geom = { path = "../geom" }
 thiserror.workspace = true
+
+[dev-dependencies]
+energy = { path = "../energy" }

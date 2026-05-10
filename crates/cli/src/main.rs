@@ -1,12 +1,15 @@
 use std::fs;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
-use chem::AminoAcid;
+use chem::{standard_ff, AminoAcid};
 use clap::{Parser, Subcommand};
-use geom::build_extended_chain;
-use io::write_pdb;
+use energy::{
+    bonded::bonded_energy, gb_energy, nonbonded_energy, sasa_energy, DEFAULT_CUTOFF_A,
+};
+use geom::{build_extended_chain, build_topology_graph};
+use io::{read_pdb, write_pdb};
 use translate::{find_orfs, parse_fasta, translate_codons};
 use translate::translate::{one_letter_string, three_letter_string};
 
@@ -52,6 +55,14 @@ enum Command {
         #[arg(long, short)]
         output: Option<PathBuf>,
     },
+    /// Compute the total potential energy of a PDB structure with a per-term breakdown.
+    Energy {
+        /// Path to the PDB file.
+        input: PathBuf,
+        /// Skip the SASA term (slow on large structures).
+        #[arg(long)]
+        skip_sasa: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -63,7 +74,79 @@ fn main() -> Result<()> {
         Command::Build { seq, from_fasta, output } => {
             run_build(seq.as_deref(), from_fasta.as_deref(), output.as_deref())
         }
+        Command::Energy { input, skip_sasa } => run_energy(&input, skip_sasa),
     }
+}
+
+fn run_energy(input: &Path, skip_sasa: bool) -> Result<()> {
+    let file = fs::File::open(input)
+        .with_context(|| format!("opening {}", input.display()))?;
+    let structure = read_pdb(file)
+        .with_context(|| format!("reading {}", input.display()))?;
+    let graph = build_topology_graph(&structure);
+    let ff = standard_ff();
+
+    let bonded = bonded_energy(&structure, &graph, ff);
+    let nb = nonbonded_energy(&structure, &graph, ff, DEFAULT_CUTOFF_A);
+    let gb = gb_energy(&structure, ff);
+    let sasa = if skip_sasa {
+        energy::SasaBreakdown::default()
+    } else {
+        sasa_energy(&structure, ff)
+    };
+
+    let total =
+        bonded.total_kj_mol() + nb.lj_kj_mol + nb.coulomb_kj_mol + gb.gb_kj_mol + sasa.sasa_kj_mol;
+
+    println!("origami energy report — {}", input.display());
+    println!("  residues: {}", structure.residues.len());
+    println!("  atoms:    {}", structure.atom_count());
+    println!();
+    println!("Total: {:>11.2} kJ/mol", total);
+    println!();
+    println!(
+        "  Bond:      {:>11.2}   ({} bonds)",
+        bonded.bond_kj_mol, bonded.bond_count
+    );
+    println!(
+        "  Angle:     {:>11.2}   ({} angles)",
+        bonded.angle_kj_mol, bonded.angle_count
+    );
+    println!(
+        "  Dihedral:  {:>11.2}   ({} dihedrals)",
+        bonded.dihedral_kj_mol, bonded.dihedral_count
+    );
+    println!(
+        "  Improper:  {:>11.2}   ({} impropers)",
+        bonded.improper_kj_mol, bonded.improper_count
+    );
+    println!(
+        "  LJ:        {:>11.2}   ({} pairs, {} 1-4)",
+        nb.lj_kj_mol, nb.pair_count, nb.one_four_count
+    );
+    println!("  Coulomb:   {:>11.2}", nb.coulomb_kj_mol);
+    println!("  GB:        {:>11.2}   (self {:.2}, cross {:.2})", gb.gb_kj_mol, gb.self_kj_mol, gb.pair_kj_mol);
+    if !skip_sasa {
+        println!(
+            "  SASA:      {:>11.2}   ({:.0} Å² total)",
+            sasa.sasa_kj_mol, sasa.total_area_a2
+        );
+    } else {
+        println!("  SASA:      (skipped)");
+    }
+    if bonded.missing_count > 0 || nb.missing_count > 0 {
+        eprintln!(
+            "warning: {} bonded + {} nonbonded parameter lookups failed",
+            bonded.missing_count, nb.missing_count
+        );
+    }
+    if gb.clamped_count > 0 {
+        eprintln!(
+            "warning: {} atoms had their effective Born radius clamped",
+            gb.clamped_count
+        );
+    }
+    Ok(())
 }
 
 fn run_translate(input: &str, orfs: bool, min_aa: usize, three_letter: bool) -> Result<()> {

@@ -134,6 +134,7 @@ dependencies = [
  "anyhow",
  "chem",
  "clap",
+ "energy",
  "geom",
  "io",
  "translate",
@@ -284,6 +285,7 @@ name = "io"
 version = "0.1.0"
 dependencies = [
  "chem",
+ "energy",
  "geom",
  "thiserror",
 ]
