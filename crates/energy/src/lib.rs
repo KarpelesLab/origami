@@ -6,11 +6,13 @@
 //! CHARMM stores values in kcal/mol, we convert at the leaves.
 
 pub mod bonded;
+pub mod nonbonded;
 pub mod units;
 
 pub use bonded::{
     angle_energy, bond_energy, dihedral_energy, improper_energy, BondedBreakdown,
 };
+pub use nonbonded::{nonbonded_energy, NonbondedBreakdown, DEFAULT_CUTOFF_A};
 
 /// Convenience aggregator returned by the bonded-energy entry point.
 #[derive(Debug, Default, Clone, Copy)]
