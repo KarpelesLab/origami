@@ -75,8 +75,19 @@ fn hct_scale(element: Element) -> f64 {
 #[allow(dead_code)]
 fn _atom_type_unused(_t: AtomType) {} // silence unused import warning if AtomType ends up unused
 
-pub fn gb_energy(structure: &Structure, ff: &ForceField) -> GbBreakdown {
-    // Per-atom positions, partial charges, intrinsic radii ρ, scaled radii S·ρ̃.
+/// Factored-out per-atom data that both the energy and the force code need.
+pub struct BornInputs {
+    pub positions: Vec<Vec3>,
+    pub charges: Vec<f64>,
+    pub effective_radii: Vec<f64>,
+    pub clamped_count: usize,
+}
+
+/// Compute effective Born radii for the given structure (the radii are what
+/// the M4 force code treats as constants under the frozen-radii
+/// approximation). Returns positions/charges as well so callers don't have
+/// to re-flatten the structure.
+pub fn compute_born_inputs(structure: &Structure, ff: &ForceField) -> BornInputs {
     let mut positions: Vec<Vec3> = Vec::with_capacity(structure.atom_count());
     let mut charges: Vec<f64> = Vec::with_capacity(structure.atom_count());
     let mut rho: Vec<f64> = Vec::with_capacity(structure.atom_count());
@@ -94,19 +105,16 @@ pub fn gb_energy(structure: &Structure, ff: &ForceField) -> GbBreakdown {
         }
     }
 
-    // Stage 1: descreening integral I_i = Σ_{j≠i} h_ij.
     let n = positions.len();
     let cl = CellList::build(&positions, BORN_RADIUS_CUTOFF_A);
     let mut integral = vec![0.0_f64; n];
     for (i, j, r) in cl.iter_pairs_within(&positions, BORN_RADIUS_CUTOFF_A) {
-        // Symmetric: each atom screens the other.
         let h_ij = pairwise_descreening(r, rho_tilde[i], scale[j] * rho_tilde[j]);
         let h_ji = pairwise_descreening(r, rho_tilde[j], scale[i] * rho_tilde[i]);
         integral[i] += h_ij;
         integral[j] += h_ji;
     }
 
-    // Stage 2: OBC II tanh transformation → effective Born radius R_i.
     let mut effective: Vec<f64> = Vec::with_capacity(n);
     let mut clamped = 0usize;
     for i in 0..n {
@@ -115,13 +123,20 @@ pub fn gb_energy(structure: &Structure, ff: &ForceField) -> GbBreakdown {
         let inv = 1.0 / rho_tilde[i] - tanh_arg.tanh() / rho[i];
         let r_eff = if inv <= 0.0 || !inv.is_finite() {
             clamped += 1;
-            // Clamp to a minimum (ρ̃) — corresponds to a fully buried atom.
             rho_tilde[i].max(0.5)
         } else {
             (1.0 / inv).max(rho_tilde[i].max(0.5))
         };
         effective.push(r_eff);
     }
+
+    BornInputs { positions, charges, effective_radii: effective, clamped_count: clamped }
+}
+
+pub fn gb_energy(structure: &Structure, ff: &ForceField) -> GbBreakdown {
+    let BornInputs { positions, charges, effective_radii: effective, clamped_count: clamped } =
+        compute_born_inputs(structure, ff);
+    let n = positions.len();
 
     // Stage 3: GB pair-energy sum (including self-terms).
     let prefactor = -0.5 * (1.0 / EPSILON_SOLUTE - 1.0 / EPSILON_WATER) * COULOMB_CONST_KCAL_A_PER_E2;

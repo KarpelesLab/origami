@@ -5,6 +5,7 @@ members = [
     "crates/translate",
     "crates/geom",
     "crates/energy",
+    "crates/dynamics",
     "crates/io",
     "crates/cli",
 ]

@@ -16,6 +16,7 @@ chem = { path = "../chem" }
 translate = { path = "../translate" }
 geom = { path = "../geom" }
 energy = { path = "../energy" }
+dynamics = { path = "../dynamics" }
 io = { path = "../io" }
 anyhow.workspace = true
 clap.workspace = true

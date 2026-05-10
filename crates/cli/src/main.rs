@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use chem::{standard_ff, AminoAcid};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+use dynamics::{minimize, Algorithm, MinimizeOptions};
 use energy::{
     bonded::bonded_energy, gb_energy, nonbonded_energy, sasa_energy, DEFAULT_CUTOFF_A,
 };
@@ -63,6 +64,32 @@ enum Command {
         #[arg(long)]
         skip_sasa: bool,
     },
+    /// Minimize a PDB structure (energy gradient descent).
+    Minimize {
+        /// Input PDB.
+        input: PathBuf,
+        /// Output (minimized) PDB.
+        #[arg(long, short)]
+        output: PathBuf,
+        /// Optimization algorithm.
+        #[arg(long, value_enum, default_value_t = AlgoFlag::Lbfgs)]
+        algorithm: AlgoFlag,
+        /// Maximum optimization steps.
+        #[arg(long, default_value_t = 500)]
+        max_steps: usize,
+        /// Convergence threshold on max gradient component (kJ/mol/Å).
+        #[arg(long, default_value_t = 1.0)]
+        tol: f64,
+        /// Maximum atom displacement per step (Å).
+        #[arg(long, default_value_t = 0.1)]
+        max_step: f64,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum AlgoFlag {
+    Sd,
+    Lbfgs,
 }
 
 fn main() -> Result<()> {
@@ -75,7 +102,49 @@ fn main() -> Result<()> {
             run_build(seq.as_deref(), from_fasta.as_deref(), output.as_deref())
         }
         Command::Energy { input, skip_sasa } => run_energy(&input, skip_sasa),
+        Command::Minimize { input, output, algorithm, max_steps, tol, max_step } => {
+            run_minimize(&input, &output, algorithm, max_steps, tol, max_step)
+        }
     }
+}
+
+fn run_minimize(
+    input: &Path,
+    output: &Path,
+    algorithm: AlgoFlag,
+    max_steps: usize,
+    tol: f64,
+    max_step_a: f64,
+) -> Result<()> {
+    let file = fs::File::open(input)
+        .with_context(|| format!("opening {}", input.display()))?;
+    let mut structure = read_pdb(file)
+        .with_context(|| format!("reading {}", input.display()))?;
+    let graph = build_topology_graph(&structure);
+    let ff = standard_ff();
+    let opts = MinimizeOptions {
+        algorithm: match algorithm {
+            AlgoFlag::Sd => Algorithm::SteepestDescent,
+            AlgoFlag::Lbfgs => Algorithm::Lbfgs,
+        },
+        max_steps,
+        gradient_tol: tol,
+        max_step_a,
+        ..Default::default()
+    };
+    let result = minimize(&mut structure, &graph, ff, opts);
+    println!("Minimization result:");
+    println!("  algorithm:      {:?}", result.algorithm);
+    println!("  steps:          {}", result.steps);
+    println!("  initial energy: {:>12.2} kJ/mol", result.initial_energy);
+    println!("  final energy:   {:>12.2} kJ/mol", result.final_energy);
+    println!("  max force:      {:>12.4} kJ/mol/Å", result.max_force);
+    println!("  converged:      {}", result.converged);
+    let mut out_file = fs::File::create(output)
+        .with_context(|| format!("creating {}", output.display()))?;
+    let title = format!("minimized from {}", input.display());
+    write_pdb(&mut out_file, &structure, &title).context("writing minimized PDB")?;
+    Ok(())
 }
 
 fn run_energy(input: &Path, skip_sasa: bool) -> Result<()> {
