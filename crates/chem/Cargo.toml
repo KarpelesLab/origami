@@ -1,0 +1,14 @@
+[package]
+name = "chem"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Atom, amino acid, codon, and property data for origami."
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+approx.workspace = true

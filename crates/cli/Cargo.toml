@@ -1,0 +1,18 @@
+[package]
+name = "cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "origami command-line interface."
+
+[[bin]]
+name = "origami"
+path = "src/main.rs"
+
+[dependencies]
+chem = { path = "../chem" }
+translate = { path = "../translate" }
+anyhow.workspace = true
+clap.workspace = true

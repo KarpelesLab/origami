@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/chem",
+    "crates/translate",
+    "crates/cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+repository = "https://github.com/magicaltux/origami"
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "2"
+clap = { version = "4", features = ["derive"] }
+approx = "0.5"
