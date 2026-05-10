@@ -10,7 +10,7 @@ use energy::{
     bonded::bonded_energy, gb_energy, nonbonded_energy, sasa_energy, DEFAULT_CUTOFF_A,
 };
 use geom::{build_extended_chain, build_topology_graph};
-use io::{read_pdb, write_pdb};
+use io::{read_pdb, render, write_pdb, RenderOptions};
 use translate::{find_orfs, parse_fasta, translate_codons};
 use translate::translate::{one_letter_string, three_letter_string};
 
@@ -64,6 +64,23 @@ enum Command {
         #[arg(long)]
         skip_sasa: bool,
     },
+    /// Render a PDB structure to a PNG image (ball-and-stick).
+    Render {
+        /// Input PDB.
+        input: PathBuf,
+        /// Output PNG path.
+        #[arg(long, short)]
+        output: PathBuf,
+        /// Image width in pixels.
+        #[arg(long, default_value_t = 800)]
+        width: u32,
+        /// Image height in pixels.
+        #[arg(long, default_value_t = 600)]
+        height: u32,
+        /// Include hydrogen atoms (hidden by default).
+        #[arg(long)]
+        show_hydrogens: bool,
+    },
     /// Minimize a PDB structure (energy gradient descent).
     Minimize {
         /// Input PDB.
@@ -105,7 +122,38 @@ fn main() -> Result<()> {
         Command::Minimize { input, output, algorithm, max_steps, tol, max_step } => {
             run_minimize(&input, &output, algorithm, max_steps, tol, max_step)
         }
+        Command::Render { input, output, width, height, show_hydrogens } => {
+            run_render(&input, &output, width, height, show_hydrogens)
+        }
     }
+}
+
+fn run_render(
+    input: &Path,
+    output: &Path,
+    width: u32,
+    height: u32,
+    show_hydrogens: bool,
+) -> Result<()> {
+    let file = fs::File::open(input)
+        .with_context(|| format!("opening {}", input.display()))?;
+    let structure = read_pdb(file)
+        .with_context(|| format!("reading {}", input.display()))?;
+    let opts = RenderOptions {
+        width,
+        height,
+        show_hydrogens,
+        ..Default::default()
+    };
+    let img = render(&structure, &opts);
+    img.save(output)
+        .with_context(|| format!("writing {}", output.display()))?;
+    println!(
+        "Rendered {} atoms ({}×{}) → {}",
+        structure.atom_count(),
+        width, height, output.display(),
+    );
+    Ok(())
 }
 
 fn run_minimize(

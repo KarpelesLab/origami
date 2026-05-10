@@ -23,3 +23,4 @@ thiserror = "2"
 clap = { version = "4", features = ["derive"] }
 approx = "0.5"
 nalgebra = "0.34"
+image = { version = "0.25", default-features = false, features = ["png"] }
