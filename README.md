@@ -64,11 +64,17 @@ Done so far: translation (M1), all-atom chain building (M2), energy evaluation
 with CHARMM36-borrowed constants and GB OBC II implicit solvent (M3), energy
 minimisation with L-BFGS (M4), BAOAB Langevin dynamics with trajectory
 rendering (M5), exact analytical SASA via spherical Gauss-Bonnet (PSA.1, ~1%
-match to Shrake-Rupley), numerical SASA forces in the gradient (PSA.2), and
-co-translational chain growth with optional exit-tunnel constraint (M6).
+match to Shrake-Rupley), numerical SASA forces in the gradient (PSA.2),
+co-translational chain growth with optional exit-tunnel constraint (M6), and
+validation against three small folds (M7): chignolin (1UAO), Trp-cage (1L2Y),
+and villin headpiece HP-35 (2F4K). For each, the native fold scores at least
+30 000 kJ/mol below the same sequence built as an extended chain, and 2 ps of
+Langevin dynamics from the Trp-cage native conformation keeps Cα RMSD under
+1 Å.
 
-Up next: end-to-end validation against chignolin, Trp-cage, and villin
-headpiece (M7).
+Up next: actually folding from scratch on a millisecond-scale trajectory
+(needs the analytical SASA derivatives — see PSA.2-followup — and probably
+GPU offload to be feasible).
 
 ## Build
 
