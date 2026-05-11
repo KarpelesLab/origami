@@ -1,7 +1,6 @@
-//! Force aggregator — combine bonded + LJ + Coulomb + GB into one
-//! `Vec<Vec3>` of forces (kJ/mol/Å) ready for the optimiser.
-//!
-//! SASA forces are intentionally excluded; see the M4 plan.
+//! Force aggregator — combine bonded + LJ + Coulomb + GB (and optionally
+//! SASA) into one `Vec<Vec3>` of forces (kJ/mol/Å) ready for the optimiser
+//! or integrator.
 
 use chem::ForceField;
 use geom::{Structure, TopologyGraph, Vec3};
@@ -11,9 +10,11 @@ use crate::forces_bonded::{
 };
 use crate::forces_gb::add_gb_forces;
 use crate::forces_nonbonded::add_nonbonded_forces;
+use crate::forces_sasa::add_sasa_forces;
 use crate::nonbonded::DEFAULT_CUTOFF_A;
 
-/// Compute the total atomic force vector. Length equals `structure.atom_count()`.
+/// Compute the total atomic force vector (without SASA forces — preserves
+/// the M4 force-aggregator behaviour). Length equals `structure.atom_count()`.
 pub fn total_force(
     structure: &Structure,
     graph: &TopologyGraph,
@@ -27,6 +28,20 @@ pub fn total_force_with_cutoff(
     graph: &TopologyGraph,
     ff: &ForceField,
     cutoff_a: f64,
+) -> Vec<Vec3> {
+    total_force_with_options(structure, graph, ff, cutoff_a, false)
+}
+
+/// Compute the total atomic force vector with optional SASA contribution.
+/// PSA.2 — when `include_sasa` is true, `add_sasa_forces` is called and
+/// the result includes the hydrophobic gradient. SASA forces are slow
+/// (numerical central differencing), so this is opt-in.
+pub fn total_force_with_options(
+    structure: &Structure,
+    graph: &TopologyGraph,
+    ff: &ForceField,
+    cutoff_a: f64,
+    include_sasa: bool,
 ) -> Vec<Vec3> {
     let n = structure.atom_count();
     let mut forces = vec![Vec3::zeros(); n];
@@ -42,6 +57,9 @@ pub fn total_force_with_cutoff(
     add_improper_forces(&positions, graph, ff, &atom_types, &mut forces);
     add_nonbonded_forces(structure, graph, ff, cutoff_a, &mut forces);
     add_gb_forces(structure, ff, &mut forces);
+    if include_sasa {
+        add_sasa_forces(structure, ff, &mut forces);
+    }
     forces
 }
 

@@ -7,7 +7,7 @@
 use chem::ForceField;
 use geom::{Structure, TopologyGraph};
 
-use crate::energy_eval::{apply_displacement, total_energy};
+use crate::energy_eval::{apply_displacement, total_energy_with_options};
 
 #[derive(Debug, Clone, Copy)]
 pub struct LineSearchOptions {
@@ -19,6 +19,11 @@ pub struct LineSearchOptions {
     pub c1: f64,
     /// Hard floor on α — give up if it drops below this.
     pub min_alpha: f64,
+    /// Include SASA in the energy evaluated along the search direction
+    /// (PSA.2). The optimiser's gradient and the line search must agree
+    /// on whether SASA is in or out, so this propagates from
+    /// `MinimizeOptions::include_sasa`.
+    pub include_sasa: bool,
 }
 
 impl Default for LineSearchOptions {
@@ -28,6 +33,7 @@ impl Default for LineSearchOptions {
             contraction: 0.5,
             c1: 1e-4,
             min_alpha: 1e-12,
+            include_sasa: false,
         }
     }
 }
@@ -69,7 +75,7 @@ pub fn backtracking(
             *s = alpha * p;
         }
         apply_displacement(structure, &step);
-        let e_new = total_energy(structure, graph, ff);
+        let e_new = total_energy_with_options(structure, graph, ff, options.include_sasa);
         // Undo the step so the caller sees the structure unchanged.
         for s in step.iter_mut() {
             *s = -*s;

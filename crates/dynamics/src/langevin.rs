@@ -34,7 +34,7 @@
 //! [`AccelConstants`] so the integrator inner loop stays clean.
 
 use chem::ForceField;
-use energy::total_force_with_cutoff;
+use energy::total_force_with_options;
 use energy::DEFAULT_CUTOFF_A;
 use geom::{Structure, TopologyGraph, Vec3};
 
@@ -67,6 +67,9 @@ pub struct LangevinOptions {
     /// `temperature_k` with the centre-of-mass velocity zeroed. If
     /// `false`, start from rest.
     pub randomise_initial_velocities: bool,
+    /// Include SASA forces (PSA.2). Slow; off by default since the
+    /// numerical SASA gradient costs ~100 ms per call on Trp-cage.
+    pub include_sasa: bool,
 }
 
 impl Default for LangevinOptions {
@@ -79,6 +82,7 @@ impl Default for LangevinOptions {
             save_every: 10,
             seed: 0,
             randomise_initial_velocities: true,
+            include_sasa: false,
         }
     }
 }
@@ -134,7 +138,7 @@ where
     let dof = (3 * n) as f64;
 
     // Compute initial forces.
-    let mut forces = total_force_with_cutoff(structure, graph, ff, DEFAULT_CUTOFF_A);
+    let mut forces = total_force_with_options(structure, graph, ff, DEFAULT_CUTOFF_A, opts.include_sasa);
 
     // Running stats (Welford).
     let mut sum_t = 0.0;
@@ -184,7 +188,7 @@ where
         apply_velocity_step(structure, &velocities, half_dt);
 
         // Recompute forces at the new positions.
-        forces = total_force_with_cutoff(structure, graph, ff, DEFAULT_CUTOFF_A);
+        forces = total_force_with_options(structure, graph, ff, DEFAULT_CUTOFF_A, opts.include_sasa);
 
         // B (second half): v += a · dt/2
         for i in 0..n {

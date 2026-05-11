@@ -17,7 +17,7 @@ use chem::ForceField;
 use geom::{Structure, TopologyGraph};
 
 use crate::energy_eval::{
-    apply_displacement, flatten_vec3, linf_norm, total_energy, total_force,
+    apply_displacement, flatten_vec3, linf_norm, total_energy_with_options, total_force_opts,
 };
 use crate::line_search::{backtracking, LineSearchOptions};
 
@@ -30,6 +30,8 @@ pub struct LbfgsOptions {
     pub max_step_a: f64,
     /// History size — number of (s, y) pairs to retain.
     pub history: usize,
+    /// Include SASA in energy + forces (PSA.2). Slow but smooth.
+    pub include_sasa: bool,
 }
 
 impl Default for LbfgsOptions {
@@ -41,6 +43,7 @@ impl Default for LbfgsOptions {
             line_search: LineSearchOptions::default(),
             max_step_a: 0.1,
             history: 10,
+            include_sasa: false,
         }
     }
 }
@@ -63,7 +66,7 @@ pub fn lbfgs(
 ) -> LbfgsResult {
     let n_dofs = structure.atom_count() * 3;
 
-    let initial_energy = total_energy(structure, graph, ff);
+    let initial_energy = total_energy_with_options(structure, graph, ff, options.include_sasa);
     let mut e_prev = initial_energy;
 
     let mut history_s: VecDeque<Vec<f64>> = VecDeque::with_capacity(options.history);
@@ -82,7 +85,7 @@ pub fn lbfgs(
 
     for step in 0..options.max_steps {
         steps = step;
-        force_buffer = total_force(structure, graph, ff);
+        force_buffer = total_force_opts(structure, graph, ff, options.include_sasa);
         // gradient = -force.
         flatten_vec3(&force_buffer, &mut g_curr);
         for g in g_curr.iter_mut() {
@@ -105,11 +108,12 @@ pub fn lbfgs(
         // Cap initial α so atoms don't move > max_step_a.
         let max_dir = linf_norm(&direction);
         let mut ls_options = options.line_search;
+        ls_options.include_sasa = options.include_sasa;
         if max_dir > 0.0 {
             ls_options.alpha0 = ls_options.alpha0.min(options.max_step_a / max_dir);
         }
 
-        let e_now = total_energy(structure, graph, ff);
+        let e_now = total_energy_with_options(structure, graph, ff, options.include_sasa);
         let res = backtracking(
             structure,
             graph,
@@ -125,6 +129,7 @@ pub fn lbfgs(
             let sd_dir: Vec<f64> = g_curr.iter().map(|g| -*g).collect();
             let max_dir2 = linf_norm(&sd_dir);
             let mut ls_options2 = options.line_search;
+            ls_options2.include_sasa = options.include_sasa;
             if max_dir2 > 0.0 {
                 ls_options2.alpha0 = ls_options2.alpha0.min(options.max_step_a / max_dir2);
             }
@@ -156,7 +161,7 @@ pub fn lbfgs(
 
         // Update history with (s = x_new - x_prev, y = g_new - g_prev) using
         // the next gradient.
-        let force_after = total_force(structure, graph, ff);
+        let force_after = total_force_opts(structure, graph, ff, options.include_sasa);
         let mut g_after = vec![0.0_f64; n_dofs];
         flatten_vec3(&force_after, &mut g_after);
         for g in g_after.iter_mut() {
@@ -196,7 +201,7 @@ pub fn lbfgs(
 
     LbfgsResult {
         steps,
-        final_energy: total_energy(structure, graph, ff),
+        final_energy: total_energy_with_options(structure, graph, ff, options.include_sasa),
         initial_energy,
         max_force,
         converged,

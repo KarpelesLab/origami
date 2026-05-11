@@ -29,7 +29,7 @@ pub struct PowerSasaResult {
     pub sasa_kj_mol: f64,
 }
 
-fn vdw_radius(e: Element) -> f64 {
+pub(crate) fn vdw_radius(e: Element) -> f64 {
     match e {
         Element::H => 1.20,
         Element::C => 1.70,
@@ -39,7 +39,7 @@ fn vdw_radius(e: Element) -> f64 {
     }
 }
 
-fn surface_tension_kcal(e: Element) -> f64 {
+pub(crate) fn surface_tension_kcal(e: Element) -> f64 {
     // Same parameters as the Shrake-Rupley implementation: ~5 cal/mol/Å²
     // for apolar atoms (C, S), 0 for polar.
     match e {

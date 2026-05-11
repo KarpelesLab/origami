@@ -117,6 +117,11 @@ enum Command {
         /// Skip Maxwell-Boltzmann initial velocity sampling.
         #[arg(long)]
         zero_initial_velocity: bool,
+        /// Include the SASA (hydrophobic) term in the forces. Slow
+        /// (~100 ms/step on Trp-cage) but adds the only solvation
+        /// contribution PSA.2 currently provides.
+        #[arg(long)]
+        with_sasa: bool,
     },
     /// Minimize a PDB structure (energy gradient descent).
     Minimize {
@@ -137,6 +142,10 @@ enum Command {
         /// Maximum atom displacement per step (Å).
         #[arg(long, default_value_t = 0.1)]
         max_step: f64,
+        /// Include the SASA (hydrophobic) term in the gradient (PSA.2).
+        /// Slow; off by default.
+        #[arg(long)]
+        with_sasa: bool,
     },
 }
 
@@ -156,8 +165,8 @@ fn main() -> Result<()> {
             run_build(seq.as_deref(), from_fasta.as_deref(), output.as_deref())
         }
         Command::Energy { input, skip_sasa } => run_energy(&input, skip_sasa),
-        Command::Minimize { input, output, algorithm, max_steps, tol, max_step } => {
-            run_minimize(&input, &output, algorithm, max_steps, tol, max_step)
+        Command::Minimize { input, output, algorithm, max_steps, tol, max_step, with_sasa } => {
+            run_minimize(&input, &output, algorithm, max_steps, tol, max_step, with_sasa)
         }
         Command::Render { input, output, output_dir, width, height, show_hydrogens } => {
             run_render(&input, output.as_deref(), output_dir.as_deref(), width, height, show_hydrogens)
@@ -172,6 +181,7 @@ fn main() -> Result<()> {
             friction,
             seed,
             zero_initial_velocity,
+            with_sasa,
         } => run_dynamics(
             &input,
             &output_trajectory,
@@ -182,6 +192,7 @@ fn main() -> Result<()> {
             friction,
             seed,
             !zero_initial_velocity,
+            with_sasa,
         ),
     }
 }
@@ -250,6 +261,7 @@ fn run_dynamics(
     friction_ps_inv: f64,
     seed: u64,
     randomise_initial_velocities: bool,
+    include_sasa: bool,
 ) -> Result<()> {
     let file = fs::File::open(input)
         .with_context(|| format!("opening {}", input.display()))?;
@@ -266,6 +278,7 @@ fn run_dynamics(
         save_every,
         seed,
         randomise_initial_velocities,
+        include_sasa,
     };
 
     eprintln!(
@@ -314,6 +327,7 @@ fn run_dynamics(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_minimize(
     input: &Path,
     output: &Path,
@@ -321,6 +335,7 @@ fn run_minimize(
     max_steps: usize,
     tol: f64,
     max_step_a: f64,
+    include_sasa: bool,
 ) -> Result<()> {
     let file = fs::File::open(input)
         .with_context(|| format!("opening {}", input.display()))?;
@@ -336,6 +351,7 @@ fn run_minimize(
         max_steps,
         gradient_tol: tol,
         max_step_a,
+        include_sasa,
         ..Default::default()
     };
     let result = minimize(&mut structure, &graph, ff, opts);

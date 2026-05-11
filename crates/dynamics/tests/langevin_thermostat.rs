@@ -20,6 +20,7 @@ fn ala3_holds_target_temperature_after_burn_in() {
         save_every: 50,
         seed: 7,
         randomise_initial_velocities: true,
+        include_sasa: false,
     };
 
     // Collect (step, T_inst, KE) at each checkpoint so we can post-filter

@@ -8,7 +8,7 @@ use chem::ForceField;
 use geom::{Structure, TopologyGraph};
 
 use crate::energy_eval::{
-    apply_displacement, flatten_vec3, linf_norm, total_energy, total_force,
+    apply_displacement, flatten_vec3, linf_norm, total_energy_with_options, total_force_opts,
 };
 use crate::line_search::{backtracking, LineSearchOptions};
 
@@ -22,6 +22,10 @@ pub struct SdOptions {
     pub line_search: LineSearchOptions,
     /// Maximum step length per atom (Å) — clamps the line-search initial α.
     pub max_step_a: f64,
+    /// Include SASA in energy + forces (PSA.2). When `true`, both
+    /// gradient evaluations and line-search energy comparisons include
+    /// the hydrophobic term. Slow (~100 ms/grad on Trp-cage).
+    pub include_sasa: bool,
 }
 
 impl Default for SdOptions {
@@ -32,6 +36,7 @@ impl Default for SdOptions {
             energy_tol: 0.01,
             line_search: LineSearchOptions::default(),
             max_step_a: 0.1,
+            include_sasa: false,
         }
     }
 }
@@ -54,7 +59,7 @@ pub fn steepest_descent(
 ) -> SdResult {
     let n_atoms = structure.atom_count();
     let n_dofs = n_atoms * 3;
-    let initial_energy = total_energy(structure, graph, ff);
+    let initial_energy = total_energy_with_options(structure, graph, ff, options.include_sasa);
     let mut e_prev = initial_energy;
     let mut gradient_flat = vec![0.0_f64; n_dofs];
     let mut direction_flat = vec![0.0_f64; n_dofs];
@@ -65,7 +70,7 @@ pub fn steepest_descent(
 
     for step in 0..options.max_steps {
         steps = step;
-        let forces = total_force(structure, graph, ff);
+        let forces = total_force_opts(structure, graph, ff, options.include_sasa);
         // gradient = -force; descent direction = -gradient = +force.
         flatten_vec3(&forces, &mut direction_flat);
         // gradient_flat is the negative of direction_flat for line search:
@@ -81,11 +86,12 @@ pub fn steepest_descent(
         // Cap initial α so no atom moves more than max_step_a per step.
         let max_dir = linf_norm(&direction_flat);
         let mut ls_options = options.line_search;
+        ls_options.include_sasa = options.include_sasa;
         if max_dir > 0.0 {
             ls_options.alpha0 = ls_options.alpha0.min(options.max_step_a / max_dir);
         }
 
-        let e_now = total_energy(structure, graph, ff);
+        let e_now = total_energy_with_options(structure, graph, ff, options.include_sasa);
         let res = backtracking(
             structure,
             graph,
@@ -113,7 +119,7 @@ pub fn steepest_descent(
     }
     SdResult {
         steps,
-        final_energy: total_energy(structure, graph, ff),
+        final_energy: total_energy_with_options(structure, graph, ff, options.include_sasa),
         initial_energy,
         max_force,
         converged,

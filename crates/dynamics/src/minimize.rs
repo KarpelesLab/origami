@@ -19,6 +19,9 @@ pub struct MinimizeOptions {
     pub gradient_tol: f64,
     pub energy_tol: f64,
     pub max_step_a: f64,
+    /// Include SASA (hydrophobic) term in energy + forces (PSA.2). Off
+    /// by default to preserve historical numerical baselines.
+    pub include_sasa: bool,
 }
 
 impl Default for MinimizeOptions {
@@ -29,6 +32,7 @@ impl Default for MinimizeOptions {
             gradient_tol: 1.0,
             energy_tol: 0.01,
             max_step_a: 0.1,
+            include_sasa: false,
         }
     }
 }
@@ -82,6 +86,7 @@ pub fn minimize(
                 gradient_tol: opts.gradient_tol,
                 energy_tol: opts.energy_tol,
                 max_step_a: opts.max_step_a,
+                include_sasa: opts.include_sasa,
                 ..Default::default()
             };
             steepest_descent(structure, graph, ff, sd_opts).into()
@@ -92,6 +97,7 @@ pub fn minimize(
                 gradient_tol: opts.gradient_tol,
                 energy_tol: opts.energy_tol,
                 max_step_a: opts.max_step_a,
+                include_sasa: opts.include_sasa,
                 ..Default::default()
             };
             lbfgs(structure, graph, ff, lbfgs_opts).into()
