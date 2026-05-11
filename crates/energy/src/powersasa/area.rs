@@ -17,10 +17,27 @@ use geom::Vec3;
 /// boundary topology. `radius` is the *physical* radius (vdW + probe) — not
 /// the unit-sphere radius.
 pub fn accessible_area(radius: f64, caps: &[SmallCircle], boundary: &AtomBoundary) -> f64 {
+    accessible_area_with_components(radius, caps, boundary, None)
+}
+
+/// Same as [`accessible_area`] but accepts a pre-computed accessible-
+/// component count. Useful for force evaluations that perturb the same
+/// atoms many times — c is integer-valued and stable under small
+/// perturbations, so caching it once per atom skips the 500-probe
+/// Fibonacci sweep inside `count_accessible_components` for the 6×N
+/// inner perturbations of a numerical SASA force call.
+pub fn accessible_area_with_components(
+    radius: f64,
+    caps: &[SmallCircle],
+    boundary: &AtomBoundary,
+    c_hint: Option<usize>,
+) -> f64 {
     match boundary {
         AtomBoundary::FullyExposed => 4.0 * std::f64::consts::PI * radius * radius,
         AtomBoundary::FullyBuried => 0.0,
-        AtomBoundary::Bounded { arcs, vertices } => bounded_area(radius, caps, arcs, vertices),
+        AtomBoundary::Bounded { arcs, vertices } => {
+            bounded_area(radius, caps, arcs, vertices, c_hint)
+        }
     }
 }
 
@@ -29,6 +46,7 @@ fn bounded_area(
     caps: &[SmallCircle],
     arcs: &[BoundaryArc],
     vertices: &[BoundaryVertex],
+    c_hint: Option<usize>,
 ) -> f64 {
     // Spherical Gauss-Bonnet, generalised to multi-component / multi-loop
     // accessible regions.
@@ -88,8 +106,14 @@ fn bounded_area(
     // contribute ≥ 1 boundary loop on the sphere, so `c ≤ L` is a hard
     // topological invariant — clamp accordingly. Probes can sometimes
     // over-count when an accessible region has a thin neck the probe
-    // grid doesn't bridge.
-    let c_raw = count_accessible_components(caps);
+    // grid doesn't bridge. When the caller has a `c_hint` from a recent
+    // un-perturbed evaluation, skip the Fibonacci-probe count entirely
+    // — c only flips at topology transitions and is stable under the
+    // 1e-4 Å perturbations the numerical SASA force code uses.
+    let c_raw = match c_hint {
+        Some(c) => c,
+        None => count_accessible_components(caps),
+    };
     let c = c_raw.min(l).max(1);
     // χ for the global accessible region: with c connected components
     // each contributing 2 − L_F to the Euler characteristic (per

@@ -15,8 +15,8 @@
 use chem::{Element, ForceField};
 use geom::{Structure, Vec3};
 
-use crate::powersasa::arrangement::{build_caps, find_boundary};
-use crate::powersasa::area::accessible_area;
+use crate::powersasa::arrangement::{build_caps, count_accessible_components, find_boundary};
+use crate::powersasa::area::accessible_area_with_components;
 use crate::powersasa::{surface_tension_kcal, vdw_radius, PROBE_RADIUS_A};
 use crate::units::kcal_to_kj;
 
@@ -65,14 +65,33 @@ pub fn add_sasa_forces(structure: &Structure, _ff: &ForceField, forces: &mut [Ve
         .map(|&e| kcal_to_kj(surface_tension_kcal(e)))
         .collect();
 
-    let mut affected: Vec<usize> = Vec::with_capacity(64);
+    // Pre-compute the accessible-component count `c` for every atom
+    // once at the unperturbed positions. `c` is integer-valued and only
+    // flips at topology transitions, which require atoms to move much
+    // more than the 1e-4 Å central-difference step. Caching it skips
+    // the 500-probe Fibonacci sweep on every inner force evaluation —
+    // the dominant per-call cost in numerical SASA forces, especially
+    // for crowded atoms with many caps.
+    let mut c_cache: Vec<usize> = vec![1; n];
     let mut neighbour_buf: Vec<(usize, Vec3, f64)> = Vec::with_capacity(64);
+    for i in 0..n {
+        if gamma[i] == 0.0 {
+            continue;
+        }
+        neighbour_buf.clear();
+        for &j in &neighbour_idx[i] {
+            neighbour_buf.push((j, positions[j], radii[j]));
+        }
+        if let Some((caps, _)) = build_caps(positions[i], radii[i], &neighbour_buf) {
+            c_cache[i] = count_accessible_components(&caps).max(1);
+        }
+    }
+
+    let mut affected: Vec<usize> = Vec::with_capacity(64);
     for k in 0..n {
         affected.clear();
         affected.extend_from_slice(&neighbour_idx[k]);
         affected.push(k);
-        // Drop atoms with γ = 0 — moving k doesn't affect a polar atom's
-        // contribution to E_SASA = Σ γ A even if A changes.
         affected.retain(|&i| gamma[i] != 0.0);
         if affected.is_empty() {
             continue;
@@ -85,7 +104,14 @@ pub fn add_sasa_forces(structure: &Structure, _ff: &ForceField, forces: &mut [Ve
                 .iter()
                 .map(|&i| {
                     gamma[i]
-                        * compute_atom_area(i, &positions, &radii, &neighbour_idx[i], &mut neighbour_buf)
+                        * compute_atom_area(
+                            i,
+                            &positions,
+                            &radii,
+                            &neighbour_idx[i],
+                            &mut neighbour_buf,
+                            c_cache[i],
+                        )
                 })
                 .sum();
             positions[k][axis] = original - SASA_FORCE_STEP_A;
@@ -93,11 +119,17 @@ pub fn add_sasa_forces(structure: &Structure, _ff: &ForceField, forces: &mut [Ve
                 .iter()
                 .map(|&i| {
                     gamma[i]
-                        * compute_atom_area(i, &positions, &radii, &neighbour_idx[i], &mut neighbour_buf)
+                        * compute_atom_area(
+                            i,
+                            &positions,
+                            &radii,
+                            &neighbour_idx[i],
+                            &mut neighbour_buf,
+                            c_cache[i],
+                        )
                 })
                 .sum();
             positions[k][axis] = original;
-            // F_kx = −∂E/∂r_kx.
             forces[k][axis] -= (e_plus - e_minus) / (2.0 * SASA_FORCE_STEP_A);
         }
     }
@@ -112,6 +144,7 @@ fn compute_atom_area(
     radii: &[f64],
     neighbour_indices: &[usize],
     neighbour_buf: &mut Vec<(usize, Vec3, f64)>,
+    c_hint: usize,
 ) -> f64 {
     let pi = positions[atom_idx];
     let ri = radii[atom_idx];
@@ -119,10 +152,6 @@ fn compute_atom_area(
     for &j in neighbour_indices {
         let pj = positions[j];
         let d = (pj - pi).norm();
-        // The static index list is correct as long as the perturbation
-        // step is small enough that no new neighbour pairs come into
-        // range. Re-test the distance defensively so a glancing pair
-        // doesn't sneak through with a negative cone-half-angle.
         if d <= ri + radii[j] {
             neighbour_buf.push((j, pj, radii[j]));
         }
@@ -132,7 +161,7 @@ fn compute_atom_area(
         None => return 0.0,
     };
     let boundary = find_boundary(&caps);
-    accessible_area(ri, &caps, &boundary)
+    accessible_area_with_components(ri, &caps, &boundary, Some(c_hint))
 }
 
 #[cfg(test)]
