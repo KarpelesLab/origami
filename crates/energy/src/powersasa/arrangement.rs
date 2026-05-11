@@ -102,43 +102,44 @@ pub fn find_boundary(caps: &[SmallCircle]) -> AtomBoundary {
         return AtomBoundary::FullyExposed;
     }
 
-    // For each cap, collect the angular positions of its intersections
-    // with every other cap. A vertex is on the *boundary of the accessible
-    // region* only if it isn't strictly inside any third cap.
+    // For each cap K, collect every transition angle around its circle —
+    // that is, every K-M intersection point with any other cap M, whether
+    // or not the point lies inside a third cap. These are the points where
+    // K's circle crosses the boundary of M's disk, splitting K's circle
+    // into segments that are uniformly inside-or-outside each M cap.
+    //
+    // The previous implementation rejected K-M intersections that fell
+    // inside a third cap N. That's correct *if* the goal is to enumerate
+    // accessible-boundary vertices, but it leaves K with too few split
+    // points: long arcs that span partially through M's interior get
+    // accepted by the midpoint test if the midpoint happens to be
+    // outside, even though chunks of the arc are buried inside M.
     let n = caps.len();
-    // For each cap, an angular-sorted list of intersection points (with the
-    // other-cap index) that lie on the accessible-region boundary.
-    let mut per_cap_vertices: Vec<Vec<(f64, Vec3, usize)>> = vec![Vec::new(); n];
-
+    let mut per_cap_transitions: Vec<Vec<(f64, Vec3, usize)>> = vec![Vec::new(); n];
     for k in 0..n {
-        for l in (k + 1)..n {
-            let pts = match intersect_circles(caps[k], caps[l]) {
-                CircleIntersection::Two(p, q) => vec![p, q],
-                CircleIntersection::Tangent(p) => vec![p],
-                CircleIntersection::Disjoint | CircleIntersection::Coincident => continue,
-            };
-            for pt in pts {
-                // Reject if pt is strictly inside any third cap.
-                let mut inside_third = false;
-                for (m, cap_m) in caps.iter().enumerate() {
-                    if m == k || m == l {
-                        continue;
-                    }
-                    if cap_m.contains_strict(pt) {
-                        inside_third = true;
-                        break;
-                    }
+        for m in 0..n {
+            if m == k {
+                continue;
+            }
+            match intersect_circles(caps[k], caps[m]) {
+                CircleIntersection::Two(p, q) => {
+                    per_cap_transitions[k].push((angular_position(p, caps[k]), p, m));
+                    per_cap_transitions[k].push((angular_position(q, caps[k]), q, m));
                 }
-                if inside_third {
-                    continue;
+                CircleIntersection::Tangent(p) => {
+                    per_cap_transitions[k].push((angular_position(p, caps[k]), p, m));
                 }
-                // Record on both caps. Use the angular position from a
-                // chosen reference direction on each circle for sorting.
-                per_cap_vertices[k].push((angular_position(pt, caps[k]), pt, l));
-                per_cap_vertices[l].push((angular_position(pt, caps[l]), pt, k));
+                CircleIntersection::Disjoint | CircleIntersection::Coincident => {}
             }
         }
+        // Sort + dedupe coincident points. Multiple caps meeting K at the
+        // same geometric location (3+-way concurrency) push duplicates;
+        // we keep the first occurrence so the segment list isn't cluttered
+        // with zero-length stubs.
+        per_cap_transitions[k].sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        per_cap_transitions[k].dedup_by(|a, b| (a.1 - b.1).norm_squared() < 1e-12);
     }
+    let per_cap_vertices = per_cap_transitions;
 
     // For each cap, if it has zero intersection vertices on its circle,
     // it's either a "full closed boundary loop" or fully hidden by other
@@ -188,6 +189,9 @@ pub fn find_boundary(caps: &[SmallCircle]) -> AtomBoundary {
             let (a_angle, a_pt, a_other) = *sorted[i];
             let (b_angle, b_pt, _b_other) = *sorted[(i + 1) % m];
             let ccw_norm = wrap_2pi_positive(b_angle - a_angle);
+            if ccw_norm < 1e-9 {
+                continue;
+            }
             let mid = midpoint_on_circle(a_pt, caps[k], ccw_norm / 2.0);
             let mid_ok = !caps.iter().enumerate().any(|(idx, cap_m)| {
                 idx != k && cap_m.contains_strict(mid)
@@ -302,6 +306,100 @@ fn every_point_buried(caps: &[SmallCircle]) -> bool {
         }
     }
     true
+}
+
+/// Count connected components of the accessible region (the part of the
+/// unit sphere not covered by any cap). Returns `1` when the sphere is
+/// fully exposed and `0` when it's fully buried.
+///
+/// The Gauss-Bonnet area formula on a sphere uses the Euler characteristic
+/// `χ(M) = 2c − L` where `c` is the number of connected accessible
+/// components and `L` is the number of boundary loops. The boundary
+/// arcs identify `L`; this routine computes `c` so the area integration
+/// can apply the right `χ` rather than guessing between "disjoint" and
+/// "annular" topologies — the failure mode for crowded atoms (many caps)
+/// in the original PSA.1 implementation.
+///
+/// Implementation: sample `PROBE_COUNT` Fibonacci-distributed unit
+/// vectors, classify each as accessible (not in any cap), and group
+/// accessible probes into connected components via union-find on
+/// spherical kNN adjacency.
+pub fn count_accessible_components(caps: &[SmallCircle]) -> usize {
+    if caps.is_empty() {
+        return 1;
+    }
+    const PROBE_COUNT: usize = 500;
+    let probes = fibonacci_probes(PROBE_COUNT);
+    let mut accessible = vec![false; PROBE_COUNT];
+    for (i, p) in probes.iter().enumerate() {
+        accessible[i] = !caps.iter().any(|c| c.contains_strict(*p));
+    }
+    if accessible.iter().all(|&a| !a) {
+        return 0;
+    }
+
+    // Two probes are "neighbours" if their angular separation is less than
+    // ~2.5× the typical inter-probe spacing on a Fibonacci grid. For N
+    // points, average area-per-point is 4π/N, so typical angular spacing
+    // (in radians) is √(4π/N). The 2.5× factor leaves a generous margin
+    // for the kNN graph: accessible regions that are "topologically
+    // connected through a thin neck" should still be merged. With smaller
+    // multipliers a single component fragmented into many spurious sub-
+    // components and inflated the final area.
+    let typical_spacing = (4.0 * std::f64::consts::PI / PROBE_COUNT as f64).sqrt();
+    let thresh = (2.5 * typical_spacing).min(std::f64::consts::PI);
+    let cos_thresh = thresh.cos();
+
+    let mut parent: Vec<usize> = (0..PROBE_COUNT).collect();
+    fn root(parent: &mut [usize], mut x: usize) -> usize {
+        while parent[x] != x {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        x
+    }
+    for i in 0..PROBE_COUNT {
+        if !accessible[i] {
+            continue;
+        }
+        for j in (i + 1)..PROBE_COUNT {
+            if !accessible[j] {
+                continue;
+            }
+            if probes[i].dot(&probes[j]) > cos_thresh {
+                let ri = root(&mut parent, i);
+                let rj = root(&mut parent, j);
+                if ri != rj {
+                    parent[ri] = rj;
+                }
+            }
+        }
+    }
+
+    let mut roots: Vec<usize> = Vec::new();
+    for i in 0..PROBE_COUNT {
+        if accessible[i] {
+            let r = root(&mut parent, i);
+            if !roots.contains(&r) {
+                roots.push(r);
+            }
+        }
+    }
+    roots.len()
+}
+
+/// Fibonacci-distributed points on the unit sphere — same construction as
+/// the Shrake-Rupley sampler. Used here only for component-counting probes.
+fn fibonacci_probes(n: usize) -> Vec<Vec3> {
+    let golden_angle = std::f64::consts::PI * (3.0 - (5.0_f64).sqrt());
+    (0..n)
+        .map(|i| {
+            let z = 1.0 - (2.0 * i as f64 + 1.0) / n as f64;
+            let r = (1.0 - z * z).max(0.0).sqrt();
+            let theta = golden_angle * i as f64;
+            Vec3::new(r * theta.cos(), r * theta.sin(), z)
+        })
+        .collect()
 }
 
 #[cfg(test)]

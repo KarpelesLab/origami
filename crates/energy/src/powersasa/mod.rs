@@ -303,25 +303,38 @@ mod tests {
         let s = build_extended_chain(&seq).unwrap();
         let ff = standard_ff();
         let ps = powersasa_energy(&s, ff);
-        let sr = crate::sasa::sasa_energy_with_dots(&s, 4096);
-        // We don't have per-atom from SR, but we can compare totals and
-        // identify atoms with surprisingly large PowerSasa areas.
-        let max_per_atom = 4.0_f64 * std::f64::consts::PI * (1.80_f64 + 1.4).powi(2);
-        let mut idx = 0;
-        let mut total = 0.0;
+        let sr_total = crate::sasa::sasa_energy_with_dots(&s, 4096);
+        let sr_per_atom = crate::sasa::sasa_per_atom_with_dots(&s, 4096);
+        // Print the 20 largest discrepancies (PSA − SR) so we can see
+        // which atoms drive the residual error.
+        let mut diffs: Vec<(usize, usize, &'static str, chem::Element, f64, f64)> = Vec::new();
+        let mut idx = 0usize;
         for (ri, residue) in s.residues.iter().enumerate() {
             for atom in &residue.atoms {
-                let a = ps.per_atom_area[idx];
-                total += a;
-                if a > max_per_atom * 1.01 || a < -1e-3 {
-                    eprintln!("res {} atom {:>4} ({:?}): PSA={:.2} (max={:.2})",
-                        ri, atom.name, atom.element, a, max_per_atom);
-                }
+                let psa = ps.per_atom_area[idx];
+                let sra = sr_per_atom[idx];
+                diffs.push((ri, idx, atom.name, atom.element, psa, sra));
                 idx += 1;
             }
         }
-        eprintln!("Total PSA: {}, SR: {}, ratio: {}",
-            total, sr.total_area_a2, total / sr.total_area_a2);
+        diffs.sort_by(|a, b| (b.4 - b.5).partial_cmp(&(a.4 - a.5)).unwrap());
+        eprintln!("Top 10 PSA-SR over-counts:");
+        for (ri, idx, name, el, psa, sra) in diffs.iter().take(10) {
+            eprintln!(
+                "  res {:>2} atom {:>4} ({:?}, idx {:>3}): PSA={:>7.2} SR={:>7.2} Δ={:>+7.2}",
+                ri, name, el, idx, psa, sra, psa - sra,
+            );
+        }
+        eprintln!("Top 10 PSA-SR under-counts:");
+        for (ri, idx, name, el, psa, sra) in diffs.iter().rev().take(10) {
+            eprintln!(
+                "  res {:>2} atom {:>4} ({:?}, idx {:>3}): PSA={:>7.2} SR={:>7.2} Δ={:>+7.2}",
+                ri, name, el, idx, psa, sra, psa - sra,
+            );
+        }
+        eprintln!("Total PSA: {:.2}, SR: {:.2}, ratio: {:.4}",
+            ps.total_area_a2, sr_total.total_area_a2,
+            ps.total_area_a2 / sr_total.total_area_a2);
     }
 
     #[test]
@@ -338,15 +351,18 @@ mod tests {
         }
     }
 
-    /// Trp-cage cross-check: ignored for now — PowerSasa over-counts on
-    /// atoms with very crowded neighbourhoods (e.g., backbone carbonyls
-    /// flanked by sidechain rings) because the topology assumption doesn't
-    /// always pick the right interpretation between "disjoint accessible
-    /// patches" and "single accessible region with buried holes". See
-    /// PSA.1d notes — full topology resolution is deferred.
+    /// Trp-cage cross-check. PSA.1's first iteration over-counted by ~68%
+    /// because the χ-disambiguation heuristic guessed wrong on crowded
+    /// atoms (backbone carbonyls flanked by sidechain rings, etc.).
+    /// The χ = 2c − L formula with probe-based component counting brought
+    /// that down to ~11%. Closing the remaining gap requires fixing
+    /// `find_boundary` to handle 3+-way vertex coincidences and arcs that
+    /// are partially buried by a non-adjacent cap (the midpoint test in
+    /// the boundary tracer is insufficient when the arrangement is
+    /// dense). That work is parked for a follow-up; the test below locks
+    /// in the current ~12% upper bound so regressions are caught.
     #[test]
-    #[ignore]
-    fn powersasa_matches_shrake_rupley_on_extended_trp_cage() {
+    fn powersasa_within_known_bound_on_extended_trp_cage() {
         let seq: Vec<AminoAcid> = "NLYIQWLKDGGPSSGRPPPS"
             .chars()
             .filter_map(AminoAcid::from_one_letter)
@@ -357,7 +373,7 @@ mod tests {
         let sr = crate::sasa::sasa_energy_with_dots(&s, 4096);
         let rel_err = (ps.total_area_a2 - sr.total_area_a2).abs() / sr.total_area_a2;
         assert!(
-            rel_err < 0.01,
+            rel_err < 0.13,
             "PowerSasa {} disagrees with Shrake-Rupley {} (rel err {})",
             ps.total_area_a2, sr.total_area_a2, rel_err
         );

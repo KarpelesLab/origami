@@ -8,10 +8,9 @@
 //! signed central angle (sign by traversal); epsilon is the exterior angle
 //! at the vertex (positive = turn toward the accessible region).
 
-use super::arrangement::{AtomBoundary, BoundaryArc, BoundaryVertex};
+use super::arrangement::{count_accessible_components, AtomBoundary, BoundaryArc, BoundaryVertex};
 use super::geometry::SmallCircle;
 
-#[cfg(test)]
 use geom::Vec3;
 
 /// Return the accessible-surface area of an atom given the precomputed
@@ -31,125 +30,183 @@ fn bounded_area(
     arcs: &[BoundaryArc],
     vertices: &[BoundaryVertex],
 ) -> f64 {
-    // For each boundary loop independently, apply the simply-connected form
-    // A_loop = R²(2π − arc_sum_loop − vertex_sum_loop). This treats the
-    // loop's "left side" (accessible side, by our boundary-walk convention)
-    // as a topological disk.
+    // Spherical Gauss-Bonnet, generalised to multi-component / multi-loop
+    // accessible regions.
     //
-    // To assemble these into the total accessible area we have two
-    // candidate formulas:
-    //   - **Disjoint patches**: A = Σ A_loop. Correct when the loops bound
-    //     k separate accessible disks (typical for crowded atoms where the
-    //     buried region is one connected blob with multiple "windows").
-    //   - **Annular interpretation**: A = Σ A_loop − (k−1)·4πR². Correct
-    //     when there's one big accessible region with k buried holes
-    //     (typical when the buried regions are disjoint disks).
-    // Both formulas agree when k = 1.
+    // For a connected region M ⊂ S² bounded by L_M loops:
+    //   χ(M) = 2 − L_M     (consequence of χ(S²) = 2 and complement = L_M
+    //                       disjoint disks for typical cap arrangements)
     //
-    // Pick the interpretation whose result is a physically valid area in
-    // [0, 4πR²]. For typical protein geometry one of the two is in range.
+    // For disconnected M with c components, χ is additive:
+    //   χ(M) = 2c − L      (L = total loops, c = total accessible
+    //                       connected components)
+    //
+    // Plug into Gauss-Bonnet on a curvature-K = 1/R² sphere:
+    //   A/R² = 2π χ(M) − Σ_arcs cos(α)·θ − Σ_vertices ε
+    //        = 2π(2c − L) − S
+    //
+    // The original PSA.1 implementation tried to choose between two
+    // candidate values of χ heuristically (the "disjoint" χ = c = L and
+    // the "annular" χ = 2 − L); for crowded atoms (≥ ~10 caps) neither
+    // candidate is right. Counting `c` directly via accessible-side
+    // probes is robust and the formula then handles all topologies
+    // uniformly.
 
     let r_sq = radius * radius;
     let four_pi_r2 = 4.0 * std::f64::consts::PI * r_sq;
 
-    let loops = collect_loops(arcs, vertices, caps);
-    let k = loops.len();
-    if k == 0 {
+    if arcs.is_empty() {
         return 0.0;
     }
-    let mut sum_a_loop = 0.0;
-    for la in &loops {
-        sum_a_loop += r_sq * (2.0 * std::f64::consts::PI - la.arc_sum - la.vertex_sum);
+
+    // Total arc-length and vertex-turning contributions across the entire
+    // boundary. We don't need to walk loops — we just need the sums to plug
+    // into Gauss-Bonnet alongside the global χ.
+    let mut total_arc_sum = 0.0;
+    for arc in arcs {
+        let cap = caps[arc.cap_idx];
+        total_arc_sum += cap.cos_alpha * arc.theta;
+    }
+    let mut total_vertex_sum = 0.0;
+    for vertex in vertices {
+        let v = vertex.point;
+        let t_in = v.cross(&caps[vertex.incoming_cap].axis).normalize();
+        let t_out = v.cross(&caps[vertex.outgoing_cap].axis).normalize();
+        let cos_eps = t_in.dot(&t_out).clamp(-1.0, 1.0);
+        let sin_eps = v.dot(&t_in.cross(&t_out));
+        total_vertex_sum += sin_eps.atan2(cos_eps);
     }
 
-    // Two candidate interpretations of the loop layout:
-    //   - disjoint patches (k accessible disks):  A = Σ A_loop
-    //   - annular (one region with k buried holes): A = Σ A_loop − (k−1)·4πR²
-    // Both candidates collapse to the same value when k = 1.
-    let candidate_disjoint = sum_a_loop;
-    let candidate_annular = sum_a_loop - (k as f64 - 1.0) * four_pi_r2;
+    // L = number of closed boundary loops on the accessible region,
+    // computed as the number of connected components of the graph whose
+    // nodes are boundary-vertex positions and edges are arcs. The
+    // alternative — walking arcs via (end-pos, outgoing-cap) matching —
+    // over-counts L when 3+-way vertex concurrencies are present (the
+    // recorded `outgoing_cap` on the vertex may not match the actual
+    // face-traversal continuation), under-counting area to zero on a
+    // number of small-window atoms. The graph approach mis-fuses loops
+    // that *legitimately* share a vertex point, which slightly over-
+    // estimates area on aromatic ring carbons — but the failure mode
+    // is bounded by the per-atom sphere area instead of "zero out a
+    // valid atom". A proper half-edge face-traversal (tracked as
+    // PSA.1h-followup) would resolve both directions cleanly.
+    let _ = vertices; // walker variant kept around for diagnostics
+    let l = count_boundary_loops_graph(arcs);
+    if l == 0 {
+        return 0.0;
+    }
 
-    let in_range = |a: f64| (-1e-3..=four_pi_r2 + 1e-3).contains(&a);
-    let result = match (in_range(candidate_disjoint), in_range(candidate_annular)) {
-        (true, true) => candidate_disjoint.min(candidate_annular),
-        (true, false) => candidate_disjoint,
-        (false, true) => candidate_annular,
-        (false, false) => candidate_disjoint.clamp(0.0, four_pi_r2),
-    };
-    result.clamp(0.0, four_pi_r2)
+    // Probe-based component count. Each accessible component must
+    // contribute ≥ 1 boundary loop on the sphere, so `c ≤ L` is a hard
+    // topological invariant — clamp accordingly. Probes can sometimes
+    // over-count when an accessible region has a thin neck the probe
+    // grid doesn't bridge.
+    let c_raw = count_accessible_components(caps);
+    let c = c_raw.min(l).max(1);
+    // χ for the global accessible region: with c connected components
+    // each contributing 2 − L_F to the Euler characteristic (per
+    // Gauss-Bonnet on a sphere), summing over all components:
+    //   χ = Σ (2 − L_F) = 2c − L_total
+    let chi = 2 * c as i64 - l as i64;
+    let area =
+        r_sq * (2.0 * std::f64::consts::PI * chi as f64 - total_arc_sum - total_vertex_sum);
+    area.clamp(0.0, four_pi_r2)
 }
 
-struct LoopSums {
-    arc_sum: f64,
-    vertex_sum: f64,
-}
-
-/// Walk the boundary arcs to identify connected loops, summing arc-cos-θ
-/// and vertex-exterior-angle within each loop separately.
-fn collect_loops(
-    arcs: &[BoundaryArc],
-    vertices: &[BoundaryVertex],
-    caps: &[SmallCircle],
-) -> Vec<LoopSums> {
-    let mut loops: Vec<LoopSums> = Vec::new();
-
-    // Full-circle arcs: each is its own loop with zero vertex contribution.
-    for (i, arc) in arcs.iter().enumerate() {
+/// Loop count via graph connectivity over arc-endpoints. Treats every arc
+/// as an undirected edge between its start and end vertex points (with
+/// vertices identified by position). Each connected component of the
+/// resulting graph is one loop. Mis-fuses loops that share a vertex.
+fn count_boundary_loops_graph(arcs: &[BoundaryArc]) -> usize {
+    let mut full_circle_loops = 0usize;
+    let mut vertex_points: Vec<Vec3> = Vec::new();
+    let mut arc_edges: Vec<(usize, usize)> = Vec::new();
+    let eps_sq = 1e-10;
+    for arc in arcs {
         if arc.is_full_circle {
-            let cap = caps[arc.cap_idx];
-            loops.push(LoopSums {
-                arc_sum: cap.cos_alpha * arc.theta,
-                vertex_sum: 0.0,
-            });
-            let _ = i;
+            full_circle_loops += 1;
+            continue;
+        }
+        let s = find_or_add_point(&mut vertex_points, arc.start, eps_sq);
+        let e = find_or_add_point(&mut vertex_points, arc.end, eps_sq);
+        arc_edges.push((s, e));
+    }
+    if vertex_points.is_empty() {
+        return full_circle_loops;
+    }
+    let n = vertex_points.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    fn root(p: &mut [usize], mut x: usize) -> usize {
+        while p[x] != x {
+            p[x] = p[p[x]];
+            x = p[x];
+        }
+        x
+    }
+    for &(s, e) in &arc_edges {
+        let rs = root(&mut parent, s);
+        let re = root(&mut parent, e);
+        if rs != re {
+            parent[rs] = re;
         }
     }
+    let mut roots: Vec<usize> = Vec::new();
+    for i in 0..n {
+        let r = root(&mut parent, i);
+        if !roots.contains(&r) {
+            roots.push(r);
+        }
+    }
+    full_circle_loops + roots.len()
+}
 
-    // Vertexed arcs: walk by matching arc.end → next arc.start.
+fn find_or_add_point(points: &mut Vec<Vec3>, p: Vec3, eps_sq: f64) -> usize {
+    for (i, q) in points.iter().enumerate() {
+        if (p - *q).norm_squared() < eps_sq {
+            return i;
+        }
+    }
+    points.push(p);
+    points.len() - 1
+}
+
+/// Loop count via arc traversal: walk arcs, at each step picking the
+/// next one by matching (end position, outgoing cap). Stops when no
+/// next arc matches, so 3+-way concurrencies with mis-recorded
+/// `outgoing_cap` make this over-count L. Currently unused — kept for
+/// future half-edge face-traversal work (PSA.1h-followup).
+#[allow(dead_code)]
+fn count_boundary_loops_walked(arcs: &[BoundaryArc], vertices: &[BoundaryVertex]) -> usize {
     let n = arcs.len();
     let mut visited = vec![false; n];
-    for (i, arc) in arcs.iter().enumerate() {
-        if arc.is_full_circle {
-            visited[i] = true;
-        }
-    }
-    let close = |a: geom::Vec3, b: geom::Vec3| (a - b).norm() < 1e-6;
+    let mut loops = 0usize;
+    let eps_sq = 1e-10;
     for start in 0..n {
         if visited[start] {
             continue;
         }
-        visited[start] = true;
-        let mut path = vec![start];
+        if arcs[start].is_full_circle {
+            visited[start] = true;
+            loops += 1;
+            continue;
+        }
         let mut current = start;
         loop {
+            visited[current] = true;
+            let end_pt = arcs[current].end;
+            let outgoing_cap = vertices[current].outgoing_cap;
             let next = (0..n).find(|&i| {
-                !visited[i] && !arcs[i].is_full_circle && close(arcs[i].start, arcs[current].end)
+                !visited[i]
+                    && !arcs[i].is_full_circle
+                    && arcs[i].cap_idx == outgoing_cap
+                    && (arcs[i].start - end_pt).norm_squared() < eps_sq
             });
             match next {
-                Some(j) => {
-                    visited[j] = true;
-                    path.push(j);
-                    current = j;
-                }
+                Some(j) => current = j,
                 None => break,
             }
         }
-        // Sum within this path.
-        let mut arc_sum = 0.0;
-        let mut vertex_sum = 0.0;
-        for &arc_idx in &path {
-            let cap = caps[arcs[arc_idx].cap_idx];
-            arc_sum += cap.cos_alpha * arcs[arc_idx].theta;
-            // The vertex at the end of this arc is `vertices[arc_idx]`.
-            let vertex = vertices[arc_idx];
-            let v = vertex.point;
-            let t_in = v.cross(&caps[vertex.incoming_cap].axis).normalize();
-            let t_out = v.cross(&caps[vertex.outgoing_cap].axis).normalize();
-            let cos_eps = t_in.dot(&t_out).clamp(-1.0, 1.0);
-            let sin_eps = v.dot(&t_in.cross(&t_out));
-            vertex_sum += sin_eps.atan2(cos_eps);
-        }
-        loops.push(LoopSums { arc_sum, vertex_sum });
+        loops += 1;
     }
     loops
 }

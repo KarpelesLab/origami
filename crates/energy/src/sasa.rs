@@ -59,6 +59,56 @@ pub fn sasa_energy(structure: &Structure, _ff: &ForceField) -> SasaBreakdown {
     sasa_energy_with_dots(structure, SHRAKE_RUPLEY_DOTS)
 }
 
+/// Shrake-Rupley SASA returning per-atom areas (Å²) and the total.
+/// Used as the reference for PowerSasa cross-checks.
+pub fn sasa_per_atom_with_dots(structure: &Structure, n_dots: usize) -> Vec<f64> {
+    let mut positions: Vec<Vec3> = Vec::with_capacity(structure.atom_count());
+    let mut elements: Vec<Element> = Vec::with_capacity(structure.atom_count());
+    for residue in &structure.residues {
+        for atom in &residue.atoms {
+            positions.push(atom.position);
+            elements.push(atom.element);
+        }
+    }
+    let n = positions.len();
+    let radii: Vec<f64> = elements
+        .iter()
+        .map(|&e| vdw_radius(e) + PROBE_RADIUS_A)
+        .collect();
+    let max_radius = radii.iter().cloned().fold(0.0_f64, f64::max);
+    let cell_size = (2.0 * max_radius).max(1.0);
+    let cl = CellList::build(&positions, cell_size);
+    let mut neighbours: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (i, j, r) in cl.iter_pairs_within(&positions, 2.0 * max_radius) {
+        if r <= radii[i] + radii[j] {
+            neighbours[i].push(j);
+            neighbours[j].push(i);
+        }
+    }
+    let dots = fibonacci_unit_sphere(n_dots);
+    let mut per_atom = vec![0.0; n];
+    for i in 0..n {
+        let ri = radii[i];
+        let pi = positions[i];
+        let mut accessible = 0usize;
+        for &dot in &dots {
+            let test_point = pi + dot * ri;
+            let mut buried = false;
+            for &j in &neighbours[i] {
+                if (test_point - positions[j]).norm_squared() < radii[j] * radii[j] {
+                    buried = true;
+                    break;
+                }
+            }
+            if !buried {
+                accessible += 1;
+            }
+        }
+        per_atom[i] = (accessible as f64 / n_dots as f64) * 4.0 * std::f64::consts::PI * ri * ri;
+    }
+    per_atom
+}
+
 pub fn sasa_energy_with_dots(structure: &Structure, n_dots: usize) -> SasaBreakdown {
     let mut positions: Vec<Vec3> = Vec::with_capacity(structure.atom_count());
     let mut elements: Vec<Element> = Vec::with_capacity(structure.atom_count());
