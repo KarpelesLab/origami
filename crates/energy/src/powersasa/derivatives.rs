@@ -55,6 +55,77 @@
 
 use geom::Vec3;
 
+use super::geometry::SmallCircle;
+
+/// One of the two intersection points of two small-circle caps on the
+/// unit sphere. The sign disambiguates which of the two roots:
+/// `RootSign::Plus` is `base + offset`, `Minus` is `base − offset`, in
+/// the parameterisation `intersect_circles` uses (see geometry.rs).
+///
+/// We need this in the analytical-derivative path because the
+/// topology-caching strategy stores *which* of the two intersection
+/// points a vertex is, so it can recompute the vertex position from
+/// updated cap parameters without re-running `find_boundary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RootSign {
+    Plus,
+    Minus,
+}
+
+impl RootSign {
+    pub fn as_f64(self) -> f64 {
+        match self {
+            RootSign::Plus => 1.0,
+            RootSign::Minus => -1.0,
+        }
+    }
+}
+
+/// Compute the vertex point at the intersection of two small-circle
+/// caps on the unit sphere, given a sign choice. Returns `None` if the
+/// caps are disjoint or coincident — the caller should treat that as a
+/// topology break (the cached identity no longer applies and a fresh
+/// boundary recomputation is needed).
+///
+/// Mirrors `intersect_circles` but takes the sign explicitly so it can
+/// be cached. Used by the topology-cached SASA force path.
+pub fn vertex_point(c1: SmallCircle, c2: SmallCircle, sign: RootSign) -> Option<Vec3> {
+    let sigma = c1.axis.dot(&c2.axis);
+    let denom = 1.0 - sigma * sigma;
+    if denom.abs() < 1e-12 {
+        return None;
+    }
+    let a = (c1.cos_alpha - sigma * c2.cos_alpha) / denom;
+    let b = (c2.cos_alpha - sigma * c1.cos_alpha) / denom;
+    let c_sq = 1.0 - a * a - b * b - 2.0 * a * b * sigma;
+    if c_sq <= 0.0 {
+        return None;
+    }
+    let base = c1.axis * a + c2.axis * b;
+    let normal_cross = c1.axis.cross(&c2.axis);
+    let n_norm = normal_cross.norm();
+    if n_norm < 1e-12 {
+        return None;
+    }
+    let offset = normal_cross / n_norm * c_sq.sqrt();
+    Some(base + offset * sign.as_f64())
+}
+
+/// Identify which sign of `vertex_point` matches a known reference
+/// position (typically a vertex extracted from an unperturbed
+/// `find_boundary` result). Returns `None` if the caps don't intersect.
+pub fn identify_root_sign(c1: SmallCircle, c2: SmallCircle, reference: Vec3) -> Option<RootSign> {
+    let v_plus = vertex_point(c1, c2, RootSign::Plus)?;
+    let v_minus = vertex_point(c1, c2, RootSign::Minus)?;
+    let d_plus = (v_plus - reference).norm_squared();
+    let d_minus = (v_minus - reference).norm_squared();
+    Some(if d_plus <= d_minus {
+        RootSign::Plus
+    } else {
+        RootSign::Minus
+    })
+}
+
 /// Apply the Jacobian `∂ω_K/∂r_k` to a vector `v`, where
 ///
 ///   ω_K = (r_k − r_i) / |r_k − r_i|
@@ -213,5 +284,31 @@ mod tests {
             g_k,
             numeric_k
         );
+    }
+
+    /// `vertex_point` matches the two roots that `intersect_circles`
+    /// returns, and `identify_root_sign` picks the right one when
+    /// given a reference position.
+    #[test]
+    fn vertex_point_matches_intersect_circles() {
+        use crate::powersasa::geometry::{intersect_circles, CircleIntersection};
+        // Two caps at a generic configuration.
+        let c1 = SmallCircle::new(Vec3::new(0.3, 0.5, 1.0), 0.4);
+        let c2 = SmallCircle::new(Vec3::new(1.0, 0.2, -0.3), 0.3);
+        let (p, q) = match intersect_circles(c1, c2) {
+            CircleIntersection::Two(p, q) => (p, q),
+            other => panic!("expected Two, got {:?}", other),
+        };
+        let v_plus = vertex_point(c1, c2, RootSign::Plus).expect("Plus");
+        let v_minus = vertex_point(c1, c2, RootSign::Minus).expect("Minus");
+        // The unordered pair {p, q} should equal {v_plus, v_minus}.
+        let matches_plus = (v_plus - p).norm() < 1e-12 || (v_plus - q).norm() < 1e-12;
+        let matches_minus = (v_minus - p).norm() < 1e-12 || (v_minus - q).norm() < 1e-12;
+        assert!(matches_plus && matches_minus);
+        assert!((v_plus - v_minus).norm() > 1e-6, "plus and minus must differ");
+
+        // identify_root_sign reproduces both halves.
+        assert_eq!(identify_root_sign(c1, c2, v_plus), Some(RootSign::Plus));
+        assert_eq!(identify_root_sign(c1, c2, v_minus), Some(RootSign::Minus));
     }
 }
