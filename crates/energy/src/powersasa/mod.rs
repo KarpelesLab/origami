@@ -167,6 +167,98 @@ mod tests {
 
     #[test]
     #[ignore]
+    fn diagnose_specific_overcount_atom() {
+        // Instrument a specific atom that PSA over-counts to find where the
+        // arc/vertex sums go wrong. Trp-cage residue 7 (Lys) CB is the
+        // worst offender: PSA=18.55 vs SR=0.24 (heavily buried).
+        let seq: Vec<AminoAcid> = "NLYIQWLKDGGPSSGRPPPS"
+            .chars()
+            .filter_map(AminoAcid::from_one_letter)
+            .collect();
+        let s = build_extended_chain(&seq).unwrap();
+
+        // Find the target atom and its neighbours.
+        let mut all_pos: Vec<Vec3> = Vec::new();
+        let mut all_rad: Vec<f64> = Vec::new();
+        let mut target_idx = usize::MAX;
+        let mut idx = 0usize;
+        for (ri, residue) in s.residues.iter().enumerate() {
+            for atom in &residue.atoms {
+                all_pos.push(atom.position);
+                all_rad.push(vdw_radius(atom.element) + PROBE_RADIUS_A);
+                if ri == 7 && atom.name == "CB" {
+                    target_idx = idx;
+                }
+                idx += 1;
+            }
+        }
+        assert!(target_idx != usize::MAX, "did not find Lys CB");
+        let pi = all_pos[target_idx];
+        let ri_a = all_rad[target_idx];
+        eprintln!("target atom idx={}, pos={:?}, radius={:.3}", target_idx, pi, ri_a);
+
+        let mut neighbours = Vec::new();
+        for (j, &pj) in all_pos.iter().enumerate() {
+            if j == target_idx {
+                continue;
+            }
+            let d = (pj - pi).norm();
+            if d <= ri_a + all_rad[j] {
+                neighbours.push((j, pj, all_rad[j]));
+            }
+        }
+        eprintln!("Has {} cap neighbours", neighbours.len());
+
+        let (caps, owners) = build_caps(pi, ri_a, &neighbours).expect("not fully buried");
+        let unit_caps: Vec<crate::powersasa::geometry::SmallCircle> = caps.clone();
+        let boundary = find_boundary(&unit_caps);
+
+        eprintln!("Built {} caps, owners={:?}", unit_caps.len(), owners);
+        match &boundary {
+            crate::powersasa::arrangement::AtomBoundary::FullyExposed => eprintln!("FullyExposed"),
+            crate::powersasa::arrangement::AtomBoundary::FullyBuried => eprintln!("FullyBuried"),
+            crate::powersasa::arrangement::AtomBoundary::Bounded { arcs, vertices } => {
+                eprintln!("Bounded: {} arcs, {} vertices", arcs.len(), vertices.len());
+                let mut arc_sum = 0.0;
+                for (i, arc) in arcs.iter().enumerate() {
+                    let cap = unit_caps[arc.cap_idx];
+                    let contrib = cap.cos_alpha * arc.theta;
+                    arc_sum += contrib;
+                    eprintln!(
+                        "  arc {:>2}: cap={} cos_α={:+.4} θ={:+.4} contrib={:+.4} fc={} start=({:+.3},{:+.3},{:+.3}) end=({:+.3},{:+.3},{:+.3})",
+                        i, arc.cap_idx, cap.cos_alpha, arc.theta, contrib, arc.is_full_circle,
+                        arc.start.x, arc.start.y, arc.start.z, arc.end.x, arc.end.y, arc.end.z,
+                    );
+                }
+                let mut vert_sum = 0.0;
+                for (i, vertex) in vertices.iter().enumerate() {
+                    let v = vertex.point;
+                    let t_in = v.cross(&unit_caps[vertex.incoming_cap].axis).normalize();
+                    let t_out = v.cross(&unit_caps[vertex.outgoing_cap].axis).normalize();
+                    let cos_eps = t_in.dot(&t_out).clamp(-1.0, 1.0);
+                    let sin_eps = v.dot(&t_in.cross(&t_out));
+                    let eps = sin_eps.atan2(cos_eps);
+                    vert_sum += eps;
+                    eprintln!(
+                        "  vert {:>2}: in_cap={} out_cap={} ε={:+.4}",
+                        i, vertex.incoming_cap, vertex.outgoing_cap, eps,
+                    );
+                }
+                eprintln!("arc_sum = {:+.4}, vert_sum = {:+.4}", arc_sum, vert_sum);
+                let two_pi = 2.0 * std::f64::consts::PI;
+                let r_sq = ri_a * ri_a;
+                for chi in -2..=2_i64 {
+                    let area = r_sq * (two_pi * chi as f64 - arc_sum - vert_sum);
+                    eprintln!("  if χ = {:+}: area = {:+.3}", chi, area);
+                }
+                let sr_per_atom = crate::sasa::sasa_per_atom_with_dots(&s, 4096);
+                eprintln!("\nSR truth for atom {}: {:.3}", target_idx, sr_per_atom[target_idx]);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
     fn diagnose_carbonyl_c_arrangement() {
         let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala]).unwrap();
         // Find the carbonyl C of residue 0.
@@ -351,16 +443,14 @@ mod tests {
         }
     }
 
-    /// Trp-cage cross-check. PSA.1's first iteration over-counted by ~68%
-    /// because the χ-disambiguation heuristic guessed wrong on crowded
-    /// atoms (backbone carbonyls flanked by sidechain rings, etc.).
-    /// The χ = 2c − L formula with probe-based component counting brought
-    /// that down to ~11%. Closing the remaining gap requires fixing
-    /// `find_boundary` to handle 3+-way vertex coincidences and arcs that
-    /// are partially buried by a non-adjacent cap (the midpoint test in
-    /// the boundary tracer is insufficient when the arrangement is
-    /// dense). That work is parked for a follow-up; the test below locks
-    /// in the current ~12% upper bound so regressions are caught.
+    /// Trp-cage cross-check. PSA.1 sequence of improvements:
+    /// - Original χ-disambiguation heuristic: +68 % vs Shrake-Rupley.
+    /// - PSA.1e–g (probe-based component counting + χ = 2c − L): +11 %.
+    /// - PSA.1i (recompute vertex ε from the actual face-walker
+    ///   continuation, fixing 3+-way vertex misattribution): <1 %.
+    ///
+    /// Locked at 2 % to give headroom for legitimate Shrake-Rupley
+    /// sampling noise; observed is 0.7 % under.
     #[test]
     fn powersasa_within_known_bound_on_extended_trp_cage() {
         let seq: Vec<AminoAcid> = "NLYIQWLKDGGPSSGRPPPS"
@@ -373,7 +463,7 @@ mod tests {
         let sr = crate::sasa::sasa_energy_with_dots(&s, 4096);
         let rel_err = (ps.total_area_a2 - sr.total_area_a2).abs() / sr.total_area_a2;
         assert!(
-            rel_err < 0.13,
+            rel_err < 0.02,
             "PowerSasa {} disagrees with Shrake-Rupley {} (rel err {})",
             ps.total_area_a2, sr.total_area_a2, rel_err
         );

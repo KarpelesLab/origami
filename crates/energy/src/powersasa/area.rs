@@ -59,41 +59,30 @@ fn bounded_area(
         return 0.0;
     }
 
-    // Total arc-length and vertex-turning contributions across the entire
-    // boundary. We don't need to walk loops — we just need the sums to plug
-    // into Gauss-Bonnet alongside the global χ.
+    // Walk faces with tangent disambiguation at multi-way vertices, AND
+    // recompute each vertex's exterior angle ε from the actual chosen
+    // continuation. The naive sum over `vertices[].outgoing_cap` is
+    // wrong at 3+-way vertices: the recorded outgoing_cap is whichever
+    // cap originally produced this intersection point during pairwise
+    // K-M processing, but the actual face-boundary continuation may
+    // use a different cap (others' arcs at the same point may have
+    // been rejected by the midpoint test). Using the recorded cap
+    // gives a wrong tangent direction → wrong ε → wrong area.
+    let WalkResult {
+        loop_count,
+        vertex_sum,
+    } = walk_faces_summing_vertices(arcs, caps);
+    let l = loop_count;
+    let total_vertex_sum = vertex_sum;
+    if l == 0 {
+        return 0.0;
+    }
     let mut total_arc_sum = 0.0;
     for arc in arcs {
         let cap = caps[arc.cap_idx];
         total_arc_sum += cap.cos_alpha * arc.theta;
     }
-    let mut total_vertex_sum = 0.0;
-    for vertex in vertices {
-        let v = vertex.point;
-        let t_in = v.cross(&caps[vertex.incoming_cap].axis).normalize();
-        let t_out = v.cross(&caps[vertex.outgoing_cap].axis).normalize();
-        let cos_eps = t_in.dot(&t_out).clamp(-1.0, 1.0);
-        let sin_eps = v.dot(&t_in.cross(&t_out));
-        total_vertex_sum += sin_eps.atan2(cos_eps);
-    }
-
-    // L = number of closed boundary loops on the accessible region,
-    // computed as the number of connected components of the graph whose
-    // nodes are boundary-vertex positions and edges are arcs. The
-    // alternative — walking arcs via (end-pos, outgoing-cap) matching —
-    // over-counts L when 3+-way vertex concurrencies are present (the
-    // recorded `outgoing_cap` on the vertex may not match the actual
-    // face-traversal continuation), under-counting area to zero on a
-    // number of small-window atoms. The graph approach mis-fuses loops
-    // that *legitimately* share a vertex point, which slightly over-
-    // estimates area on aromatic ring carbons — but the failure mode
-    // is bounded by the per-atom sphere area instead of "zero out a
-    // valid atom". A proper half-edge face-traversal (tracked as
-    // PSA.1h-followup) would resolve both directions cleanly.
-    let l = count_boundary_loops_face_walk(arcs, caps);
-    if l == 0 {
-        return 0.0;
-    }
+    let _ = vertices; // legacy; ε now computed per-walker-choice.
 
     // Probe-based component count. Each accessible component must
     // contribute ≥ 1 boundary loop on the sphere, so `c ≤ L` is a hard
@@ -112,20 +101,105 @@ fn bounded_area(
     area.clamp(0.0, four_pi_r2)
 }
 
-/// Loop count via half-edge-style face walking. At each vertex, when
+struct WalkResult {
+    loop_count: usize,
+    vertex_sum: f64,
+}
+
+/// Half-edge-style face walking for the boundary. At each vertex, when
 /// multiple arcs continue the boundary, we pick the one whose outgoing
-/// tangent is the immediate CCW successor of the incoming arc's tangent
-/// (right-turn around the vertex's outward normal), so 3+-way vertex
-/// concurrencies are disambiguated by local geometry rather than by
-/// arbitrary list order.
-///
-/// For each arc, the next arc is determined as:
-///   1. Match start position to current end position (within tolerance).
-///   2. Among matches, pick the one whose tangent at the vertex has the
-///      smallest positive CCW angle from the incoming tangent.
-///
-/// Two-way vertices have exactly one match and behave identically to a
-/// simple positional walker.
+/// tangent is the immediate CCW successor of the incoming arc's tangent.
+/// Walks every loop end-to-end so we can both count loops AND compute
+/// the vertex exterior-angle sum from the actual continuation choices
+/// (rather than the per-arc `outgoing_cap` that's wrong at 3+-way
+/// vertices).
+fn walk_faces_summing_vertices(arcs: &[BoundaryArc], caps: &[SmallCircle]) -> WalkResult {
+    let n = arcs.len();
+    let mut visited = vec![false; n];
+    let mut loops = 0usize;
+    let mut vertex_sum = 0.0;
+    let eps_sq = 1e-10;
+    let two_pi = 2.0 * std::f64::consts::PI;
+
+    for start in 0..n {
+        if visited[start] {
+            continue;
+        }
+        if arcs[start].is_full_circle {
+            visited[start] = true;
+            loops += 1;
+            // No vertex contribution for a full-circle arc.
+            continue;
+        }
+        let mut current = start;
+        loop {
+            visited[current] = true;
+            let end_pt = arcs[current].end;
+            let in_cap_axis = caps[arcs[current].cap_idx].axis;
+            let t_in = end_pt.cross(&in_cap_axis).normalize();
+
+            // Candidate arcs: any arc whose start matches end_pt. We
+            // include visited arcs in the candidate pool — that's how
+            // a loop closes (the next-after-last arc IS the start arc).
+            // We pick the actual next arc by smallest CCW tangent angle,
+            // then if it's the same as `start`, the loop has closed.
+            let candidates: Vec<usize> = (0..n)
+                .filter(|&i| {
+                    !arcs[i].is_full_circle
+                        && (arcs[i].start - end_pt).norm_squared() < eps_sq
+                })
+                .collect();
+            if candidates.is_empty() {
+                // Open path — shouldn't happen for well-formed boundary,
+                // but be defensive.
+                break;
+            }
+            // Pick by smallest CCW angle.
+            let mut best = candidates[0];
+            let mut best_angle = f64::INFINITY;
+            for &c in &candidates {
+                if c == current {
+                    continue; // arc can't be its own continuation
+                }
+                let out_cap_axis = caps[arcs[c].cap_idx].axis;
+                let t_out = end_pt.cross(&out_cap_axis).normalize();
+                let dot = t_in.dot(&t_out).clamp(-1.0, 1.0);
+                let cross = t_in.cross(&t_out);
+                let signed = end_pt.dot(&cross);
+                let mut angle = signed.atan2(dot);
+                if angle <= 1e-9 {
+                    angle += two_pi;
+                }
+                if angle < best_angle {
+                    best_angle = angle;
+                    best = c;
+                }
+            }
+            // Compute the actual ε at end_pt from t_in to t_out of `best`.
+            let out_cap_axis = caps[arcs[best].cap_idx].axis;
+            let t_out = end_pt.cross(&out_cap_axis).normalize();
+            let dot = t_in.dot(&t_out).clamp(-1.0, 1.0);
+            let cross = t_in.cross(&t_out);
+            let signed = end_pt.dot(&cross);
+            vertex_sum += signed.atan2(dot);
+
+            if best == start {
+                // Loop closed.
+                break;
+            }
+            current = best;
+        }
+        loops += 1;
+    }
+    WalkResult {
+        loop_count: loops,
+        vertex_sum,
+    }
+}
+
+/// Loop count via half-edge-style face walking, *without* recomputing
+/// vertex sums (kept for diagnostics).
+#[allow(dead_code)]
 fn count_boundary_loops_face_walk(arcs: &[BoundaryArc], caps: &[SmallCircle]) -> usize {
     let n = arcs.len();
     let mut visited = vec![false; n];
