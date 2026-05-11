@@ -7,6 +7,7 @@
 
 pub mod arrangement;
 pub mod area;
+pub mod derivatives;
 pub mod geometry;
 
 use chem::{Element, ForceField};
