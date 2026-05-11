@@ -188,6 +188,7 @@ dependencies = [
  "chem",
  "energy",
  "geom",
+ "io",
 ]
 
 [[package]]

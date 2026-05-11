@@ -38,21 +38,29 @@ barriers between conformations, so the chain doesn't fold:
 
 ![L-BFGS-minimised extended chain](docs/images/trp_cage_minimized.png)
 
-The missing step is **molecular dynamics at body temperature** — Langevin
-integration that gives the chain enough thermal energy to escape local minima
-and explore conformational space. That's the next milestone.
+**4. Heat it up (`origami dynamics`).** BAOAB Langevin integration at 310 K
+gives the chain thermal energy to wiggle, explore conformations, and (in
+principle) cross barriers between minima. The frame below is a snapshot
+from 3 ps of dynamics started from the native fold — the cage stays put but
+visibly fluctuates, which is what implicit-solvent MD at body temperature
+should look like:
+
+![Trp-cage during Langevin dynamics at 310 K](docs/images/trp_cage_dynamics.png)
+
+Folding the extended chain from scratch needs much longer trajectories than
+the few-ps runs we can demo here; that's the M7 endgame.
 
 ## Status
 
 Done so far: translation (M1), all-atom chain building (M2), energy evaluation
-with CHARMM36-borrowed constants and GB OBC II implicit solvent (M3), and
-energy minimisation with L-BFGS (M4). Approximate exact-analytical SASA via
-spherical Gauss-Bonnet is partially landed and being debugged for crowded
-geometries.
+with CHARMM36-borrowed constants and GB OBC II implicit solvent (M3), energy
+minimisation with L-BFGS (M4), and BAOAB Langevin dynamics with trajectory
+rendering (M5). Approximate exact-analytical SASA via spherical Gauss-Bonnet
+is partially landed and being debugged for crowded geometries.
 
-In progress: Langevin dynamics at 310 K (M5), co-translational chain growth
-with the ribosome exit tunnel (M6), and end-to-end validation against
-chignolin, Trp-cage, and villin headpiece (M7).
+Up next: co-translational chain growth with the ribosome exit tunnel (M6),
+and end-to-end validation against chignolin, Trp-cage, and villin headpiece
+(M7).
 
 ## Build
 
@@ -76,8 +84,13 @@ origami energy trp_cage.pdb
 # L-BFGS or steepest-descent minimisation
 origami minimize trp_cage.pdb --output trp_cage_min.pdb --algorithm lbfgs
 
-# Render to PNG (ball-and-stick, CPK colours, hydrogens hidden)
+# BAOAB Langevin dynamics at 310 K — writes a multi-MODEL trajectory PDB
+origami dynamics trp_cage_min.pdb --output-trajectory traj.pdb \
+    --steps 3000 --save-every 100 --temperature 310 --friction 5.0
+
+# Render single-frame or trajectory (multi-MODEL → frame_NNNN.png per model)
 origami render trp_cage.pdb --output trp_cage.png --width 800 --height 600
+origami render traj.pdb --output-dir frames/ --width 800 --height 600
 ```
 
 ## Layout
@@ -89,7 +102,8 @@ crates/
   geom/       — 3D math, NeRF, all-atom chain builder, topology graph, cell list
   io/         — PDB writer + reader, PNG renderer
   energy/     — bonded + LJ + Coulomb + GB OBC II + SASA, plus analytical forces
-  dynamics/   — backtracking line search, steepest descent, L-BFGS minimisation
+  dynamics/   — backtracking line search, steepest descent, L-BFGS minimisation,
+                BAOAB Langevin integrator + xoshiro256++ PRNG
   cli/        — `origami` binary
 data/charmm36 — vendored CHARMM36m parameter and topology files
 ```

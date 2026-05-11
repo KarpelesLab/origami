@@ -5,12 +5,14 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use chem::{standard_ff, AminoAcid};
 use clap::{Parser, Subcommand, ValueEnum};
-use dynamics::{minimize, Algorithm, MinimizeOptions};
+use dynamics::{minimize, run_langevin, Algorithm, LangevinOptions, MinimizeOptions};
 use energy::{
     bonded::bonded_energy, gb_energy, nonbonded_energy, sasa_energy, DEFAULT_CUTOFF_A,
 };
 use geom::{build_extended_chain, build_topology_graph};
-use io::{read_pdb, render, write_pdb, RenderOptions};
+use io::{
+    read_pdb, read_pdb_trajectory, render, write_pdb, write_pdb_trajectory, RenderOptions,
+};
 use translate::{find_orfs, parse_fasta, translate_codons};
 use translate::translate::{one_letter_string, three_letter_string};
 
@@ -64,13 +66,18 @@ enum Command {
         #[arg(long)]
         skip_sasa: bool,
     },
-    /// Render a PDB structure to a PNG image (ball-and-stick).
+    /// Render a PDB structure (single-MODEL or multi-MODEL trajectory) to PNG.
     Render {
-        /// Input PDB.
+        /// Input PDB. Multi-MODEL files are rendered per-frame when
+        /// `--output-dir` is given.
         input: PathBuf,
-        /// Output PNG path.
-        #[arg(long, short)]
-        output: PathBuf,
+        /// Output PNG path (for single-frame inputs).
+        #[arg(long, short, conflicts_with = "output_dir")]
+        output: Option<PathBuf>,
+        /// Output directory for trajectory frames (one PNG per MODEL,
+        /// named `frame_NNNN.png`).
+        #[arg(long, conflicts_with = "output")]
+        output_dir: Option<PathBuf>,
         /// Image width in pixels.
         #[arg(long, default_value_t = 800)]
         width: u32,
@@ -80,6 +87,36 @@ enum Command {
         /// Include hydrogen atoms (hidden by default).
         #[arg(long)]
         show_hydrogens: bool,
+    },
+    /// Run Langevin molecular dynamics at constant temperature, writing
+    /// a multi-MODEL trajectory PDB.
+    Dynamics {
+        /// Input PDB (starting configuration).
+        input: PathBuf,
+        /// Output trajectory PDB (multi-MODEL).
+        #[arg(long)]
+        output_trajectory: PathBuf,
+        /// Number of integrator steps to run.
+        #[arg(long, default_value_t = 1000)]
+        steps: usize,
+        /// Save a frame every N steps.
+        #[arg(long, default_value_t = 10)]
+        save_every: usize,
+        /// Integration timestep in femtoseconds.
+        #[arg(long, default_value_t = 1.0)]
+        dt: f64,
+        /// Target temperature in Kelvin.
+        #[arg(long, default_value_t = 310.0)]
+        temperature: f64,
+        /// Friction coefficient γ in ps⁻¹.
+        #[arg(long, default_value_t = 1.0)]
+        friction: f64,
+        /// PRNG seed (deterministic).
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+        /// Skip Maxwell-Boltzmann initial velocity sampling.
+        #[arg(long)]
+        zero_initial_velocity: bool,
     },
     /// Minimize a PDB structure (energy gradient descent).
     Minimize {
@@ -122,36 +159,157 @@ fn main() -> Result<()> {
         Command::Minimize { input, output, algorithm, max_steps, tol, max_step } => {
             run_minimize(&input, &output, algorithm, max_steps, tol, max_step)
         }
-        Command::Render { input, output, width, height, show_hydrogens } => {
-            run_render(&input, &output, width, height, show_hydrogens)
+        Command::Render { input, output, output_dir, width, height, show_hydrogens } => {
+            run_render(&input, output.as_deref(), output_dir.as_deref(), width, height, show_hydrogens)
         }
+        Command::Dynamics {
+            input,
+            output_trajectory,
+            steps,
+            save_every,
+            dt,
+            temperature,
+            friction,
+            seed,
+            zero_initial_velocity,
+        } => run_dynamics(
+            &input,
+            &output_trajectory,
+            steps,
+            save_every,
+            dt,
+            temperature,
+            friction,
+            seed,
+            !zero_initial_velocity,
+        ),
     }
 }
 
 fn run_render(
     input: &Path,
-    output: &Path,
+    output: Option<&Path>,
+    output_dir: Option<&Path>,
     width: u32,
     height: u32,
     show_hydrogens: bool,
 ) -> Result<()> {
     let file = fs::File::open(input)
         .with_context(|| format!("opening {}", input.display()))?;
-    let structure = read_pdb(file)
-        .with_context(|| format!("reading {}", input.display()))?;
     let opts = RenderOptions {
         width,
         height,
         show_hydrogens,
         ..Default::default()
     };
-    let img = render(&structure, &opts);
-    img.save(output)
-        .with_context(|| format!("writing {}", output.display()))?;
-    println!(
-        "Rendered {} atoms ({}×{}) → {}",
+    if let Some(dir) = output_dir {
+        let frames = read_pdb_trajectory(file)
+            .with_context(|| format!("reading {}", input.display()))?;
+        fs::create_dir_all(dir)
+            .with_context(|| format!("creating {}", dir.display()))?;
+        for (idx, structure) in frames.iter().enumerate() {
+            let img = render(structure, &opts);
+            let path = dir.join(format!("frame_{:04}.png", idx + 1));
+            img.save(&path)
+                .with_context(|| format!("writing {}", path.display()))?;
+        }
+        println!(
+            "Rendered {} frames ({}×{}) → {}",
+            frames.len(),
+            width,
+            height,
+            dir.display(),
+        );
+    } else {
+        let out_path = output
+            .ok_or_else(|| anyhow!("either --output or --output-dir is required"))?;
+        let structure = read_pdb(file)
+            .with_context(|| format!("reading {}", input.display()))?;
+        let img = render(&structure, &opts);
+        img.save(out_path)
+            .with_context(|| format!("writing {}", out_path.display()))?;
+        println!(
+            "Rendered {} atoms ({}×{}) → {}",
+            structure.atom_count(),
+            width,
+            height,
+            out_path.display(),
+        );
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_dynamics(
+    input: &Path,
+    output_traj: &Path,
+    steps: usize,
+    save_every: usize,
+    dt_fs: f64,
+    temperature_k: f64,
+    friction_ps_inv: f64,
+    seed: u64,
+    randomise_initial_velocities: bool,
+) -> Result<()> {
+    let file = fs::File::open(input)
+        .with_context(|| format!("opening {}", input.display()))?;
+    let mut structure = read_pdb(file)
+        .with_context(|| format!("reading {}", input.display()))?;
+    let graph = build_topology_graph(&structure);
+    let ff = standard_ff();
+
+    let opts = LangevinOptions {
+        dt_fs,
+        temperature_k,
+        friction_ps_inv,
+        steps,
+        save_every,
+        seed,
+        randomise_initial_velocities,
+    };
+
+    eprintln!(
+        "origami dynamics: {} atoms, {} residues, T={} K, γ={} ps⁻¹, dt={} fs, {} steps (save every {})",
         structure.atom_count(),
-        width, height, output.display(),
+        structure.residues.len(),
+        temperature_k,
+        friction_ps_inv,
+        dt_fs,
+        steps,
+        save_every,
+    );
+
+    let mut frames: Vec<geom::Structure> = Vec::new();
+    let summary = run_langevin(&mut structure, &graph, ff, opts, |frame| {
+        eprintln!(
+            "  step {:>6} t={:>8.1} fs   T={:>7.1} K   KE={:>9.2} kJ/mol",
+            frame.step, frame.time_fs, frame.instantaneous_temperature_k, frame.kinetic_energy_kj_mol,
+        );
+        frames.push(frame.structure.clone());
+    });
+
+    eprintln!(
+        "\ntemperature mean = {:.1} K ± {:.1} K; equipartition ratio = {:.3}; diverged = {}",
+        summary.temperature_mean_k,
+        summary.temperature_stddev_k,
+        summary.equipartition_ratio,
+        summary.diverged,
+    );
+
+    let title = format!(
+        "Langevin T={} K dt={} fs steps={} from {}",
+        temperature_k,
+        dt_fs,
+        steps,
+        input.display(),
+    );
+    let mut out = fs::File::create(output_traj)
+        .with_context(|| format!("creating {}", output_traj.display()))?;
+    write_pdb_trajectory(&mut out, &title, frames.iter()).context("writing trajectory PDB")?;
+    eprintln!(
+        "wrote {} frames → {}",
+        frames.len(),
+        output_traj.display(),
     );
     Ok(())
 }

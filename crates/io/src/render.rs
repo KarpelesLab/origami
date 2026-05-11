@@ -67,7 +67,8 @@ pub fn render(structure: &Structure, opts: &RenderOptions) -> RgbaImage {
     }
 
     // 2. Build bonds from the topology graph, keeping only those between
-    //    drawn atoms.
+    //    drawn atoms. Each bond carries both endpoint colours so the
+    //    cylinder can be split into half-tinted segments.
     let graph = build_topology_graph(structure);
     let mut bonds: Vec<RenderBond> = Vec::new();
     for b in &graph.bonds {
@@ -78,6 +79,8 @@ pub fn render(structure: &Structure, opts: &RenderOptions) -> RgbaImage {
             a: atoms[a_drawn].center,
             b: atoms[b_drawn].center,
             radius: opts.bond_radius_a,
+            color_a: atoms[a_drawn].color,
+            color_b: atoms[b_drawn].color,
         });
     }
 
@@ -102,7 +105,6 @@ pub fn render(structure: &Structure, opts: &RenderOptions) -> RgbaImage {
     // 4. Lighting (single directional source from upper-right-front).
     let light_dir = Vec3::new(0.6, 0.7, 0.5).normalize();
     let ambient = 0.18;
-    let bond_color = [0.55, 0.55, 0.6]; // muted blue-grey
 
     // 5. Per-pixel ray cast.
     let mut img = RgbaImage::new(opts.width, opts.height);
@@ -123,18 +125,19 @@ pub fn render(structure: &Structure, opts: &RenderOptions) -> RgbaImage {
                     }
                 }
             }
-            // Bond cylinders.
+            // Bond cylinders — half-coloured by which endpoint is closer
+            // along the bond axis.
             for bond in &bonds {
-                if let Some((t, normal)) = intersect_cylinder(&ray, bond.a, bond.b, bond.radius) {
+                if let Some((t, normal, frac)) = intersect_cylinder(&ray, bond.a, bond.b, bond.radius) {
                     if t > 1e-4 && t < best_t {
                         best_t = t;
                         best_normal = normal;
-                        best_color = bond_color;
+                        best_color = if frac < 0.5 { bond.color_a } else { bond.color_b };
                     }
                 }
             }
             let px = if best_t.is_finite() {
-                shade(best_normal, light_dir, best_color, ambient)
+                shade(best_normal, light_dir, -ray.direction, best_color, ambient)
             } else {
                 [
                     opts.background[0] as f64 / 255.0,
@@ -163,6 +166,8 @@ struct RenderBond {
     a: Vec3,
     b: Vec3,
     radius: f64,
+    color_a: [f64; 3],
+    color_b: [f64; 3],
 }
 
 struct Ray {
@@ -230,9 +235,10 @@ fn intersect_sphere(ray: &Ray, center: Vec3, radius: f64) -> Option<f64> {
 }
 
 /// Intersect ray with a finite cylinder (no end caps — they're hidden
-/// inside the atom spheres). Returns the closest positive `t` and the
-/// surface normal at the hit.
-fn intersect_cylinder(ray: &Ray, a: Vec3, b: Vec3, radius: f64) -> Option<(f64, Vec3)> {
+/// inside the atom spheres). Returns the closest positive `t`, the
+/// surface normal at the hit, and the fractional position along the
+/// axis from `a` to `b` (0 at `a`, 1 at `b`) used for half-colour split.
+fn intersect_cylinder(ray: &Ray, a: Vec3, b: Vec3, radius: f64) -> Option<(f64, Vec3, f64)> {
     let axis = b - a;
     let axis_len = axis.norm();
     if axis_len < 1e-9 {
@@ -267,18 +273,28 @@ fn intersect_cylinder(ray: &Ray, a: Vec3, b: Vec3, radius: f64) -> Option<(f64, 
         }
         let axis_pt = a + axis_hat * along;
         let normal = (hit - axis_pt).normalize();
-        return Some((t, normal));
+        let frac = along / axis_len;
+        return Some((t, normal, frac));
     }
     None
 }
 
-fn shade(normal: Vec3, light_dir: Vec3, color: [f64; 3], ambient: f64) -> [f64; 3] {
+fn shade(
+    normal: Vec3,
+    light_dir: Vec3,
+    view_dir: Vec3,
+    color: [f64; 3],
+    ambient: f64,
+) -> [f64; 3] {
     let diff = normal.dot(&light_dir).max(0.0);
     let intensity = ambient + (1.0 - ambient) * diff;
+    // Blinn-Phong specular: gentle highlight on top of Lambert.
+    let half = (light_dir + view_dir).normalize();
+    let spec_intensity = normal.dot(&half).max(0.0).powf(32.0) * 0.35;
     [
-        color[0] * intensity,
-        color[1] * intensity,
-        color[2] * intensity,
+        (color[0] * intensity + spec_intensity).min(1.0),
+        (color[1] * intensity + spec_intensity).min(1.0),
+        (color[2] * intensity + spec_intensity).min(1.0),
     ]
 }
 

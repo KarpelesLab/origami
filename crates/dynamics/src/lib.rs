@@ -6,9 +6,16 @@
 //! convergence criteria.
 
 pub mod energy_eval;
+pub mod langevin;
 pub mod lbfgs;
 pub mod line_search;
 pub mod minimize;
+pub mod rng;
 pub mod steepest_descent;
 
+pub use langevin::{
+    instant_temperature_k, run_langevin, LangevinFrame, LangevinOptions, LangevinSummary,
+    BOLTZMANN_KJ_PER_MOL_K,
+};
 pub use minimize::{minimize, Algorithm, MinimizationResult, MinimizeOptions};
+pub use rng::Xoshiro256pp;

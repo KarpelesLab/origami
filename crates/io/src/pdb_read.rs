@@ -33,6 +33,125 @@ pub enum PdbReadError {
     Empty,
 }
 
+/// Read every MODEL in a multi-frame PDB. A file with no `MODEL` records
+/// is treated as a single-model trajectory and returns one structure.
+pub fn read_pdb_trajectory<R: Read>(reader: R) -> Result<Vec<Structure>, PdbReadError> {
+    let buf = BufReader::new(reader);
+    let mut frames: Vec<Structure> = Vec::new();
+    let mut current: Vec<ParsedAtom> = Vec::new();
+    let mut chain_filter: Option<char> = None;
+
+    for (lineno_zero, line) in buf.lines().enumerate() {
+        let lineno = lineno_zero + 1;
+        let line = line?;
+
+        if line.starts_with("ENDMDL") {
+            if !current.is_empty() {
+                frames.push(assemble_structure(std::mem::take(&mut current)));
+                chain_filter = None;
+            }
+            continue;
+        }
+        if line.starts_with("END") {
+            if !current.is_empty() {
+                frames.push(assemble_structure(std::mem::take(&mut current)));
+            }
+            break;
+        }
+        if line.starts_with("MODEL") {
+            // Starting a new MODEL — if we accumulated atoms outside a
+            // MODEL block, flush them first.
+            if !current.is_empty() {
+                frames.push(assemble_structure(std::mem::take(&mut current)));
+                chain_filter = None;
+            }
+            continue;
+        }
+        if line.starts_with("TER") {
+            continue;
+        }
+        if !line.starts_with("ATOM") {
+            continue;
+        }
+
+        let rec = parse_atom_record(&line, lineno)?;
+        if let Some(filter) = chain_filter {
+            if rec.chain != filter {
+                continue;
+            }
+        } else {
+            chain_filter = Some(rec.chain);
+        }
+        if rec.alt_loc != ' ' && rec.alt_loc != 'A' {
+            continue;
+        }
+        let aa = AminoAcid::from_three_letter(&rec.res_name)
+            .ok_or_else(|| PdbReadError::UnknownResidue(lineno, rec.res_name.clone()))?;
+        let norm_owned = normalise_atom_name(&rec.atom_name);
+        let canonical_name = match canonical_atom_name(aa, &norm_owned) {
+            Some(n) => n,
+            None => {
+                if is_terminal_patch_atom(&norm_owned) {
+                    continue;
+                }
+                return Err(PdbReadError::UnknownAtom(lineno, rec.atom_name, aa));
+            }
+        };
+        let element = if let Some(e) = parse_element(&rec.element) {
+            e
+        } else {
+            element_from_atom_name(canonical_name).ok_or_else(|| {
+                PdbReadError::Malformed(
+                    lineno,
+                    format!("can't determine element for atom {canonical_name:?}"),
+                )
+            })?
+        };
+        current.push(ParsedAtom {
+            res_key: (rec.chain, rec.res_seq),
+            aa,
+            atom: PlacedAtom {
+                name: canonical_name,
+                element,
+                position: Vec3::new(rec.x, rec.y, rec.z),
+            },
+        });
+    }
+    if !current.is_empty() {
+        frames.push(assemble_structure(current));
+    }
+    if frames.is_empty() {
+        return Err(PdbReadError::Empty);
+    }
+    Ok(frames)
+}
+
+struct ParsedAtom {
+    res_key: (char, i32),
+    aa: AminoAcid,
+    atom: PlacedAtom,
+}
+
+fn assemble_structure(parsed: Vec<ParsedAtom>) -> Structure {
+    let mut residues: Vec<PlacedResidue> = Vec::new();
+    let mut current_key: Option<(char, i32)> = None;
+    let mut seen: BTreeMap<(usize, &'static str), ()> = BTreeMap::new();
+    for p in parsed {
+        if Some(p.res_key) != current_key {
+            residues.push(PlacedResidue {
+                aa: p.aa,
+                atoms: Vec::new(),
+            });
+            current_key = Some(p.res_key);
+        }
+        let idx = residues.len() - 1;
+        if seen.insert((idx, p.atom.name), ()).is_none() {
+            residues.last_mut().unwrap().atoms.push(p.atom);
+        }
+    }
+    Structure { residues }
+}
+
 pub fn read_pdb<R: Read>(reader: R) -> Result<Structure, PdbReadError> {
     let buf = BufReader::new(reader);
 
@@ -348,6 +467,32 @@ mod tests {
         let expected_seq = "NLYIQWLKDGGPSSGRPPPS";
         let actual_seq: String = s.residues.iter().map(|r| r.aa.one_letter()).collect();
         assert_eq!(actual_seq, expected_seq);
+    }
+
+    #[test]
+    fn round_trip_trajectory() {
+        let s1 = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Gly]).unwrap();
+        let mut s2 = s1.clone();
+        // Perturb the second frame so the two structures differ.
+        s2.residues[0].atoms[0].position += Vec3::new(0.5, 0.0, 0.0);
+        let frames = [s1.clone(), s2.clone(), s1.clone()];
+        let mut buf = Vec::new();
+        crate::write_pdb_trajectory(&mut buf, "round-trip traj", frames.iter()).unwrap();
+        let parsed = read_pdb_trajectory(buf.as_slice()).expect("parse traj");
+        assert_eq!(parsed.len(), 3);
+        for (a, b) in parsed.iter().zip(frames.iter()) {
+            assert_eq!(a.residues.len(), b.residues.len());
+            for (ar, br) in a.residues.iter().zip(b.residues.iter()) {
+                assert_eq!(ar.atoms.len(), br.atoms.len());
+                for (aa, bb) in ar.atoms.iter().zip(br.atoms.iter()) {
+                    assert!((aa.position - bb.position).norm() < 1e-3);
+                }
+            }
+        }
+        // The second frame's first atom should be offset by ~0.5 Å along x.
+        let dx = parsed[1].residues[0].atoms[0].position.x
+            - parsed[0].residues[0].atoms[0].position.x;
+        assert!((dx - 0.5).abs() < 1e-3);
     }
 
     #[test]
