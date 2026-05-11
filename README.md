@@ -55,8 +55,30 @@ and running Langevin dynamics for the time slice up to the next emission.
 An optional cylindrical exit-tunnel constraint keeps the nascent chain
 inside a confined region, mimicking the ribosomal tunnel.
 
-Folding the extended chain from scratch needs much longer trajectories than
-the few-ps runs we can demo here; that's the M7 endgame.
+**6. Actually fold something.** Start from a minimised extended chignolin
+(GYDPETGTWG, 10 residues) and run 500 ps of Langevin dynamics at 310 K.
+The chain finds the native fold within ~160 ps:
+
+| frame (× 10 ps) | Cα RMSD vs 1UAO native |
+|---:|---|
+| 0 (start) | 8.76 Å |
+| 6 | 3.66 Å |
+| 10 | 2.92 Å |
+| 14 | 2.09 Å |
+| **16** | **1.82 Å** — within NMR experimental uncertainty |
+| 17–18 | 1.88, 2.01 Å |
+
+The simulated structure at 160 ps next to the experimental NMR
+reference (1UAO):
+
+![Simulated chignolin at 160 ps (1.82 Å RMSD vs native)](docs/images/chignolin_folded_160ps.png)
+![Native chignolin (1UAO)](docs/images/chignolin_native.png)
+
+Full RMSD trace: [docs/data/chignolin_rmsd.tsv](docs/data/chignolin_rmsd.tsv).
+
+The hypothesis at the top of this README — that hand-built physics can
+produce reasonable folds without ML priors — is at least true for the
+smallest known fold.
 
 ## Status
 
@@ -72,9 +94,18 @@ and villin headpiece HP-35 (2F4K). For each, the native fold scores at least
 Langevin dynamics from the Trp-cage native conformation keeps Cα RMSD under
 1 Å.
 
-Up next: actually folding from scratch on a millisecond-scale trajectory
-(needs the analytical SASA derivatives — see PSA.2-followup — and probably
-GPU offload to be feasible).
+Performance benchmarks (release build, single-core Apple Silicon):
+- Trp-cage (300 atoms): 527 fs/s (≈ 45 ns/day)
+- Chignolin (134 atoms): 2 165 fs/s (≈ 187 ns/day)
+- Force-term breakdown on Trp-cage (1.9 ms/step total, no SASA):
+  nonbonded LJ+Coulomb 1.07 ms (56 %), GB 0.75 ms (39 %), all bonded
+  terms together 0.06 ms (3 %).
+- Adding numerical SASA forces raises step cost by ~5 000× —
+  analytical Klenin §3 derivatives (PSA.2-followup) are the next
+  optimisation lever before SIMD / GPU.
+
+Up next: analytical SASA derivatives, then SIMD / vectorisation of the
+two O(N²) pair-sum kernels, then larger folds and longer trajectories.
 
 ## Build
 

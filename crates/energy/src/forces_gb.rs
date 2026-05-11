@@ -27,29 +27,41 @@ pub fn add_gb_forces(structure: &Structure, ff: &ForceField, forces: &mut [Vec3]
     let inputs = compute_born_inputs(structure, ff);
     let n = inputs.positions.len();
     let prefactor_kcal = (1.0 / EPSILON_SOLUTE - 1.0 / EPSILON_WATER) * COULOMB_CONST_KCAL_A_PER_E2;
+    let positions = &inputs.positions;
+    let charges = &inputs.charges;
+    let radii = &inputs.effective_radii;
+    // Outer-loop skip on q_i = 0 removes ~half the iterations cheaply
+    // (CHARMM gives many hydrocarbons q ≈ 0 on the heavy atom). The
+    // pre-converted Coulomb prefactor avoids re-multiplying by the
+    // kcal→kJ factor inside the hot loop.
+    let prefactor_kj = kcal_to_kj(prefactor_kcal);
     for i in 0..n {
+        let qi = charges[i];
+        if qi == 0.0 {
+            continue;
+        }
+        let pi = positions[i];
+        let ri = radii[i];
         for j in (i + 1)..n {
-            let qq = inputs.charges[i] * inputs.charges[j];
-            if qq == 0.0 {
+            let qj = charges[j];
+            if qj == 0.0 {
                 continue;
             }
-            let r_ij_vec = inputs.positions[j] - inputs.positions[i];
+            let qq = qi * qj;
+            let r_ij_vec = positions[j] - pi;
             let r2 = r_ij_vec.norm_squared();
-            let r = r2.sqrt();
-            if r < 1e-9 {
+            if r2 < 1e-18 {
                 continue;
             }
-            let rij_prod = inputs.effective_radii[i] * inputs.effective_radii[j];
-            let exp_arg = -r2 / (4.0 * rij_prod);
-            let exp_val = exp_arg.exp();
+            let r = r2.sqrt();
+            let rij_prod = ri * radii[j];
+            let exp_val = (-r2 / (4.0 * rij_prod)).exp();
             let f_gb_sq = r2 + rij_prod * exp_val;
             let f_gb = f_gb_sq.sqrt();
-            // dfGB²/dr = 2r − (r/2)·exp(−r²/(4·RR))
             let d_fgb_sq_dr = 2.0 * r - 0.5 * r * exp_val;
             let d_fgb_dr = d_fgb_sq_dr / (2.0 * f_gb);
             // F_i = +(1−1/εw) k qq / fGB² × dfGB/dr × (r_j − r_i)/r
-            let coeff_kcal = prefactor_kcal * qq / f_gb_sq * d_fgb_dr / r;
-            let coeff = kcal_to_kj(coeff_kcal);
+            let coeff = prefactor_kj * qq / f_gb_sq * d_fgb_dr / r;
             let f = r_ij_vec * coeff;
             forces[i] += f;
             forces[j] -= f;
