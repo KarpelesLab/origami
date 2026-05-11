@@ -47,6 +47,14 @@ should look like:
 
 ![Trp-cage during Langevin dynamics at 310 K](docs/images/trp_cage_dynamics.png)
 
+**5. Grow it co-translationally (`origami cotranslate`).** A real chain
+doesn't appear all at once — the ribosome emits residues N-to-C, and the
+N-terminal portion has been folding for a while by the time the C-terminus
+arrives. The cotranslate command alternates between appending one residue
+and running Langevin dynamics for the time slice up to the next emission.
+An optional cylindrical exit-tunnel constraint keeps the nascent chain
+inside a confined region, mimicking the ribosomal tunnel.
+
 Folding the extended chain from scratch needs much longer trajectories than
 the few-ps runs we can demo here; that's the M7 endgame.
 
@@ -54,13 +62,13 @@ the few-ps runs we can demo here; that's the M7 endgame.
 
 Done so far: translation (M1), all-atom chain building (M2), energy evaluation
 with CHARMM36-borrowed constants and GB OBC II implicit solvent (M3), energy
-minimisation with L-BFGS (M4), and BAOAB Langevin dynamics with trajectory
-rendering (M5). Approximate exact-analytical SASA via spherical Gauss-Bonnet
-is partially landed and being debugged for crowded geometries.
+minimisation with L-BFGS (M4), BAOAB Langevin dynamics with trajectory
+rendering (M5), exact analytical SASA via spherical Gauss-Bonnet (PSA.1, ~1%
+match to Shrake-Rupley), numerical SASA forces in the gradient (PSA.2), and
+co-translational chain growth with optional exit-tunnel constraint (M6).
 
-Up next: co-translational chain growth with the ribosome exit tunnel (M6),
-and end-to-end validation against chignolin, Trp-cage, and villin headpiece
-(M7).
+Up next: end-to-end validation against chignolin, Trp-cage, and villin
+headpiece (M7).
 
 ## Build
 
@@ -87,6 +95,12 @@ origami minimize trp_cage.pdb --output trp_cage_min.pdb --algorithm lbfgs
 # BAOAB Langevin dynamics at 310 K — writes a multi-MODEL trajectory PDB
 origami dynamics trp_cage_min.pdb --output-trajectory traj.pdb \
     --steps 3000 --save-every 100 --temperature 310 --friction 5.0
+
+# Co-translational chain growth — append one residue, then run dynamics
+# until the ribosome emits the next residue. Optional cylindrical exit
+# tunnel mimics the ribosomal tunnel.
+origami cotranslate --seq NLYIQWLKDGGPSSGRPPPS --output-trajectory cotrans.pdb \
+    --interval 500 --tail 5000 --save-every 50 --with-tunnel
 
 # Render single-frame or trajectory (multi-MODEL → frame_NNNN.png per model)
 origami render trp_cage.pdb --output trp_cage.png --width 800 --height 600

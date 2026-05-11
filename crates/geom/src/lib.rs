@@ -5,7 +5,10 @@ pub mod nerf;
 pub mod structure;
 pub mod topology_graph;
 
-pub use builder::{build_chain, build_extended_chain, BuildError};
+pub use builder::{
+    append_residue, build_chain, build_extended_chain, BuildError, DEFAULT_OMEGA, DEFAULT_PHI,
+    DEFAULT_PSI,
+};
 pub use measure::{angle, dihedral, distance};
 pub use neighbours::CellList;
 pub use nerf::place_atom;

@@ -260,6 +260,55 @@ pub fn instant_temperature_k(velocities: &[Vec3], masses: &[f64]) -> f64 {
 }
 
 // ---------- internals ----------
+// Some of these are also used by the cotranslate driver in
+// `cotranslate.rs`, which runs its own BAOAB loop so the velocity buffer
+// and RNG persist across residue-emission slices.
+
+/// Crate-public masses collector (Da, one per atom in chain order).
+pub(crate) fn collect_masses_pub(structure: &Structure) -> Vec<f64> {
+    collect_masses(structure)
+}
+
+/// Crate-public position update step.
+pub(crate) fn apply_velocity_step_pub(structure: &mut Structure, velocities: &[Vec3], dt: f64) {
+    apply_velocity_step(structure, velocities, dt);
+}
+
+/// Re-seed velocities for atoms newly appended to a structure since the
+/// last call. Existing atoms keep their current velocity; new atoms get
+/// Maxwell-Boltzmann samples at `temperature_k`. Used by the cotranslate
+/// driver each time the ribosome emits a residue.
+pub fn initialise_velocities_for_new_atoms(
+    structure: &Structure,
+    velocities: &mut Vec<Vec3>,
+    temperature_k: f64,
+    rng: &mut Xoshiro256pp,
+) {
+    let n = structure.atom_count();
+    let old_n = velocities.len();
+    if n <= old_n {
+        return;
+    }
+    // Compute σ_v per new atom based on its mass.
+    let kbt = BOLTZMANN_KJ_PER_MOL_K * temperature_k;
+    let mut counted = 0usize;
+    for residue in &structure.residues {
+        for atom in &residue.atoms {
+            if counted >= old_n {
+                let m = atom.element.mass_da();
+                let sigma = (kbt * ACCEL_FACTOR / m).sqrt();
+                let v = Vec3::new(
+                    sigma * rng.gaussian(),
+                    sigma * rng.gaussian(),
+                    sigma * rng.gaussian(),
+                );
+                velocities.push(v);
+            }
+            counted += 1;
+        }
+    }
+    debug_assert_eq!(velocities.len(), n);
+}
 
 fn collect_masses(structure: &Structure) -> Vec<f64> {
     let mut out = Vec::with_capacity(structure.atom_count());
@@ -281,7 +330,7 @@ fn apply_velocity_step(structure: &mut Structure, velocities: &[Vec3], dt: f64) 
     }
 }
 
-fn kinetic_energy_kj_mol(velocities: &[Vec3], masses: &[f64]) -> f64 {
+pub(crate) fn kinetic_energy_kj_mol(velocities: &[Vec3], masses: &[f64]) -> f64 {
     let mut sum = 0.0;
     for (v, m) in velocities.iter().zip(masses.iter()) {
         sum += m * v.norm_squared();

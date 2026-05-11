@@ -5,7 +5,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use chem::{standard_ff, AminoAcid};
 use clap::{Parser, Subcommand, ValueEnum};
-use dynamics::{minimize, run_langevin, Algorithm, LangevinOptions, MinimizeOptions};
+use dynamics::{
+    minimize, run_cotranslate, run_langevin, Algorithm, CylindricalTunnel, LangevinOptions,
+    MinimizeOptions, UniformRibosome,
+};
+use geom::Vec3;
 use energy::{
     bonded::bonded_energy, gb_energy, nonbonded_energy, sasa_energy, DEFAULT_CUTOFF_A,
 };
@@ -87,6 +91,50 @@ enum Command {
         /// Include hydrogen atoms (hidden by default).
         #[arg(long)]
         show_hydrogens: bool,
+    },
+    /// Co-translational chain growth: assemble the chain residue-by-
+    /// residue at a constant codon rate while Langevin dynamics relaxes
+    /// the existing chain between emissions. Optional cylindrical
+    /// exit-tunnel constraint.
+    Cotranslate {
+        /// Amino-acid sequence (one-letter codes, e.g. "MAGW").
+        #[arg(long)]
+        seq: String,
+        /// Output trajectory PDB (multi-MODEL).
+        #[arg(long)]
+        output_trajectory: PathBuf,
+        /// Per-residue emission interval in femtoseconds. With dt = 1 fs,
+        /// `interval = 1000` runs 1 ps of dynamics between residues.
+        #[arg(long, default_value_t = 1000.0)]
+        interval: f64,
+        /// Extra fs of dynamics after the last residue is emitted (lets
+        /// the completed chain relax).
+        #[arg(long, default_value_t = 5000.0)]
+        tail: f64,
+        /// Save a frame every N integrator steps.
+        #[arg(long, default_value_t = 25)]
+        save_every: usize,
+        /// Integration timestep in fs.
+        #[arg(long, default_value_t = 1.0)]
+        dt: f64,
+        /// Target temperature (K).
+        #[arg(long, default_value_t = 310.0)]
+        temperature: f64,
+        /// Friction γ in ps⁻¹.
+        #[arg(long, default_value_t = 2.0)]
+        friction: f64,
+        /// PRNG seed.
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+        /// Enable the cylindrical exit-tunnel constraint.
+        #[arg(long)]
+        with_tunnel: bool,
+        /// Tunnel radius in Å (only with --with-tunnel).
+        #[arg(long, default_value_t = 12.0)]
+        tunnel_radius: f64,
+        /// Tunnel length in Å.
+        #[arg(long, default_value_t = 80.0)]
+        tunnel_length: f64,
     },
     /// Run Langevin molecular dynamics at constant temperature, writing
     /// a multi-MODEL trajectory PDB.
@@ -171,6 +219,33 @@ fn main() -> Result<()> {
         Command::Render { input, output, output_dir, width, height, show_hydrogens } => {
             run_render(&input, output.as_deref(), output_dir.as_deref(), width, height, show_hydrogens)
         }
+        Command::Cotranslate {
+            seq,
+            output_trajectory,
+            interval,
+            tail,
+            save_every,
+            dt,
+            temperature,
+            friction,
+            seed,
+            with_tunnel,
+            tunnel_radius,
+            tunnel_length,
+        } => run_cotranslate_cmd(
+            &seq,
+            &output_trajectory,
+            interval,
+            tail,
+            save_every,
+            dt,
+            temperature,
+            friction,
+            seed,
+            with_tunnel,
+            tunnel_radius,
+            tunnel_length,
+        ),
         Command::Dynamics {
             input,
             output_trajectory,
@@ -323,6 +398,105 @@ fn run_dynamics(
         "wrote {} frames → {}",
         frames.len(),
         output_traj.display(),
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_cotranslate_cmd(
+    seq_str: &str,
+    output_traj: &Path,
+    interval_fs: f64,
+    tail_fs: f64,
+    save_every: usize,
+    dt_fs: f64,
+    temperature_k: f64,
+    friction_ps_inv: f64,
+    seed: u64,
+    with_tunnel: bool,
+    tunnel_radius_a: f64,
+    tunnel_length_a: f64,
+) -> Result<()> {
+    let sequence = parse_aa_seq(seq_str)?;
+    let ribosome = UniformRibosome::new(sequence.clone(), interval_fs);
+    let ff = standard_ff();
+
+    let opts = LangevinOptions {
+        dt_fs,
+        temperature_k,
+        friction_ps_inv,
+        steps: 0, // overridden per slice by run_cotranslate
+        save_every,
+        seed,
+        randomise_initial_velocities: true,
+        include_sasa: false,
+    };
+
+    let tunnel = if with_tunnel {
+        Some(CylindricalTunnel {
+            axis_origin: Vec3::zeros(),
+            axis_direction: Vec3::new(0.0, 0.0, 1.0),
+            radius_a: tunnel_radius_a,
+            length_a: tunnel_length_a,
+            k_confine: 50.0,
+        })
+    } else {
+        None
+    };
+    let external: Option<&dyn dynamics::ExternalPotential> =
+        tunnel.as_ref().map(|t| t as &dyn dynamics::ExternalPotential);
+
+    eprintln!(
+        "origami cotranslate: {} residues, interval={} fs, dt={} fs, T={} K, γ={} ps⁻¹{}",
+        sequence.len(),
+        interval_fs,
+        dt_fs,
+        temperature_k,
+        friction_ps_inv,
+        if with_tunnel {
+            format!(
+                ", tunnel(R={} Å L={} Å)",
+                tunnel_radius_a, tunnel_length_a
+            )
+        } else {
+            String::new()
+        },
+    );
+
+    let tail_steps = (tail_fs / dt_fs).round() as usize;
+    let mut frames: Vec<geom::Structure> = Vec::new();
+    let mut last_residue = 0usize;
+    let final_struct = run_cotranslate(&ribosome, ff, opts, tail_steps, external, |frame| {
+        if frame.residue_count != last_residue {
+            eprintln!(
+                "  residue {:>2}/{:<2} appended at t={:>8.1} fs (chain has {} atoms)",
+                frame.residue_count,
+                sequence.len(),
+                frame.time_fs,
+                frame.structure.atom_count(),
+            );
+            last_residue = frame.residue_count;
+        }
+        frames.push(frame.structure.clone());
+    });
+
+    let title = format!(
+        "Cotranslate seq={} interval={}fs dt={}fs T={}K{}",
+        seq_str,
+        interval_fs,
+        dt_fs,
+        temperature_k,
+        if with_tunnel { " +tunnel" } else { "" }
+    );
+    let mut out = fs::File::create(output_traj)
+        .with_context(|| format!("creating {}", output_traj.display()))?;
+    write_pdb_trajectory(&mut out, &title, frames.iter()).context("writing trajectory PDB")?;
+    eprintln!(
+        "wrote {} frames → {} (final: {} residues, {} atoms)",
+        frames.len(),
+        output_traj.display(),
+        final_struct.residues.len(),
+        final_struct.atom_count(),
     );
     Ok(())
 }

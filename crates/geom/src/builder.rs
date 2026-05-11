@@ -62,11 +62,30 @@ pub fn build_chain(
         return Err(BuildError::Empty);
     }
     let mut structure = Structure::new();
-    for (idx, &aa) in sequence.iter().enumerate() {
-        let residue = build_residue(&structure, idx, aa, phi, psi, omega)?;
-        structure.residues.push(residue);
+    for &aa in sequence {
+        append_residue(&mut structure, aa, phi, psi, omega)?;
     }
     Ok(structure)
+}
+
+/// Append one residue to the C-terminus of an existing structure using
+/// the standard NeRF chain-extension geometry. This is the building
+/// block for co-translational growth (M6) — a `Ribosome` scheduler calls
+/// it once per emitted residue and the integrator picks up the new atoms
+/// without re-initialising the whole structure.
+///
+/// On the first residue (empty structure), seeds the chain at the origin.
+pub fn append_residue(
+    structure: &mut Structure,
+    aa: AminoAcid,
+    phi: f64,
+    psi: f64,
+    omega: f64,
+) -> Result<(), BuildError> {
+    let idx = structure.residues.len();
+    let residue = build_residue(structure, idx, aa, phi, psi, omega)?;
+    structure.residues.push(residue);
+    Ok(())
 }
 
 fn build_residue(
