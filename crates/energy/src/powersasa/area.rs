@@ -90,8 +90,7 @@ fn bounded_area(
     // is bounded by the per-atom sphere area instead of "zero out a
     // valid atom". A proper half-edge face-traversal (tracked as
     // PSA.1h-followup) would resolve both directions cleanly.
-    let _ = vertices; // walker variant kept around for diagnostics
-    let l = count_boundary_loops_graph(arcs);
+    let l = count_boundary_loops_face_walk(arcs, caps);
     if l == 0 {
         return 0.0;
     }
@@ -113,10 +112,94 @@ fn bounded_area(
     area.clamp(0.0, four_pi_r2)
 }
 
+/// Loop count via half-edge-style face walking. At each vertex, when
+/// multiple arcs continue the boundary, we pick the one whose outgoing
+/// tangent is the immediate CCW successor of the incoming arc's tangent
+/// (right-turn around the vertex's outward normal), so 3+-way vertex
+/// concurrencies are disambiguated by local geometry rather than by
+/// arbitrary list order.
+///
+/// For each arc, the next arc is determined as:
+///   1. Match start position to current end position (within tolerance).
+///   2. Among matches, pick the one whose tangent at the vertex has the
+///      smallest positive CCW angle from the incoming tangent.
+///
+/// Two-way vertices have exactly one match and behave identically to a
+/// simple positional walker.
+fn count_boundary_loops_face_walk(arcs: &[BoundaryArc], caps: &[SmallCircle]) -> usize {
+    let n = arcs.len();
+    let mut visited = vec![false; n];
+    let mut loops = 0usize;
+    let eps_sq = 1e-10;
+    let two_pi = 2.0 * std::f64::consts::PI;
+
+    for start in 0..n {
+        if visited[start] {
+            continue;
+        }
+        if arcs[start].is_full_circle {
+            visited[start] = true;
+            loops += 1;
+            continue;
+        }
+        let mut current = start;
+        loop {
+            visited[current] = true;
+            let end_pt = arcs[current].end;
+            let in_cap_axis = caps[arcs[current].cap_idx].axis;
+            // Tangent at `end_pt` for the incoming arc. Our arcs go CW
+            // around the cap axis (θ negative), so the tangent of motion
+            // at any point p on the cap circle is p × ω_cap.
+            let t_in = end_pt.cross(&in_cap_axis).normalize();
+
+            let candidates: Vec<usize> = (0..n)
+                .filter(|&i| {
+                    !visited[i]
+                        && !arcs[i].is_full_circle
+                        && (arcs[i].start - end_pt).norm_squared() < eps_sq
+                })
+                .collect();
+            let next = match candidates.len() {
+                0 => None,
+                1 => Some(candidates[0]),
+                _ => {
+                    // Pick by tangent angle: smallest CCW angle from t_in
+                    // to t_out, measured around the outward normal end_pt.
+                    let mut best = candidates[0];
+                    let mut best_angle = f64::INFINITY;
+                    for &c in &candidates {
+                        let out_cap_axis = caps[arcs[c].cap_idx].axis;
+                        let t_out = end_pt.cross(&out_cap_axis).normalize();
+                        let dot = t_in.dot(&t_out).clamp(-1.0, 1.0);
+                        let cross = t_in.cross(&t_out);
+                        let signed = end_pt.dot(&cross);
+                        let mut angle = signed.atan2(dot);
+                        if angle <= 1e-9 {
+                            angle += two_pi;
+                        }
+                        if angle < best_angle {
+                            best_angle = angle;
+                            best = c;
+                        }
+                    }
+                    Some(best)
+                }
+            };
+            match next {
+                Some(j) => current = j,
+                None => break,
+            }
+        }
+        loops += 1;
+    }
+    loops
+}
+
 /// Loop count via graph connectivity over arc-endpoints. Treats every arc
 /// as an undirected edge between its start and end vertex points (with
 /// vertices identified by position). Each connected component of the
 /// resulting graph is one loop. Mis-fuses loops that share a vertex.
+#[allow(dead_code)]
 fn count_boundary_loops_graph(arcs: &[BoundaryArc]) -> usize {
     let mut full_circle_loops = 0usize;
     let mut vertex_points: Vec<Vec3> = Vec::new();
