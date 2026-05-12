@@ -113,12 +113,18 @@ mod tests {
             let q2 = frozen_charges[i] * frozen_charges[i];
             self_e += prefactor_kj * q2 / frozen_radii[i];
         }
+        // The reference energy honours the same GB cutoff the force
+        // code uses (see forces_gb::GB_DEFAULT_CUTOFF_A); otherwise
+        // numeric vs analytical gradients would differ by the
+        // truncated long-range tail.
+        let gb_cutoff_sq = DEFAULT_CUTOFF_A * DEFAULT_CUTOFF_A;
         let mut pair_e = 0.0;
         for i in 0..n {
             for j in (i + 1)..n {
                 let qq = frozen_charges[i] * frozen_charges[j];
                 if qq == 0.0 { continue; }
                 let r2 = (positions[i] - positions[j]).norm_squared();
+                if r2 > gb_cutoff_sq { continue; }
                 let rprod = frozen_radii[i] * frozen_radii[j];
                 let f_gb = (r2 + rprod * (-r2 / (4.0 * rprod)).exp()).sqrt();
                 pair_e += 2.0 * prefactor_kj * qq / f_gb;
