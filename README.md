@@ -71,36 +71,38 @@ LJ + Coulomb + GB (no hydrophobic forces) over 500 ps:
 ![Simulated chignolin at 160 ps (1.82 Å RMSD vs native)](docs/images/chignolin_folded_160ps.png)
 ![Native chignolin (1UAO)](docs/images/chignolin_native.png)
 
-Adding the analytical hydrophobic-SASA forces (PSA.2) drives faster
-collapse — the chain reaches a near-fold by ~32 ps and a 2.82 Å Cα
-minimum at 64 ps:
+Adding the analytical hydrophobic-SASA forces (PSA.2) accelerates
+collapse. A γ-scaling sweep on the same starting structure and seed
+shows the trade-off:
 
-| frame (× 4 ps) | Cα RMSD vs 1UAO native |
-|---:|---|
-| 0 (start) | 8.76 Å |
-| 6 (24 ps) | 5.35 Å |
-| 8 (32 ps) | 3.57 Å |
-| 15 (60 ps) | 2.99 Å |
-| **16 (64 ps)** | **2.82 Å** (min) |
-| 30–35 (120–140 ps) | hovers around 3.05–3.21 Å |
-
-![SASA-driven fold at 64 ps (2.82 Å)](docs/images/chignolin_sasa_folded_64ps.png)
+| γ scale | Min Cα RMSD vs 1UAO | Time to min | Sim length |
+|---:|---:|---:|---:|
+| 0.0 (no SASA) | **1.82 Å** | 160 ps | 500 ps |
+| 0.25 | 2.04 Å | 100 ps | 200 ps |
+| 0.5 | 2.37 Å | 48 ps | 200 ps |
+| 1.0 (full literature γ) | 2.82 Å | 64 ps | 200 ps |
 
 Full RMSD traces:
 [no-SASA](docs/data/chignolin_rmsd.tsv) ·
-[with SASA](docs/data/chignolin_sasa_rmsd.tsv).
+[γ=0.25](docs/data/chignolin_sasa_g025_rmsd.tsv) ·
+[γ=0.5](docs/data/chignolin_sasa_g050_rmsd.tsv) ·
+[γ=1.0](docs/data/chignolin_sasa_rmsd.tsv).
 
-SASA collapses the chain faster (~2× faster onset of compaction) but
-locks into a slightly less tight minimum than the LJ+GB-only run.
-This is consistent with the well-known tendency of implicit-solvent
-hydrophobic terms to over-stabilise compact states — a "molten
-globule" trap that's hard to escape on short trajectories. Tuning the
-γ parameter or running much longer trajectories would let the chain
-relax further.
+Lower γ → tighter native fit (less molten-globule lock-in). The
+γ=0.25 fold at 100 ps:
 
-Either way: the central hypothesis — that hand-built physics produces
-reasonable folds without ML priors — is at least true for the
-smallest known fold, both with and without hydrophobic forces.
+![γ=0.25 SASA fold at 100 ps (2.04 Å)](docs/images/chignolin_sasa_g025_100ps.png)
+
+The sweet spot looks like γ ∈ [0.25, 0.5]: enough hydrophobic drive
+to compact the chain ~2× faster than LJ+GB-only, without
+over-stabilising the first compact state it finds. The literature γ
+of 5 cal/mol/Å² (our γ=1.0 baseline) appears to be too aggressive
+for our combined CHARMM36 + OBC-GB force field. Tunable via the
+`ORIGAMI_SASA_GAMMA_SCALE` environment variable.
+
+Either way: the central hypothesis — that hand-built physics
+produces reasonable folds without ML priors — is at least true for
+the smallest known fold, both with and without hydrophobic forces.
 
 ## Status
 

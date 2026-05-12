@@ -450,10 +450,18 @@ pub fn add_sasa_forces_analytical(
         }
     }
     // Per-element surface tension γ in kJ/mol/Å² (matches the numerical
-    // implementation in forces_sasa).
+    // implementation in forces_sasa). Optional multiplicative scale
+    // from the `ORIGAMI_SASA_GAMMA_SCALE` env var (default 1.0) lets us
+    // probe the hydrophobic-strength axis without recompiling — useful
+    // for sweeping γ to test whether the molten-globule trap goes away
+    // at weaker coupling.
+    let gamma_scale = std::env::var("ORIGAMI_SASA_GAMMA_SCALE")
+        .ok()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(1.0);
     let gamma: Vec<f64> = elements
         .iter()
-        .map(|&e| crate::units::kcal_to_kj(super::surface_tension_kcal(e)))
+        .map(|&e| crate::units::kcal_to_kj(super::surface_tension_kcal(e)) * gamma_scale)
         .collect();
     // Neighbour lists from the unperturbed configuration.
     let mut neighbour_idx: Vec<Vec<usize>> = vec![Vec::new(); n];
