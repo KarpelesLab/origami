@@ -104,6 +104,23 @@ Either way: the central hypothesis — that hand-built physics
 produces reasonable folds without ML priors — is at least true for
 the smallest known fold, both with and without hydrophobic forces.
 
+**Trp-cage fold trial.** Same setup on the 20-residue Trp-cage
+(NLYIQWLKDGGPSSGRPPPS, starting Cα RMSD 16.66 Å vs the 1L2Y NMR
+structure), 300 ps Langevin at γ=0.25. The chain compacts steadily
+from 16.66 Å → 4.20 Å (frame 35 / 210 ps) and stabilises in a
+~4.2 Å plateau through to 300 ps:
+
+![Trp-cage molten globule at 210 ps (4.20 Å)](docs/images/trpcage_sasa_g025_210ps.png)
+
+Trace: [docs/data/trpcage_sasa_g025_rmsd.tsv](docs/data/trpcage_sasa_g025_rmsd.tsv).
+
+Not the native fold — Trp-cage folds in ~5 μs experimentally, and
+our 300 ps run is ~16 000× short of that — but a clear hydrophobic
+collapse to a compact molten globule. The chain didn't diverge,
+didn't get stuck extended, and didn't blow through the native basin.
+To reach the actual 1L2Y fold would need a much longer trajectory
+(milliseconds of simulated time, or replica exchange).
+
 ## Status
 
 Done so far: translation (M1), all-atom chain building (M2), energy evaluation
