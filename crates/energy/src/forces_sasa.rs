@@ -27,8 +27,22 @@ const SASA_FORCE_STEP_A: f64 = 1.0e-4;
 
 /// Add `F_k = −∂E_SASA/∂r_k` to `forces` for every atom.
 ///
+/// Delegates to the analytical Klenin §3 derivatives by default — they
+/// match central differences to machine precision and run two to three
+/// orders of magnitude faster (the central-difference scheme rebuilds
+/// the boundary topology per perturbation; the analytical scheme builds
+/// it once per atom).
+///
 /// `forces` length must equal `structure.atom_count()`.
-pub fn add_sasa_forces(structure: &Structure, _ff: &ForceField, forces: &mut [Vec3]) {
+pub fn add_sasa_forces(structure: &Structure, ff: &ForceField, forces: &mut [Vec3]) {
+    crate::powersasa::analytical::add_sasa_forces_analytical(structure, ff, forces);
+}
+
+/// Numerical (central-difference) SASA force evaluation. Kept as the
+/// reference baseline for cross-validation; the production code path
+/// is `add_sasa_forces` which goes through the analytical pipeline.
+#[allow(dead_code)]
+pub fn add_sasa_forces_numerical(structure: &Structure, _ff: &ForceField, forces: &mut [Vec3]) {
     let n = structure.atom_count();
     assert_eq!(forces.len(), n);
     let mut positions: Vec<Vec3> = Vec::with_capacity(n);

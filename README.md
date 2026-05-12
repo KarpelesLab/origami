@@ -95,17 +95,17 @@ Langevin dynamics from the Trp-cage native conformation keeps Cα RMSD under
 1 Å.
 
 Performance benchmarks (release build, single-core Apple Silicon):
-- Trp-cage (300 atoms): 527 fs/s (≈ 45 ns/day)
-- Chignolin (134 atoms): 2 165 fs/s (≈ 187 ns/day)
-- Force-term breakdown on Trp-cage (1.9 ms/step total, no SASA):
+- Trp-cage (300 atoms), no SASA: **527 fs/s** (≈ 45 ns/day)
+- Trp-cage, **with** analytical SASA: **30 fs/s** (≈ 2.6 ns/day)
+- Chignolin (134 atoms), no SASA: 2 165 fs/s (≈ 187 ns/day)
+- Force-term breakdown on Trp-cage (1.9 ms/step without SASA):
   nonbonded LJ+Coulomb 1.07 ms (56 %), GB 0.75 ms (39 %), all bonded
-  terms together 0.06 ms (3 %).
-- Adding numerical SASA forces raises step cost by ~5 000× —
-  analytical Klenin §3 derivatives (PSA.2-followup) are the next
-  optimisation lever before SIMD / GPU.
+  terms together 0.06 ms (3 %), analytical SASA 31 ms when enabled.
+- Numerical-vs-analytical SASA force: 10 048 ms → 31 ms per step
+  (325× speedup, max numerical-vs-analytical agreement 4.5×10⁻⁹).
 
-Up next: analytical SASA derivatives, then SIMD / vectorisation of the
-two O(N²) pair-sum kernels, then larger folds and longer trajectories.
+Up next: SoA / SIMD on the two O(N²) pair-sum kernels, GB cell-list
+cutoff, then larger folds and longer trajectories.
 
 ## Build
 

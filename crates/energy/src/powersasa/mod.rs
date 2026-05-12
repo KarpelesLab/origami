@@ -5,6 +5,7 @@
 //! M3g, providing smooth analytical derivatives needed by M4 minimisation
 //! and M5 dynamics.
 
+pub mod analytical;
 pub mod arrangement;
 pub mod area;
 pub mod derivatives;

@@ -90,7 +90,7 @@ fn main() {
         forces.iter_mut().for_each(|f| *f = Vec3::zeros());
         add_gb_forces(&s, ff, &mut forces);
     });
-    timeit("SASA force (numerical)", (n_iter / 20).max(1), || {
+    timeit("SASA force (analytical)", (n_iter / 20).max(1), || {
         forces.iter_mut().for_each(|f| *f = Vec3::zeros());
         add_sasa_forces(&s, ff, &mut forces);
     });
