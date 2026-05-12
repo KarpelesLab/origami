@@ -158,13 +158,25 @@ pub fn build_atom_cache(
         })
         .collect();
 
-    // Link arcs to their start/end vertices by position matching. The
-    // `find_boundary` output stores `vertices[arc_idx]` as the vertex
-    // at arc i's END, so end_vertex_local = arc index. For the START,
-    // we search for the vertex whose point is closest to `arc.start`.
+    // Link arcs to their start/end vertices. `find_boundary` pushes
+    // arcs and vertices in lock-step ONLY for vertexed arcs (full-circle
+    // arcs append to `arcs` without appending to `vertices`), so the
+    // arc index ≠ vertex index in the mixed-population case.
+    //
+    // We compute the end vertex by scanning vertices for the one whose
+    // point matches `arc.end`, and same for `arc.start`. Robust to any
+    // ordering find_boundary chooses to emit.
     let eps_sq = 1e-10;
+    let find_vertex_at = |target: Vec3| -> usize {
+        vertices_raw
+            .iter()
+            .enumerate()
+            .find(|(_, v)| (v.point - target).norm_squared() < eps_sq)
+            .map(|(idx, _)| idx)
+            .unwrap_or(usize::MAX)
+    };
     let mut cached_arcs: Vec<CachedArc> = Vec::with_capacity(arcs_raw.len());
-    for (i, arc) in arcs_raw.iter().enumerate() {
+    for arc in arcs_raw.iter() {
         if arc.is_full_circle {
             cached_arcs.push(CachedArc {
                 cap_local: arc.cap_idx,
@@ -175,14 +187,8 @@ pub fn build_atom_cache(
             });
             continue;
         }
-        let end_v_local = i;
-        // Find start vertex: the vertex whose point matches arc.start.
-        let start_v_local = vertices_raw
-            .iter()
-            .enumerate()
-            .find(|(_, v)| (v.point - arc.start).norm_squared() < eps_sq)
-            .map(|(idx, _)| idx)
-            .unwrap_or(usize::MAX);
+        let start_v_local = find_vertex_at(arc.start);
+        let end_v_local = find_vertex_at(arc.end);
         cached_arcs.push(CachedArc {
             cap_local: arc.cap_idx,
             start_vertex_local: start_v_local,
@@ -345,8 +351,16 @@ fn directional_area_derivative(
             continue;
         }
 
-        // Vertexed arc. Identify the "other" cap at each endpoint and
-        // the corresponding sign.
+        // Defensive: if vertex linking failed during cache construction
+        // (rare with degenerate boundaries), treat θ as fixed and emit
+        // only the dcos term. Better to drop a small contribution than
+        // to panic mid-simulation.
+        if arc.start_vertex_local >= cache.vertices.len()
+            || arc.end_vertex_local >= cache.vertices.len()
+        {
+            sum_arc += arc.theta * dcos;
+            continue;
+        }
         let vs = cache.vertices[arc.start_vertex_local];
         let ve = cache.vertices[arc.end_vertex_local];
 
