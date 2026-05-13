@@ -4,11 +4,15 @@ pub mod measure;
 pub mod neighbours;
 pub mod nerf;
 pub mod rmsd;
+pub mod secondary_structure;
 pub mod structure;
 pub mod topology_graph;
 
 pub use analysis::{
     contact_map_ca, end_to_end_ca, radius_of_gyration_ca, radius_of_gyration_points,
+};
+pub use secondary_structure::{
+    classify as classify_phi_psi, phi, psi, secondary_structure_string, ss_counts, SsType,
 };
 pub use builder::{
     append_residue, build_chain, build_extended_chain, BuildError, DEFAULT_OMEGA, DEFAULT_PHI,

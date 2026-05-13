@@ -825,7 +825,7 @@ fn run_analyze(
     };
     writeln!(
         sink,
-        "# frame\trmsd_ca_A\trg_ca_A\tend_to_end_A\tn_residues\tn_atoms"
+        "# frame\trmsd_ca_A\trg_ca_A\tend_to_end_A\tn_residues\tn_atoms\tpct_helix\tpct_strand\tss_string"
     )?;
     let mut min_rmsd: f64 = f64::INFINITY;
     let mut min_rmsd_idx: usize = 0;
@@ -847,15 +847,32 @@ fn run_analyze(
         let rmsd_s = rmsd.map(|v| format!("{v:.3}")).unwrap_or_else(|| "NaN".into());
         let rg_s = rg.map(|v| format!("{v:.3}")).unwrap_or_else(|| "NaN".into());
         let e2e_s = e2e.map(|v| format!("{v:.3}")).unwrap_or_else(|| "NaN".into());
+        // Ramachandran-region secondary structure (H / E / C).
+        let ss_string = geom::secondary_structure_string(frame);
+        let n_res = frame.residues.len();
+        let (n_h, n_e, _n_c) = geom::ss_counts(frame);
+        let pct_helix = if n_res > 0 {
+            100.0 * n_h as f64 / n_res as f64
+        } else {
+            0.0
+        };
+        let pct_strand = if n_res > 0 {
+            100.0 * n_e as f64 / n_res as f64
+        } else {
+            0.0
+        };
         writeln!(
             sink,
-            "{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{:.1}\t{:.1}\t{}",
             idx,
             rmsd_s,
             rg_s,
             e2e_s,
-            frame.residues.len(),
-            frame.atom_count()
+            n_res,
+            frame.atom_count(),
+            pct_helix,
+            pct_strand,
+            ss_string,
         )?;
     }
     let _ = last_rmsd;
