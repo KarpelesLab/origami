@@ -419,6 +419,7 @@ mod tests {
                     element: chem::Element::C,
                     position: Vec3::new(6.0, 0.0, 25.0),
                 }],
+                chain: 'A',
             }],
         };
         let mut forces = vec![Vec3::zeros(); 1];
@@ -440,6 +441,7 @@ mod tests {
                     element: chem::Element::C,
                     position: Vec3::new(2.0, 0.0, 40.0),
                 }],
+                chain: 'A',
             }],
         };
         let mut forces = vec![Vec3::zeros(); 1];

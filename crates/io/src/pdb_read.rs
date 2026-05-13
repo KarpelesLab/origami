@@ -39,7 +39,6 @@ pub fn read_pdb_trajectory<R: Read>(reader: R) -> Result<Vec<Structure>, PdbRead
     let buf = BufReader::new(reader);
     let mut frames: Vec<Structure> = Vec::new();
     let mut current: Vec<ParsedAtom> = Vec::new();
-    let mut chain_filter: Option<char> = None;
 
     for (lineno_zero, line) in buf.lines().enumerate() {
         let lineno = lineno_zero + 1;
@@ -48,7 +47,6 @@ pub fn read_pdb_trajectory<R: Read>(reader: R) -> Result<Vec<Structure>, PdbRead
         if line.starts_with("ENDMDL") {
             if !current.is_empty() {
                 frames.push(assemble_structure(std::mem::take(&mut current)));
-                chain_filter = None;
             }
             continue;
         }
@@ -63,7 +61,6 @@ pub fn read_pdb_trajectory<R: Read>(reader: R) -> Result<Vec<Structure>, PdbRead
             // MODEL block, flush them first.
             if !current.is_empty() {
                 frames.push(assemble_structure(std::mem::take(&mut current)));
-                chain_filter = None;
             }
             continue;
         }
@@ -75,13 +72,6 @@ pub fn read_pdb_trajectory<R: Read>(reader: R) -> Result<Vec<Structure>, PdbRead
         }
 
         let rec = parse_atom_record(&line, lineno)?;
-        if let Some(filter) = chain_filter {
-            if rec.chain != filter {
-                continue;
-            }
-        } else {
-            chain_filter = Some(rec.chain);
-        }
         if rec.alt_loc != ' ' && rec.alt_loc != 'A' {
             continue;
         }
@@ -141,6 +131,7 @@ fn assemble_structure(parsed: Vec<ParsedAtom>) -> Structure {
             residues.push(PlacedResidue {
                 aa: p.aa,
                 atoms: Vec::new(),
+                chain: p.res_key.0,
             });
             current_key = Some(p.res_key);
         }
@@ -162,11 +153,11 @@ pub fn read_pdb<R: Read>(reader: R) -> Result<Structure, PdbReadError> {
         aa: AminoAcid,
         atoms: Vec<PlacedAtom>,
         atom_names_seen: BTreeMap<&'static str, ()>,
+        chain: char,
     }
     let mut residues: Vec<ResidueBuf> = Vec::new();
     // Track current key for grouping consecutive ATOMs of the same residue.
     let mut current: Option<(char, i32)> = None;
-    let mut chain_filter: Option<char> = None;
     let mut found_any = false;
 
     for (lineno_zero, line) in buf.lines().enumerate() {
@@ -186,21 +177,18 @@ pub fn read_pdb<R: Read>(reader: R) -> Result<Structure, PdbReadError> {
         if line.starts_with("MODEL") && !residues.is_empty() {
             break;
         }
-        if line.starts_with("TER") && !residues.is_empty() {
-            break;
+        // TER separates chains within a PDB (chain A's TER comes before
+        // chain B's ATOMs). Skip it but keep reading — multi-chain
+        // proteins like insulin (2HIU) need to capture chain B's atoms
+        // after chain A's TER.
+        if line.starts_with("TER") {
+            continue;
         }
         if !line.starts_with("ATOM") {
             continue;
         }
 
         let rec = parse_atom_record(&line, lineno)?;
-        if let Some(filter) = chain_filter {
-            if rec.chain != filter {
-                continue;
-            }
-        } else {
-            chain_filter = Some(rec.chain);
-        }
 
         // Only take the primary alternate location.
         if rec.alt_loc != ' ' && rec.alt_loc != 'A' {
@@ -236,7 +224,12 @@ pub fn read_pdb<R: Read>(reader: R) -> Result<Structure, PdbReadError> {
 
         let key = (rec.chain, rec.res_seq);
         if Some(key) != current {
-            residues.push(ResidueBuf { aa, atoms: Vec::new(), atom_names_seen: BTreeMap::new() });
+            residues.push(ResidueBuf {
+                aa,
+                atoms: Vec::new(),
+                atom_names_seen: BTreeMap::new(),
+                chain: rec.chain,
+            });
             current = Some(key);
         }
         let last = residues.last_mut().unwrap();
@@ -256,7 +249,7 @@ pub fn read_pdb<R: Read>(reader: R) -> Result<Structure, PdbReadError> {
 
     let placed: Vec<PlacedResidue> = residues
         .into_iter()
-        .map(|r| PlacedResidue { aa: r.aa, atoms: r.atoms })
+        .map(|r| PlacedResidue { aa: r.aa, atoms: r.atoms, chain: r.chain })
         .collect();
 
     Ok(Structure { residues: placed })

@@ -486,6 +486,7 @@ mod tests {
                     PlacedAtom { name: "N", element: Element::N, position: Vec3::zeros() },
                     PlacedAtom { name: "CA", element: Element::C, position: Vec3::new(r0, 0.0, 0.0) },
                 ],
+                chain: 'A',
             }],
         };
         let g = build_topology_graph(&s);

@@ -70,7 +70,24 @@ fn write_atoms_and_ter<W: Write>(
     starting_serial: u32,
 ) -> io::Result<()> {
     let mut serial = starting_serial;
+    let mut prev_chain: Option<char> = None;
     for (res_idx, residue) in structure.residues.iter().enumerate() {
+        // Emit a TER record when crossing a chain boundary so the
+        // reader doesn't auto-fuse the previous chain's last residue
+        // to the next chain's first residue with a phantom peptide
+        // bond (insulin needs this — A21's C must not bond to B1's N).
+        if let Some(prev) = prev_chain {
+            if prev != residue.chain {
+                writeln!(
+                    writer,
+                    "TER   {:>5}      {:>3} {chain}{res_seq:>4}",
+                    serial,
+                    "",
+                    chain = prev,
+                    res_seq = res_idx as u32,
+                )?;
+            }
+        }
         let res_seq = (res_idx + 1) as u32;
         let res_name = residue.aa.three_letter().to_uppercase();
         for atom in &residue.atoms {
@@ -79,7 +96,7 @@ fn write_atoms_and_ter<W: Write>(
                 serial,
                 atom.name,
                 &res_name,
-                'A',
+                residue.chain,
                 res_seq,
                 atom.position.x,
                 atom.position.y,
@@ -88,14 +105,18 @@ fn write_atoms_and_ter<W: Write>(
             )?;
             serial += 1;
         }
+        prev_chain = Some(residue.chain);
     }
     if let Some(last) = structure.residues.last() {
         let res_seq = structure.residues.len() as u32;
         let res_name = last.aa.three_letter().to_uppercase();
         writeln!(
             writer,
-            "TER   {:>5}      {:>3} A{:>4}",
-            serial, res_name, res_seq
+            "TER   {:>5}      {:>3} {chain}{res_seq:>4}",
+            serial,
+            res_name,
+            chain = last.chain,
+            res_seq = res_seq,
         )?;
     }
     Ok(())

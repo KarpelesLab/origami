@@ -162,6 +162,19 @@ without the S-S bonds the chain would unfold. The six yellow sulfurs
 
 ![Crambin native (PDB 1CRN), 3 disulfide bridges](docs/images/crambin_native.png)
 
+**Multi-chain proteins.** Insulin (PDB 2HIU, 51 residues across chains
+A and B) is the smallest standard test for multi-chain support. The
+two-chain `Structure` representation, chain-aware PDB I/O, and the
+two-chain-aware peptide-bond auto-detection all ship in
+`crates/io/tests/fixtures/2HIU_insulin.pdb`. Disulfide detection is
+purely geometric, so the two inter-chain bridges (A7-B7 and A20-B19)
+fall out of the same logic that catches crambin's intra-chain
+disulfides. The yellow sulfurs split into three pairs:
+
+![Insulin (PDB 2HIU), chains A+B linked by 3 disulfide bridges](docs/images/insulin_native.png)
+
+A 1 ps native MD test asserts Cα RMSD stays under 1 Å.
+
 ## Status
 
 Done so far: translation (M1), all-atom chain building (M2), energy evaluation

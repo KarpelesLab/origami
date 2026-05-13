@@ -13,6 +13,13 @@ pub struct PlacedAtom {
 pub struct PlacedResidue {
     pub aa: AminoAcid,
     pub atoms: Vec<PlacedAtom>,
+    /// Chain identifier from the source PDB (single ASCII byte), or
+    /// `'A'` by default for synthesised single-chain structures. Used
+    /// by `geom::topology_graph::build_topology_graph` to skip the
+    /// peptide-bond auto-detection at chain boundaries so multi-chain
+    /// proteins (insulin, antibodies) don't get a phantom C(i-1)–N(i)
+    /// bond across the chain break.
+    pub chain: char,
 }
 
 impl PlacedResidue {

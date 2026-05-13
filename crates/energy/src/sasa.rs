@@ -212,6 +212,7 @@ mod tests {
                     element: Element::C,
                     position: Vec3::zeros(),
                 }],
+                chain: 'A',
             }],
         };
         let ff = standard_ff();
@@ -232,6 +233,7 @@ mod tests {
                     PlacedAtom { name: "CB", element: Element::C, position: Vec3::zeros() },
                     PlacedAtom { name: "CG", element: Element::C, position: Vec3::new(0.5, 0.0, 0.0) },
                 ],
+                chain: 'A',
             }],
         };
         let ff = standard_ff();
@@ -250,6 +252,7 @@ mod tests {
                     PlacedAtom { name: "CB", element: Element::C, position: Vec3::zeros() },
                     PlacedAtom { name: "CG", element: Element::C, position: Vec3::new(50.0, 0.0, 0.0) },
                 ],
+                chain: 'A',
             }],
         };
         let ff = standard_ff();

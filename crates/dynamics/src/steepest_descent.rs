@@ -145,6 +145,7 @@ mod tests {
                     PlacedAtom { name: "N", element: Element::N, position: Vec3::zeros() },
                     PlacedAtom { name: "CA", element: Element::C, position: Vec3::new(1.7, 0.0, 0.0) },
                 ],
+                chain: 'A',
             }],
         };
         let mut s = s;

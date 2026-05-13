@@ -196,6 +196,7 @@ mod tests {
                     element: Element::C,
                     position: Vec3::zeros(),
                 }],
+                chain: 'A',
             }],
         };
         let ff = standard_ff();

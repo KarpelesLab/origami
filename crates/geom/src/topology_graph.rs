@@ -184,7 +184,12 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
         }
 
         // ---- Inter-residue peptide bond C(i-1) -- N(i) ----
-        if ri > 0 {
+        // Only auto-bond within the same chain. Multi-chain proteins
+        // (insulin, antibodies) have a TER record between chains in
+        // the PDB; without this check the last residue of chain A
+        // would get a phantom peptide bond to the first residue of
+        // chain B, which would distort everything downstream.
+        if ri > 0 && structure.residues[ri - 1].chain == res.chain {
             let prev_c = lookup(ri - 1, "C");
             if let (Some(prev_c), Some(n)) = (prev_c, n) {
                 add_bond(&mut bonds, prev_c, n);
