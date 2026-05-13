@@ -165,6 +165,48 @@ didn't get stuck extended, and didn't blow through the native basin.
 To reach the actual 1L2Y fold would need a much longer trajectory
 (milliseconds of simulated time, or replica exchange).
 
+**REMD on Trp-cage: 3.31 Å min, native-like basin populated 64 % of
+the time.** 8 replicas at 280–388 K, geometric ladder, 2 ns per
+replica, dt = 2 fs + SHAKE, no SASA. 1.43 Å on chignolin set the
+methodology; running it on Trp-cage from the same minimised
+extended chain gives:
+
+  • <5.0 Å Cα RMSD vs 1L2Y native at **70 ps**
+  • <4.0 Å at **86 ps**
+  • <3.5 Å at **97 ps**
+  • global minimum **3.31 Å at 508 ps**
+
+Clustering the production trajectory at a 2 Å Cα-RMSD single-
+linkage cutoff finds the chain spends:
+
+  • 64 % of frames in cluster 0 (medoid 4.03 Å vs native — the
+    native-like basin)
+  • 23 % in cluster 1 (medoid 6.71 Å — a competing more-extended
+    basin)
+  • 10 % in cluster 2 (medoid 5.97 Å — a third basin)
+
+Swap acceptance ratios across the 7 adjacent pairs: 0.41 – 0.48
+(geometric ladder factor ≈ 1.045 vs the 1.05 we used on chignolin —
+Trp-cage's larger heat capacity narrows the optimal spacing).
+
+![Trp-cage REMD: 8-replica parallel-tempered fold trajectory](docs/animations/trpcage_remd.gif)
+
+Cluster-0 medoid (the dominant native-like fold the chain spent
+~64 % of the run in):
+
+![Trp-cage REMD cluster-0 medoid (4.03 Å vs 1L2Y native)](docs/images/trpcage_remd_basin.png)
+
+[Trajectory MP4](docs/animations/trpcage_remd.mp4) ·
+[RMSD trace](docs/data/trpcage_remd_rmsd.tsv) ·
+[Cluster-0 medoid PDB](docs/data/trpcage_remd_cluster0_medoid.pdb).
+Still 60-65 % short of the native 1 Å basin — Trp-cage's
+microsecond fold time is past what this ladder + 2 ns reaches —
+but the chain *is* sampling the native basin (the 3.31 Å minimum
+implies brief excursions into it), and the structure of the time
+distribution (64/23/10 % across three basins) is exactly what we'd
+expect from a sampling that's exploring conformational space rather
+than getting trapped.
+
 **Disulfide bonds.** Crambin (PDB 1CRN, 46 residues, plant peptide)
 ships under `crates/io/tests/fixtures/1CRN_crambin.pdb` to exercise
 the S-S detection path. `geom::build_topology_graph` finds all three
