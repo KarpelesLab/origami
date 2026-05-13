@@ -36,6 +36,7 @@ use chem::ForceField;
 use energy::{bonded::bonded_energy, gb_energy, nonbonded_energy, DEFAULT_CUTOFF_A};
 use energy::{total_force_with_scratch, ForceScratch};
 use geom::{Structure, TopologyGraph, Vec3};
+use rayon::prelude::*;
 
 use crate::langevin::{
     initialise_velocities_for_new_atoms, kinetic_energy_kj_mol, ACCEL_FACTOR,
@@ -153,7 +154,10 @@ where
     let total_steps = (opts.total_time_fs / opts.dt_fs).round() as usize;
     let n_swap_rounds = total_steps.div_ceil(steps_per_swap.max(1));
 
-    // Per-replica integrator state.
+    // Per-replica integrator state. Each replica owns everything it
+    // needs to run a BAOAB step independently, so `replicas
+    // .par_iter_mut()` is safe — no shared mutable state across
+    // replicas during the parallel-advance phase.
     struct Replica {
         structure: Structure,
         velocities: Vec<Vec3>,
@@ -167,6 +171,14 @@ where
         shake_failures: usize,
         time_fs: f64,
         step: usize,
+        // Per-replica position scratch (was shared/outer in the
+        // sequential version; needs to be per-replica for rayon
+        // to give each thread its own copy).
+        pos_buf: Vec<Vec3>,
+        ref_buf: Vec<Vec3>,
+        // Frames produced during a parallel advance, drained
+        // serially into the callback after the rayon scope closes.
+        pending_frames: Vec<(usize /* step */, f64 /* time_fs */, f64 /* T_inst */, Structure)>,
     }
 
     let constraints = if opts.constrain_h_bonds {
@@ -216,13 +228,11 @@ where
             shake_failures: 0,
             time_fs: 0.0,
             step: 0,
+            pos_buf: vec![Vec3::zeros(); n],
+            ref_buf: vec![Vec3::zeros(); n],
+            pending_frames: Vec::new(),
         });
     }
-
-    // Position scratch buffers shared across replicas (we only ever
-    // touch one replica at a time).
-    let mut pos_buf: Vec<Vec3> = vec![Vec3::zeros(); n];
-    let mut ref_buf: Vec<Vec3> = vec![Vec3::zeros(); n];
     const SHAKE_TOL_SQ: f64 = 1e-6;
     const SHAKE_MAX_ITERS: usize = 64;
 
@@ -266,15 +276,21 @@ where
             break;
         }
 
-        for (rep_idx, rep) in replicas.iter_mut().enumerate() {
+        // Parallel advance — every replica runs `step_range.len()`
+        // integrator steps with no cross-replica state shared, so
+        // rayon can hand each one to a different worker. The inner
+        // SoA nonbonded kernel also uses rayon for its own pair
+        // loop; under nested parallelism rayon's work-stealing
+        // scheduler is well-behaved (the inner par_iter just queues
+        // more work for whichever worker is free).
+        replicas.par_iter_mut().for_each(|rep| {
             if rep.diverged {
-                continue;
+                return;
             }
+            rep.pending_frames.clear();
             let alpha = (-opts.friction_ps_inv * opts.dt_fs * 1.0e-3).exp();
             let kbt = BOLTZMANN_KJ_PER_MOL_K * rep.temperature_k;
-            for local_step in step_range.clone() {
-                // Cheap rename for brevity inside the inner loop.
-                let _ = local_step;
+            for _local_step in step_range.clone() {
                 rep.step += 1;
                 let abs_step = rep.step;
 
@@ -285,14 +301,14 @@ where
                 }
                 // A (first half)
                 if use_shake {
-                    flatten_positions(&rep.structure, &mut ref_buf);
+                    flatten_positions(&rep.structure, &mut rep.ref_buf);
                 }
                 apply_velocity_step(&mut rep.structure, &rep.velocities, half_dt);
                 if use_shake {
-                    flatten_positions(&rep.structure, &mut pos_buf);
+                    flatten_positions(&rep.structure, &mut rep.pos_buf);
                     if shake::shake_iterate(
-                        &mut pos_buf,
-                        &ref_buf,
+                        &mut rep.pos_buf,
+                        &rep.ref_buf,
                         &rep.inv_masses,
                         &constraints,
                         SHAKE_TOL_SQ,
@@ -303,29 +319,36 @@ where
                         rep.shake_failures += 1;
                     }
                     for i in 0..n {
-                        rep.velocities[i] = (pos_buf[i] - ref_buf[i]) / half_dt;
+                        rep.velocities[i] = (rep.pos_buf[i] - rep.ref_buf[i]) / half_dt;
                     }
-                    unflatten_positions(&mut rep.structure, &pos_buf);
+                    unflatten_positions(&mut rep.structure, &rep.pos_buf);
                 }
                 // O
                 let one_minus_alpha2 = 1.0 - alpha * alpha;
                 for i in 0..n {
-                    let sigma =
-                        (one_minus_alpha2 * kbt * dof_correction * ACCEL_FACTOR / rep.masses[i]).sqrt();
-                    rep.velocities[i].x = alpha * rep.velocities[i].x + sigma * rep.rng.gaussian();
-                    rep.velocities[i].y = alpha * rep.velocities[i].y + sigma * rep.rng.gaussian();
-                    rep.velocities[i].z = alpha * rep.velocities[i].z + sigma * rep.rng.gaussian();
+                    let sigma = (one_minus_alpha2
+                        * kbt
+                        * dof_correction
+                        * ACCEL_FACTOR
+                        / rep.masses[i])
+                        .sqrt();
+                    rep.velocities[i].x =
+                        alpha * rep.velocities[i].x + sigma * rep.rng.gaussian();
+                    rep.velocities[i].y =
+                        alpha * rep.velocities[i].y + sigma * rep.rng.gaussian();
+                    rep.velocities[i].z =
+                        alpha * rep.velocities[i].z + sigma * rep.rng.gaussian();
                 }
                 // A (second half)
                 if use_shake {
-                    flatten_positions(&rep.structure, &mut ref_buf);
+                    flatten_positions(&rep.structure, &mut rep.ref_buf);
                 }
                 apply_velocity_step(&mut rep.structure, &rep.velocities, half_dt);
                 if use_shake {
-                    flatten_positions(&rep.structure, &mut pos_buf);
+                    flatten_positions(&rep.structure, &mut rep.pos_buf);
                     if shake::shake_iterate(
-                        &mut pos_buf,
-                        &ref_buf,
+                        &mut rep.pos_buf,
+                        &rep.ref_buf,
                         &rep.inv_masses,
                         &constraints,
                         SHAKE_TOL_SQ,
@@ -336,9 +359,9 @@ where
                         rep.shake_failures += 1;
                     }
                     for i in 0..n {
-                        rep.velocities[i] = (pos_buf[i] - ref_buf[i]) / half_dt;
+                        rep.velocities[i] = (rep.pos_buf[i] - rep.ref_buf[i]) / half_dt;
                     }
-                    unflatten_positions(&mut rep.structure, &pos_buf);
+                    unflatten_positions(&mut rep.structure, &rep.pos_buf);
                 }
                 // Recompute force at new positions.
                 total_force_with_scratch(
@@ -366,7 +389,7 @@ where
                 }
                 rep.time_fs += opts.dt_fs;
 
-                // Frame emit.
+                // Frame emit — buffered, dispatched serially below.
                 if opts.save_every > 0 && abs_step % opts.save_every == 0 {
                     let ke = kinetic_energy_kj_mol(&rep.velocities, &rep.masses);
                     let dof = (3 * n) as f64;
@@ -375,15 +398,26 @@ where
                     } else {
                         0.0
                     };
-                    callback(RemdFrame {
-                        replica_idx: rep_idx,
-                        temperature_k: rep.temperature_k,
-                        step: abs_step,
-                        time_fs: rep.time_fs,
-                        instantaneous_temperature_k: t_inst,
-                        structure: &rep.structure,
-                    });
+                    rep.pending_frames
+                        .push((abs_step, rep.time_fs, t_inst, rep.structure.clone()));
                 }
+            }
+        });
+
+        // Drain buffered frames into the caller's callback in replica
+        // order — the callback is `FnMut` so we can't call it from
+        // inside the parallel section.
+        for (rep_idx, rep) in replicas.iter_mut().enumerate() {
+            let frames = std::mem::take(&mut rep.pending_frames);
+            for (step, time_fs, t_inst, structure) in frames {
+                callback(RemdFrame {
+                    replica_idx: rep_idx,
+                    temperature_k: rep.temperature_k,
+                    step,
+                    time_fs,
+                    instantaneous_temperature_k: t_inst,
+                    structure: &structure,
+                });
             }
         }
 

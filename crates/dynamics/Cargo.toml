@@ -11,6 +11,7 @@ description = "Energy minimization and (later) molecular dynamics for origami."
 chem = { path = "../chem" }
 geom = { path = "../geom" }
 energy = { path = "../energy" }
+rayon.workspace = true
 
 [dev-dependencies]
 approx.workspace = true
