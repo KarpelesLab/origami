@@ -38,10 +38,10 @@ pub fn add_nonbonded_forces(
         for atom in &residue.atoms {
             positions.push(atom.position);
             atom_types.push(
-                classify(residue.aa, atom.name)
-                    .unwrap_or_else(|| panic!("unclassified atom {:?} {}", residue.aa, atom.name)),
+                classify(residue.aa(), atom.name)
+                    .unwrap_or_else(|| panic!("unclassified atom {:?} {}", residue.aa(), atom.name)),
             );
-            charges.push(ff.partial_charge(residue.aa, atom.name).unwrap_or(0.0));
+            charges.push(ff.partial_charge(residue.aa(), atom.name).unwrap_or(0.0));
         }
     }
 
@@ -368,7 +368,7 @@ mod tests {
         let dist = 2.0 * r_min_carbon;
         let s = Structure {
             residues: vec![PlacedResidue {
-                aa: AminoAcid::Ala,
+                monomer: geom::structure::Monomer::Protein(AminoAcid::Ala),
                 atoms: vec![
                     PlacedAtom { name: "CB", element: Element::C, position: Vec3::zeros() },
                     PlacedAtom { name: "C", element: Element::C, position: Vec3::new(dist, 0.0, 0.0) },

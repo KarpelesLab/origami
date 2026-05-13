@@ -28,7 +28,7 @@ fn main() {
             }
             atom_idx += 1;
         }
-        if r.aa == AminoAcid::Cys {
+        if r.monomer.as_amino_acid() == Some(AminoAcid::Cys) {
             sg_per_res.push((ri, sg));
         }
     }

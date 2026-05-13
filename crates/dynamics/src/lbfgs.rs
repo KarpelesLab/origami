@@ -276,7 +276,7 @@ mod tests {
     fn lbfgs_two_atoms_relax_to_equilibrium() {
         let s = Structure {
             residues: vec![PlacedResidue {
-                aa: AminoAcid::Ala,
+                monomer: geom::structure::Monomer::Protein(AminoAcid::Ala),
                 atoms: vec![
                     PlacedAtom { name: "N", element: Element::N, position: Vec3::zeros() },
                     PlacedAtom { name: "CA", element: Element::C, position: Vec3::new(1.7, 0.0, 0.0) },

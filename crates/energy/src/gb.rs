@@ -107,7 +107,7 @@ pub fn compute_born_inputs(structure: &Structure, ff: &ForceField) -> BornInputs
     for residue in &structure.residues {
         for atom in &residue.atoms {
             positions.push(atom.position);
-            charges.push(charge_for(ff, residue.aa, atom.name));
+            charges.push(charge_for(ff, residue.aa(), atom.name));
             let r = intrinsic_radius(atom.element);
             rho.push(r);
             rho_tilde.push(r - OBC_OFFSET);

@@ -140,7 +140,7 @@ mod tests {
         // Use the N-CA bond (NH1-CT1, r₀ = 1.430 Å). Start at 1.7 Å.
         let s = Structure {
             residues: vec![PlacedResidue {
-                aa: AminoAcid::Ala,
+                monomer: geom::structure::Monomer::Protein(AminoAcid::Ala),
                 atoms: vec![
                     PlacedAtom { name: "N", element: Element::N, position: Vec3::zeros() },
                     PlacedAtom { name: "CA", element: Element::C, position: Vec3::new(1.7, 0.0, 0.0) },

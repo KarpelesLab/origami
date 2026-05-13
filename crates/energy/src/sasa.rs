@@ -207,7 +207,7 @@ mod tests {
         // Single C atom in a "structure": its SASA should be ~4π(R+probe)².
         let s = Structure {
             residues: vec![PlacedResidue {
-                aa: AminoAcid::Ala,
+                monomer: geom::structure::Monomer::Protein(AminoAcid::Ala),
                 atoms: vec![PlacedAtom {
                     name: "CB",
                     element: Element::C,
@@ -229,7 +229,7 @@ mod tests {
         // outer sphere alone.
         let s = Structure {
             residues: vec![PlacedResidue {
-                aa: AminoAcid::Ala,
+                monomer: geom::structure::Monomer::Protein(AminoAcid::Ala),
                 atoms: vec![
                     PlacedAtom { name: "CB", element: Element::C, position: Vec3::zeros() },
                     PlacedAtom { name: "CG", element: Element::C, position: Vec3::new(0.5, 0.0, 0.0) },
@@ -248,7 +248,7 @@ mod tests {
     fn far_apart_atoms_sum_individually() {
         let s = Structure {
             residues: vec![PlacedResidue {
-                aa: AminoAcid::Ala,
+                monomer: geom::structure::Monomer::Protein(AminoAcid::Ala),
                 atoms: vec![
                     PlacedAtom { name: "CB", element: Element::C, position: Vec3::zeros() },
                     PlacedAtom { name: "CG", element: Element::C, position: Vec3::new(50.0, 0.0, 0.0) },

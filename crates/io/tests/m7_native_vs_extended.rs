@@ -28,7 +28,7 @@ fn read_fixture(path: &str) -> geom::Structure {
 
 fn assert_native_better(name: &str, native_path: &str, expected_seq: &str, min_gap_kj_mol: f64) {
     let native = read_fixture(native_path);
-    let seq: String = native.residues.iter().map(|r| r.aa.one_letter()).collect();
+    let seq: String = native.residues.iter().map(|r| r.aa().one_letter()).collect();
     assert_eq!(
         seq, expected_seq,
         "{name}: parsed sequence ({}) != expected ({})", seq, expected_seq
@@ -85,7 +85,7 @@ fn villin_hp35_native_beats_extended() {
     // the comparison is "native fold" vs "extended chain", not
     // "X-ray-reported coordinates" vs "extended chain".
     let mut native = read_fixture("tests/fixtures/2F4K_villin_hp35.pdb");
-    let seq: String = native.residues.iter().map(|r| r.aa.one_letter()).collect();
+    let seq: String = native.residues.iter().map(|r| r.aa().one_letter()).collect();
     eprintln!("villin HP35 fixture seq ({} aa): {}", seq.len(), seq);
     assert!(seq.len() >= 30, "expected ≥30 residues, got {}", seq.len());
 

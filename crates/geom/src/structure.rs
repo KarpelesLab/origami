@@ -1,4 +1,4 @@
-use chem::{AminoAcid, Element};
+use chem::{AminoAcid, Element, Nucleotide};
 
 use crate::Vec3;
 
@@ -9,9 +9,56 @@ pub struct PlacedAtom {
     pub position: Vec3,
 }
 
+/// What kind of polymer monomer a residue is. Currently protein amino
+/// acids and RNA ribonucleotides; the enum is the integration point
+/// for the long-horizon ribosome work — once full RNA dynamics is in
+/// place, a Structure can hold mixed chains (rRNA + ribosomal
+/// proteins) without changing the surrounding code.
+#[derive(Debug, Clone, Copy)]
+pub enum Monomer {
+    Protein(AminoAcid),
+    Rna(Nucleotide),
+}
+
+impl Monomer {
+    pub fn as_amino_acid(self) -> Option<AminoAcid> {
+        match self {
+            Self::Protein(a) => Some(a),
+            _ => None,
+        }
+    }
+    pub fn as_nucleotide(self) -> Option<Nucleotide> {
+        match self {
+            Self::Rna(n) => Some(n),
+            _ => None,
+        }
+    }
+    pub fn is_protein(self) -> bool {
+        matches!(self, Self::Protein(_))
+    }
+    pub fn is_rna(self) -> bool {
+        matches!(self, Self::Rna(_))
+    }
+}
+
+impl From<AminoAcid> for Monomer {
+    fn from(a: AminoAcid) -> Self {
+        Self::Protein(a)
+    }
+}
+impl From<Nucleotide> for Monomer {
+    fn from(n: Nucleotide) -> Self {
+        Self::Rna(n)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PlacedResidue {
-    pub aa: AminoAcid,
+    /// What polymer monomer this residue is (protein amino acid or
+    /// RNA ribonucleotide). The protein-oriented code paths reach in
+    /// via `aa()` which `.expect`s a protein residue; explicitly
+    /// RNA-aware code matches on `monomer` directly.
+    pub monomer: Monomer,
     pub atoms: Vec<PlacedAtom>,
     /// Chain identifier from the source PDB (single ASCII byte), or
     /// `'A'` by default for synthesised single-chain structures. Used
@@ -28,6 +75,24 @@ impl PlacedResidue {
             .iter()
             .find(|a| a.name == atom_name)
             .map(|a| a.position)
+    }
+
+    /// Returns the amino acid this residue carries. Panics if the
+    /// residue is an RNA nucleotide instead — the protein-only call
+    /// sites use this everywhere `residue.aa` was a field access
+    /// before the Monomer refactor; new code should pattern match on
+    /// `monomer` instead.
+    pub fn aa(&self) -> AminoAcid {
+        self.monomer
+            .as_amino_acid()
+            .expect("residue is not a protein amino acid")
+    }
+
+    /// Backward-compat for `residue.aa().three_letter()` etc. through
+    /// any path that doesn't need to handle nucleotides. New code can
+    /// use `monomer.as_amino_acid()` if it wants Option semantics.
+    pub fn nucleotide(&self) -> Option<Nucleotide> {
+        self.monomer.as_nucleotide()
     }
 }
 

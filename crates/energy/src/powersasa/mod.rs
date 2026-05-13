@@ -121,7 +121,7 @@ mod tests {
     fn isolated_carbon_full_sphere() {
         let s = Structure {
             residues: vec![PlacedResidue {
-                aa: AminoAcid::Ala,
+                monomer: geom::structure::Monomer::Protein(AminoAcid::Ala),
                 atoms: vec![PlacedAtom {
                     name: "CB",
                     element: Element::C,
@@ -142,7 +142,7 @@ mod tests {
         // Two C atoms 3 Å apart — caps overlap on each. Cross-check.
         let s = Structure {
             residues: vec![PlacedResidue {
-                aa: AminoAcid::Ala,
+                monomer: geom::structure::Monomer::Protein(AminoAcid::Ala),
                 atoms: vec![
                     PlacedAtom { name: "CB", element: Element::C, position: Vec3::zeros() },
                     PlacedAtom { name: "C", element: Element::C, position: Vec3::new(3.0, 0.0, 0.0) },

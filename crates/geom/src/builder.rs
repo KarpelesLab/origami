@@ -97,7 +97,11 @@ fn build_residue(
     omega: f64,
 ) -> Result<PlacedResidue, BuildError> {
     let topo = aa.topology();
-    let mut residue = PlacedResidue { aa, atoms: Vec::new(), chain: 'A' };
+    let mut residue = PlacedResidue {
+        monomer: crate::structure::Monomer::Protein(aa),
+        atoms: Vec::new(),
+        chain: 'A',
+    };
 
     // ---------------- Backbone ----------------
     let (n_pos, ca_pos, c_pos) = if idx == 0 {

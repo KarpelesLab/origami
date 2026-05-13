@@ -413,7 +413,7 @@ mod tests {
         };
         let s = Structure {
             residues: vec![geom::structure::PlacedResidue {
-                aa: AminoAcid::Ala,
+                monomer: geom::structure::Monomer::Protein(AminoAcid::Ala),
                 atoms: vec![geom::structure::PlacedAtom {
                     name: "CA",
                     element: chem::Element::C,
@@ -435,7 +435,7 @@ mod tests {
         let tunnel = CylindricalTunnel::default();
         let s = Structure {
             residues: vec![geom::structure::PlacedResidue {
-                aa: AminoAcid::Ala,
+                monomer: geom::structure::Monomer::Protein(AminoAcid::Ala),
                 atoms: vec![geom::structure::PlacedAtom {
                     name: "CA",
                     element: chem::Element::C,

@@ -84,6 +84,23 @@ impl Nucleotide {
         })
     }
 
+    /// Parse a wwPDB-style residue-name field. Accepts:
+    ///   • single-character RNA codes "A" / "U" / "G" / "C"
+    ///   • AMBER-style "RA" / "RU" / "RG" / "RC"
+    ///   • DNA codes "DA" / "DT" / "DG" / "DC" (T normalises to U;
+    ///     we model the ribose sugar only for now)
+    /// Returns `None` for amino-acid names — let the caller fall back
+    /// to [`crate::AminoAcid::from_three_letter`].
+    pub fn from_three_letter(s: &str) -> Option<Self> {
+        match s.trim() {
+            "A" | "RA" | "DA" => Some(Self::Adenine),
+            "U" | "RU" | "T" | "DT" => Some(Self::Uracil),
+            "G" | "RG" | "DG" => Some(Self::Guanine),
+            "C" | "RC" | "DC" => Some(Self::Cytosine),
+            _ => None,
+        }
+    }
+
     /// Heavy-atom list (in PDB canonical order) shared by every
     /// ribonucleotide: phosphate, sugar (ribose), and the 2'-hydroxyl
     /// that distinguishes RNA from DNA. Hydrogens are listed

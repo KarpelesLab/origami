@@ -28,13 +28,13 @@ fn all_twenty_residues_build_cleanly() {
         // Within tolerance because everything is constructed via NeRF, which
         // is exact.
         assert!((measure::distance(n, ca) - 1.458).abs() < 1e-6,
-            "residue {} ({:?}): N-CA = {}", i, res.aa, measure::distance(n, ca));
+            "residue {} ({:?}): N-CA = {}", i, res.aa(), measure::distance(n, ca));
         assert!((measure::distance(ca, c) - 1.525).abs() < 1e-6);
         assert!((measure::distance(c, o) - 1.231).abs() < 1e-6);
         if i > 0 {
             let prev_c = structure.residues[i - 1].position("C").unwrap();
             assert!((measure::distance(prev_c, n) - 1.329).abs() < 1e-6,
-                "residue {} ({:?}): prev_C-N = {}", i, res.aa, measure::distance(prev_c, n));
+                "residue {} ({:?}): prev_C-N = {}", i, res.aa(), measure::distance(prev_c, n));
         }
     }
 

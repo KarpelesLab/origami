@@ -24,8 +24,8 @@ pub fn build_atom_types(structure: &Structure) -> Vec<AtomType> {
     for residue in &structure.residues {
         for atom in &residue.atoms {
             out.push(
-                classify(residue.aa, atom.name)
-                    .unwrap_or_else(|| panic!("unclassified atom {:?} {}", residue.aa, atom.name)),
+                classify(residue.aa(), atom.name)
+                    .unwrap_or_else(|| panic!("unclassified atom {:?} {}", residue.aa(), atom.name)),
             );
         }
     }
@@ -481,7 +481,7 @@ mod tests {
         let r0 = 1.430;
         let s = geom::Structure {
             residues: vec![PlacedResidue {
-                aa: AminoAcid::Ala,
+                monomer: geom::structure::Monomer::Protein(AminoAcid::Ala),
                 atoms: vec![
                     PlacedAtom { name: "N", element: Element::N, position: Vec3::zeros() },
                     PlacedAtom { name: "CA", element: Element::C, position: Vec3::new(r0, 0.0, 0.0) },

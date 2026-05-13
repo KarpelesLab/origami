@@ -53,7 +53,7 @@ fn insulin_three_disulfides_detected() {
             }
             atom_idx += 1;
         }
-        if r.aa == AminoAcid::Cys {
+        if r.monomer.as_amino_acid() == Some(AminoAcid::Cys) {
             if let Some(idx) = sg {
                 sg_indices.push((ri + 1, r.chain, idx));
             }

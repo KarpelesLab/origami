@@ -25,7 +25,7 @@ fn native_trp_cage_lower_energy_than_extended() {
     let pdb = include_str!("fixtures/1L2Y_model1.pdb");
     let native = read_pdb(pdb.as_bytes()).expect("parse 1L2Y");
     assert_eq!(native.residues.len(), 20);
-    let native_seq: String = native.residues.iter().map(|r| r.aa.one_letter()).collect();
+    let native_seq: String = native.residues.iter().map(|r| r.aa().one_letter()).collect();
     assert_eq!(native_seq, "NLYIQWLKDGGPSSGRPPPS");
 
     let extended = build_extended_chain(

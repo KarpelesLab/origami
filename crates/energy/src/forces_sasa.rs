@@ -190,7 +190,7 @@ mod tests {
         // leaves E_SASA unchanged → F = 0.
         let s = Structure {
             residues: vec![PlacedResidue {
-                aa: AminoAcid::Ala,
+                monomer: geom::structure::Monomer::Protein(AminoAcid::Ala),
                 atoms: vec![PlacedAtom {
                     name: "CB",
                     element: Element::C,

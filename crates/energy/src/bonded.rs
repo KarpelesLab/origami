@@ -48,8 +48,8 @@ fn build_atom_types(structure: &Structure) -> Vec<AtomType> {
     for residue in &structure.residues {
         for atom in &residue.atoms {
             out.push(
-                classify(residue.aa, atom.name)
-                    .unwrap_or_else(|| panic!("unclassified atom {:?} {}", residue.aa, atom.name)),
+                classify(residue.aa(), atom.name)
+                    .unwrap_or_else(|| panic!("unclassified atom {:?} {}", residue.aa(), atom.name)),
             );
         }
     }

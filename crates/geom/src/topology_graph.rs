@@ -154,7 +154,13 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
     };
 
     for (ri, res) in structure.residues.iter().enumerate() {
-        let aa = res.aa;
+        // Skip non-protein residues — the protein-only auto-bond
+        // pass below assumes amino-acid topology. RNA residues are
+        // handled by a separate (future) path.
+        let aa = match res.monomer.as_amino_acid() {
+            Some(a) => a,
+            None => continue,
+        };
 
         // ---- Backbone bonds ----
         let n = lookup(ri, "N");
@@ -223,7 +229,7 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
     // SG–SG > ~3.6 Å is definitively not bonded).
     let mut cys_sg: Vec<(usize, crate::Vec3)> = Vec::new();
     for (ri, res) in structure.residues.iter().enumerate() {
-        if res.aa != AminoAcid::Cys {
+        if res.monomer.as_amino_acid() != Some(AminoAcid::Cys) {
             continue;
         }
         if let (Some(idx), Some(pos)) = (lookup(ri, "SG"), res.position("SG")) {
@@ -296,7 +302,10 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
     // (planar) for sp² centers. Order is (substituent_a, central, sub_b, sub_c).
     let mut impropers: Vec<Improper> = Vec::new();
     for (ri, res) in structure.residues.iter().enumerate() {
-        let aa = res.aa;
+        let aa = match res.monomer.as_amino_acid() {
+            Some(a) => a,
+            None => continue,
+        };
 
         // Backbone peptide bond: C(i) is sp²; bonded to CA, O, N(i+1).
         let prev_atoms = if ri + 1 < structure.residues.len() {

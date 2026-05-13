@@ -38,7 +38,7 @@ fn cys_sg_indices(s: &geom::Structure) -> Vec<(usize, usize)> {
             }
             atom_idx += 1;
         }
-        if r.aa == AminoAcid::Cys {
+        if r.monomer.as_amino_acid() == Some(AminoAcid::Cys) {
             if let Some(idx) = sg {
                 out.push((ri + 1, idx));
             }

@@ -89,7 +89,7 @@ fn write_atoms_and_ter<W: Write>(
             }
         }
         let res_seq = (res_idx + 1) as u32;
-        let res_name = residue.aa.three_letter().to_uppercase();
+        let res_name = residue.aa().three_letter().to_uppercase();
         for atom in &residue.atoms {
             write_atom(
                 writer,
@@ -109,7 +109,7 @@ fn write_atoms_and_ter<W: Write>(
     }
     if let Some(last) = structure.residues.last() {
         let res_seq = structure.residues.len() as u32;
-        let res_name = last.aa.three_letter().to_uppercase();
+        let res_name = last.aa().three_letter().to_uppercase();
         writeln!(
             writer,
             "TER   {:>5}      {:>3} {chain}{res_seq:>4}",

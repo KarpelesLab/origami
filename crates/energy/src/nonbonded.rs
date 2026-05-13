@@ -110,10 +110,10 @@ pub fn nonbonded_energy(
     for residue in &structure.residues {
         for atom in &residue.atoms {
             atom_types.push(
-                classify(residue.aa, atom.name)
-                    .unwrap_or_else(|| panic!("unclassified atom {:?} {}", residue.aa, atom.name)),
+                classify(residue.aa(), atom.name)
+                    .unwrap_or_else(|| panic!("unclassified atom {:?} {}", residue.aa(), atom.name)),
             );
-            charges.push(ff.partial_charge(residue.aa, atom.name).unwrap_or(0.0));
+            charges.push(ff.partial_charge(residue.aa(), atom.name).unwrap_or(0.0));
         }
     }
 

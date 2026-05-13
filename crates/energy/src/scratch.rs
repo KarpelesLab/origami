@@ -128,11 +128,11 @@ impl ForceScratch {
         let mut idx = 0;
         for residue in &structure.residues {
             for atom in &residue.atoms {
-                let ty = classify(residue.aa, atom.name).unwrap_or_else(|| {
-                    panic!("unclassified atom {:?} {}", residue.aa, atom.name)
+                let ty = classify(residue.aa(), atom.name).unwrap_or_else(|| {
+                    panic!("unclassified atom {:?} {}", residue.aa(), atom.name)
                 });
                 self.atom_types.push(ty);
-                let q = charge_for(ff, residue.aa, atom.name);
+                let q = charge_for(ff, residue.aa(), atom.name);
                 self.charges[idx] = q;
                 // GB OBC II per-atom constants (element-only, never
                 // change at runtime).

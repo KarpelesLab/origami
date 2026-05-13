@@ -20,8 +20,8 @@ fn enumerate_required_force_field_tuples() {
     let mut atom_types: Vec<AtomType> = Vec::with_capacity(s.atom_count());
     for residue in &s.residues {
         for atom in &residue.atoms {
-            let t = classify(residue.aa, atom.name)
-                .unwrap_or_else(|| panic!("classifier missing {:?} {:?}", residue.aa, atom.name));
+            let t = classify(residue.aa(), atom.name)
+                .unwrap_or_else(|| panic!("classifier missing {:?} {:?}", residue.aa(), atom.name));
             atom_types.push(t);
         }
     }
@@ -121,7 +121,7 @@ fn every_force_field_tuple_has_parameters() {
     let mut atom_types: Vec<AtomType> = Vec::with_capacity(s.atom_count());
     for residue in &s.residues {
         for atom in &residue.atoms {
-            atom_types.push(classify(residue.aa, atom.name).unwrap());
+            atom_types.push(classify(residue.aa(), atom.name).unwrap());
         }
     }
 
@@ -182,8 +182,8 @@ fn every_force_field_tuple_has_parameters() {
     let mut missing_charges: Vec<(AminoAcid, String)> = Vec::new();
     for residue in &s.residues {
         for atom in &residue.atoms {
-            if ff.partial_charge(residue.aa, atom.name).is_none() {
-                missing_charges.push((residue.aa, atom.name.to_string()));
+            if ff.partial_charge(residue.aa(), atom.name).is_none() {
+                missing_charges.push((residue.aa(), atom.name.to_string()));
             }
         }
     }

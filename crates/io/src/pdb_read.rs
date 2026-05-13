@@ -75,8 +75,20 @@ pub fn read_pdb_trajectory<R: Read>(reader: R) -> Result<Vec<Structure>, PdbRead
         if rec.alt_loc != ' ' && rec.alt_loc != 'A' {
             continue;
         }
-        let aa = AminoAcid::from_three_letter(&rec.res_name)
-            .ok_or_else(|| PdbReadError::UnknownResidue(lineno, rec.res_name.clone()))?;
+        // Try the protein lookup first; fall back to ribonucleotides
+        // (A / U / G / C, RA / RC etc.) — we silently skip RNA residues
+        // because the protein-only energy / dynamics code paths can't
+        // handle them yet. The chem layer has `Nucleotide` so a future
+        // commit can promote the skip into a real Monomer::Rna inclusion.
+        let aa = match AminoAcid::from_three_letter(&rec.res_name) {
+            Some(a) => a,
+            None => {
+                if chem::Nucleotide::from_three_letter(&rec.res_name).is_some() {
+                    continue;
+                }
+                return Err(PdbReadError::UnknownResidue(lineno, rec.res_name.clone()));
+            }
+        };
         let norm_owned = normalise_atom_name(&rec.atom_name);
         let canonical_name = match canonical_atom_name(aa, &norm_owned) {
             Some(n) => n,
@@ -129,7 +141,7 @@ fn assemble_structure(parsed: Vec<ParsedAtom>) -> Structure {
     for p in parsed {
         if Some(p.res_key) != current_key {
             residues.push(PlacedResidue {
-                aa: p.aa,
+                monomer: geom::structure::Monomer::Protein(p.aa),
                 atoms: Vec::new(),
                 chain: p.res_key.0,
             });
@@ -195,8 +207,20 @@ pub fn read_pdb<R: Read>(reader: R) -> Result<Structure, PdbReadError> {
             continue;
         }
 
-        let aa = AminoAcid::from_three_letter(&rec.res_name)
-            .ok_or_else(|| PdbReadError::UnknownResidue(lineno, rec.res_name.clone()))?;
+        // Try the protein lookup first; fall back to ribonucleotides
+        // (A / U / G / C, RA / RC etc.) — we silently skip RNA residues
+        // because the protein-only energy / dynamics code paths can't
+        // handle them yet. The chem layer has `Nucleotide` so a future
+        // commit can promote the skip into a real Monomer::Rna inclusion.
+        let aa = match AminoAcid::from_three_letter(&rec.res_name) {
+            Some(a) => a,
+            None => {
+                if chem::Nucleotide::from_three_letter(&rec.res_name).is_some() {
+                    continue;
+                }
+                return Err(PdbReadError::UnknownResidue(lineno, rec.res_name.clone()));
+            }
+        };
 
         // Normalise the atom name to wwPDB v3.3.
         let norm_owned = normalise_atom_name(&rec.atom_name);
@@ -249,7 +273,11 @@ pub fn read_pdb<R: Read>(reader: R) -> Result<Structure, PdbReadError> {
 
     let placed: Vec<PlacedResidue> = residues
         .into_iter()
-        .map(|r| PlacedResidue { aa: r.aa, atoms: r.atoms, chain: r.chain })
+        .map(|r| PlacedResidue {
+            monomer: geom::structure::Monomer::Protein(r.aa),
+            atoms: r.atoms,
+            chain: r.chain,
+        })
         .collect();
 
     Ok(Structure { residues: placed })
@@ -405,7 +433,7 @@ mod tests {
         let parsed = read_pdb(buf.as_slice()).expect("read back");
         assert_eq!(parsed.residues.len(), original.residues.len());
         for (a, b) in parsed.residues.iter().zip(original.residues.iter()) {
-            assert_eq!(a.aa, b.aa);
+            assert_eq!(a.aa(), b.aa());
             assert_eq!(a.atoms.len(), b.atoms.len());
             for (pa, pb) in a.atoms.iter().zip(b.atoms.iter()) {
                 assert_eq!(pa.name, pb.name);
@@ -458,7 +486,7 @@ mod tests {
         let s = read_pdb(pdb.as_bytes()).expect("parse 1L2Y");
         assert_eq!(s.residues.len(), 20);
         let expected_seq = "NLYIQWLKDGGPSSGRPPPS";
-        let actual_seq: String = s.residues.iter().map(|r| r.aa.one_letter()).collect();
+        let actual_seq: String = s.residues.iter().map(|r| r.aa().one_letter()).collect();
         assert_eq!(actual_seq, expected_seq);
     }
 
