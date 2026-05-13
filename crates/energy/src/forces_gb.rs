@@ -48,14 +48,16 @@ pub fn add_gb_forces(structure: &Structure, ff: &ForceField, forces: &mut [Vec3]
 pub fn add_gb_forces_soa(
     scratch: &mut crate::scratch::ForceScratch,
     structure: &Structure,
-    ff: &ForceField,
+    _ff: &ForceField,
     cutoff_a: f64,
 ) {
-    // Born radii require the structure (positions + per-atom intrinsic
-    // radii); cheaper to call the existing path than re-implement it.
-    let born = compute_born_inputs(structure, ff);
-    let effective_radii = &born.effective_radii;
-    let charges = &scratch.charges;
+    // Born radii via the SoA path — reuses the per-atom cache stored
+    // on `scratch` (rho / rho_tilde / scale, populated at scratch
+    // construction) and writes into `scratch.gb_effective_radii`. No
+    // per-call Vec allocation for the descreening accumulator: the
+    // previous implementation re-allocated five n-length Vecs every
+    // step, which dominated GB cost for short-running proteins.
+    let _ = crate::gb::compute_born_radii_into_scratch(structure, scratch);
     let n = scratch.n;
     let prefactor_kj = kcal_to_kj(
         (1.0 / EPSILON_SOLUTE - 1.0 / EPSILON_WATER) * COULOMB_CONST_KCAL_A_PER_E2,
@@ -66,16 +68,16 @@ pub fn add_gb_forces_soa(
     const CELL_LIST_THRESHOLD: usize = 600;
     if n < CELL_LIST_THRESHOLD {
         for i in 0..n {
-            let qi = charges[i];
+            let qi = scratch.charges[i];
             if qi == 0.0 {
                 continue;
             }
             let xi = scratch.xs[i];
             let yi = scratch.ys[i];
             let zi = scratch.zs[i];
-            let ri = effective_radii[i];
+            let ri = scratch.gb_effective_radii[i];
             for j in (i + 1)..n {
-                let qj = charges[j];
+                let qj = scratch.charges[j];
                 if qj == 0.0 {
                     continue;
                 }
@@ -87,7 +89,7 @@ pub fn add_gb_forces_soa(
                     continue;
                 }
                 let r = r2.sqrt();
-                let rij_prod = ri * effective_radii[j];
+                let rij_prod = ri * scratch.gb_effective_radii[j];
                 let exp_val = (-r2 / (4.0 * rij_prod)).exp();
                 let f_gb_sq = r2 + rij_prod * exp_val;
                 let f_gb = f_gb_sq.sqrt();
@@ -115,8 +117,8 @@ pub fn add_gb_forces_soa(
         }
         let cl = CellList::build(&positions, cutoff_a);
         for (i, j, r) in cl.iter_pairs_within(&positions, cutoff_a) {
-            let qi = charges[i];
-            let qj = charges[j];
+            let qi = scratch.charges[i];
+            let qj = scratch.charges[j];
             if qi == 0.0 || qj == 0.0 || r < 1e-9 {
                 continue;
             }
@@ -124,7 +126,7 @@ pub fn add_gb_forces_soa(
             let dy = scratch.ys[j] - scratch.ys[i];
             let dz = scratch.zs[j] - scratch.zs[i];
             let r2 = r * r;
-            let rij_prod = effective_radii[i] * effective_radii[j];
+            let rij_prod = scratch.gb_effective_radii[i] * scratch.gb_effective_radii[j];
             let exp_val = (-r2 / (4.0 * rij_prod)).exp();
             let f_gb_sq = r2 + rij_prod * exp_val;
             let f_gb = f_gb_sq.sqrt();

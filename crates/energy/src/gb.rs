@@ -30,9 +30,13 @@ const OBC_BETA: f64 = 0.8;
 const OBC_GAMMA: f64 = 4.85;
 /// Born radius offset (Å). Subtracted from ρ to give ρ̃.
 const OBC_OFFSET: f64 = 0.09;
+/// Public alias of [`OBC_OFFSET`] for the SoA Born-radius cache (see
+/// `energy::scratch`) which precomputes ρ̃ = ρ − OBC_OFFSET once.
+pub const OBC_OFFSET_PUB: f64 = OBC_OFFSET;
 
 /// Cutoff distance for the descreening sum (Å). Beyond this, atoms
 /// contribute negligibly to the effective Born radius.
+pub const BORN_RADIUS_CUTOFF_A_PUB: f64 = BORN_RADIUS_CUTOFF_A;
 const BORN_RADIUS_CUTOFF_A: f64 = 20.0;
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -60,6 +64,9 @@ fn intrinsic_radius(element: Element) -> f64 {
         Element::S => 1.80,
     }
 }
+/// Public re-export so `energy::scratch::ForceScratch::rebuild_params`
+/// can populate its element-derived GB cache in one place.
+pub fn intrinsic_radius_pub(e: Element) -> f64 { intrinsic_radius(e) }
 
 /// HCT scaling factor for the descreening integral. AMBER's mbondi2 set.
 fn hct_scale(element: Element) -> f64 {
@@ -71,6 +78,7 @@ fn hct_scale(element: Element) -> f64 {
         Element::S => 0.96,
     }
 }
+pub fn hct_scale_pub(e: Element) -> f64 { hct_scale(e) }
 
 #[allow(dead_code)]
 fn _atom_type_unused(_t: AtomType) {} // silence unused import warning if AtomType ends up unused
@@ -173,6 +181,108 @@ pub fn gb_energy(structure: &Structure, ff: &ForceField) -> GbBreakdown {
 
 fn charge_for(ff: &ForceField, aa: AminoAcid, atom_name: &str) -> f64 {
     ff.partial_charge(aa, atom_name).unwrap_or(0.0)
+}
+
+/// SoA Born-radius computation. Equivalent to `compute_born_inputs`
+/// except it reads ρ / ρ̃ / scale / charges from the pre-built caches
+/// in `ForceScratch` (populated once at `rebuild_params`) and writes
+/// the result into `scratch.gb_effective_radii`. Positions are read
+/// from the AoS structure path (`atom.position`) — the cell list is
+/// built once over those positions per call.
+///
+/// For larger systems the descreening pair loop runs in parallel
+/// via rayon, using the same per-thread-accumulator pattern as the
+/// nonbonded SoA kernel. Below the threshold a serial sweep wins
+/// (rayon spawn overhead exceeds the saved work).
+///
+/// Returns the number of atoms whose effective Born radius came out
+/// unphysical and was clamped, so callers can surface that to the
+/// breakdown.
+pub fn compute_born_radii_into_scratch(
+    structure: &Structure,
+    scratch: &mut crate::scratch::ForceScratch,
+) -> usize {
+    use rayon::prelude::*;
+    let n = scratch.n;
+    debug_assert_eq!(structure.atom_count(), n, "scratch sized for a different structure");
+
+    // The Born-radius cutoff is 20 Å — wider than the LJ / Coulomb
+    // 10 Å — so we build a separate cell list at the GB cell size.
+    let positions: Vec<Vec3> = structure
+        .residues
+        .iter()
+        .flat_map(|r| r.atoms.iter().map(|a| a.position))
+        .collect();
+    let cl = CellList::build(&positions, BORN_RADIUS_CUTOFF_A);
+
+    // Zero the accumulator buffer.
+    scratch.gb_integral[..n].fill(0.0);
+
+    // Collect pairs once so rayon can chunk them. The Born cutoff at
+    // 20 Å produces ~4× more pairs than the LJ / Coulomb path; even
+    // a 300-atom protein has 100 k+ pairs here, well into the
+    // parallel-pays-off regime.
+    let pairs: Vec<(usize, usize, f64)> = cl
+        .iter_pairs_within(&positions, BORN_RADIUS_CUTOFF_A)
+        .collect();
+
+    let rho_tilde = scratch.gb_rho_tilde.as_slice();
+    let scale = scratch.gb_scale.as_slice();
+
+    const PARALLEL_THRESHOLD: usize = 30_000;
+    if pairs.len() < PARALLEL_THRESHOLD {
+        // Serial path.
+        for &(i, j, r) in &pairs {
+            let h_ij = pairwise_descreening(r, rho_tilde[i], scale[j] * rho_tilde[j]);
+            let h_ji = pairwise_descreening(r, rho_tilde[j], scale[i] * rho_tilde[i]);
+            scratch.gb_integral[i] += h_ij;
+            scratch.gb_integral[j] += h_ji;
+        }
+    } else {
+        // Parallel: per-thread accumulator slices in scratch.par_fx
+        // (we steal that buffer — it's the same length and same
+        // lifetime as the per-thread integral we need; force eval
+        // and Born-radius compute don't run simultaneously).
+        let n_threads = scratch.n_par_threads;
+        let chunk_size = pairs.len().div_ceil(n_threads).max(1);
+        let used_threads = pairs.len().div_ceil(chunk_size);
+        let acc_slice = &mut scratch.par_fx[..used_threads * n];
+        acc_slice.fill(0.0);
+        let chunks: Vec<&[(usize, usize, f64)]> = pairs.chunks(chunk_size).collect();
+        acc_slice
+            .par_chunks_mut(n)
+            .zip(chunks.into_par_iter())
+            .for_each(|(acc, chunk)| {
+                for &(i, j, r) in chunk {
+                    let h_ij = pairwise_descreening(r, rho_tilde[i], scale[j] * rho_tilde[j]);
+                    let h_ji = pairwise_descreening(r, rho_tilde[j], scale[i] * rho_tilde[i]);
+                    acc[i] += h_ij;
+                    acc[j] += h_ji;
+                }
+            });
+        for t in 0..used_threads {
+            let base = t * n;
+            for k in 0..n {
+                scratch.gb_integral[k] += scratch.par_fx[base + k];
+            }
+        }
+    }
+
+    let mut clamped = 0usize;
+    for i in 0..n {
+        let rho_tilde_i = scratch.gb_rho_tilde[i];
+        let rho_i = scratch.gb_rho[i];
+        let psi = scratch.gb_integral[i] * rho_tilde_i;
+        let tanh_arg = OBC_ALPHA * psi - OBC_BETA * psi * psi + OBC_GAMMA * psi * psi * psi;
+        let inv = 1.0 / rho_tilde_i - tanh_arg.tanh() / rho_i;
+        scratch.gb_effective_radii[i] = if inv <= 0.0 || !inv.is_finite() {
+            clamped += 1;
+            rho_tilde_i.max(0.5)
+        } else {
+            (1.0 / inv).max(rho_tilde_i.max(0.5))
+        };
+    }
+    clamped
 }
 
 /// Pairwise descreening integral (HCT/OBC form).

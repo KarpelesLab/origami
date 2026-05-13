@@ -63,6 +63,22 @@ pub struct ForceScratch {
     pub par_fy: Vec<f64>,
     pub par_fz: Vec<f64>,
     pub n_par_threads: usize,
+
+    // ---- GB OBC II Born-radius cache ----
+    //
+    // Element-derived per-atom constants. Populated once at construction
+    // (rebuild_params) — they only depend on `Element`, which doesn't
+    // change at runtime. Sharing the cache across every force evaluation
+    // saves the Vec allocation + classification work the previous AoS
+    // `compute_born_inputs` path paid every step.
+    pub gb_rho: Vec<f64>,
+    pub gb_rho_tilde: Vec<f64>,
+    pub gb_scale: Vec<f64>,
+    /// Per-atom descreening integral, the inner-loop accumulator. Reused
+    /// across calls; zeroed at the start of each Born-radius computation.
+    pub gb_integral: Vec<f64>,
+    /// Output buffer: effective Born radii in Å.
+    pub gb_effective_radii: Vec<f64>,
 }
 
 impl ForceScratch {
@@ -90,6 +106,11 @@ impl ForceScratch {
             par_fy: vec![0.0; n_threads * n],
             par_fz: vec![0.0; n_threads * n],
             n_par_threads: n_threads,
+            gb_rho: vec![0.0; n],
+            gb_rho_tilde: vec![0.0; n],
+            gb_scale: vec![0.0; n],
+            gb_integral: vec![0.0; n],
+            gb_effective_radii: vec![0.0; n],
         };
         s.rebuild_params(structure, ff);
         s.rebuild_exclusions(graph);
@@ -113,6 +134,12 @@ impl ForceScratch {
                 self.atom_types.push(ty);
                 let q = charge_for(ff, residue.aa, atom.name);
                 self.charges[idx] = q;
+                // GB OBC II per-atom constants (element-only, never
+                // change at runtime).
+                let r = crate::gb::intrinsic_radius_pub(atom.element);
+                self.gb_rho[idx] = r;
+                self.gb_rho_tilde[idx] = r - crate::gb::OBC_OFFSET_PUB;
+                self.gb_scale[idx] = crate::gb::hct_scale_pub(atom.element);
                 if let Some(p) = ff.nonbonded(ty) {
                     self.rmin_half[idx] = p.rmin_half;
                     self.epsilon[idx] = p.epsilon;
