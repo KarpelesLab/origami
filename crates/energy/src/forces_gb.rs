@@ -36,6 +36,114 @@ pub fn add_gb_forces(structure: &Structure, ff: &ForceField, forces: &mut [Vec3]
     add_gb_forces_with_cutoff(structure, ff, forces, GB_DEFAULT_CUTOFF_A);
 }
 
+/// SoA-aware GB force kernel reading from / writing to a
+/// [`crate::scratch::ForceScratch`]. Same caller protocol as
+/// [`crate::forces_nonbonded::add_nonbonded_forces_soa`]:
+/// caller pre-allocates the scratch, syncs positions each step,
+/// zeros force buffers, calls this. Effective Born radii are
+/// recomputed inside (they depend on positions and need a fresh
+/// descreening integral each step), but charges are read from the
+/// cached `scratch.charges` rather than re-flattened from the
+/// structure on every call.
+pub fn add_gb_forces_soa(
+    scratch: &mut crate::scratch::ForceScratch,
+    structure: &Structure,
+    ff: &ForceField,
+    cutoff_a: f64,
+) {
+    // Born radii require the structure (positions + per-atom intrinsic
+    // radii); cheaper to call the existing path than re-implement it.
+    let born = compute_born_inputs(structure, ff);
+    let effective_radii = &born.effective_radii;
+    let charges = &scratch.charges;
+    let n = scratch.n;
+    let prefactor_kj = kcal_to_kj(
+        (1.0 / EPSILON_SOLUTE - 1.0 / EPSILON_WATER) * COULOMB_CONST_KCAL_A_PER_E2,
+    );
+    let cutoff_sq = cutoff_a * cutoff_a;
+
+    // Same threshold logic as the AoS path.
+    const CELL_LIST_THRESHOLD: usize = 600;
+    if n < CELL_LIST_THRESHOLD {
+        for i in 0..n {
+            let qi = charges[i];
+            if qi == 0.0 {
+                continue;
+            }
+            let xi = scratch.xs[i];
+            let yi = scratch.ys[i];
+            let zi = scratch.zs[i];
+            let ri = effective_radii[i];
+            for j in (i + 1)..n {
+                let qj = charges[j];
+                if qj == 0.0 {
+                    continue;
+                }
+                let dx = scratch.xs[j] - xi;
+                let dy = scratch.ys[j] - yi;
+                let dz = scratch.zs[j] - zi;
+                let r2 = dx * dx + dy * dy + dz * dz;
+                if r2 > cutoff_sq || r2 < 1e-18 {
+                    continue;
+                }
+                let r = r2.sqrt();
+                let rij_prod = ri * effective_radii[j];
+                let exp_val = (-r2 / (4.0 * rij_prod)).exp();
+                let f_gb_sq = r2 + rij_prod * exp_val;
+                let f_gb = f_gb_sq.sqrt();
+                let d_fgb_sq_dr = 2.0 * r - 0.5 * r * exp_val;
+                let d_fgb_dr = d_fgb_sq_dr / (2.0 * f_gb);
+                let coeff = prefactor_kj * (qi * qj) / f_gb_sq * d_fgb_dr / r;
+                let fx = dx * coeff;
+                let fy = dy * coeff;
+                let fz = dz * coeff;
+                scratch.fxs[i] += fx;
+                scratch.fys[i] += fy;
+                scratch.fzs[i] += fz;
+                scratch.fxs[j] -= fx;
+                scratch.fys[j] -= fy;
+                scratch.fzs[j] -= fz;
+            }
+        }
+    } else {
+        // Cell-list path. Reconstruct Vec3 positions for the cell list
+        // (it's templated on Vec3); could be specialised later if it
+        // matters.
+        let mut positions: Vec<Vec3> = Vec::with_capacity(n);
+        for i in 0..n {
+            positions.push(Vec3::new(scratch.xs[i], scratch.ys[i], scratch.zs[i]));
+        }
+        let cl = CellList::build(&positions, cutoff_a);
+        for (i, j, r) in cl.iter_pairs_within(&positions, cutoff_a) {
+            let qi = charges[i];
+            let qj = charges[j];
+            if qi == 0.0 || qj == 0.0 || r < 1e-9 {
+                continue;
+            }
+            let dx = scratch.xs[j] - scratch.xs[i];
+            let dy = scratch.ys[j] - scratch.ys[i];
+            let dz = scratch.zs[j] - scratch.zs[i];
+            let r2 = r * r;
+            let rij_prod = effective_radii[i] * effective_radii[j];
+            let exp_val = (-r2 / (4.0 * rij_prod)).exp();
+            let f_gb_sq = r2 + rij_prod * exp_val;
+            let f_gb = f_gb_sq.sqrt();
+            let d_fgb_sq_dr = 2.0 * r - 0.5 * r * exp_val;
+            let d_fgb_dr = d_fgb_sq_dr / (2.0 * f_gb);
+            let coeff = prefactor_kj * (qi * qj) / f_gb_sq * d_fgb_dr / r;
+            let fx = dx * coeff;
+            let fy = dy * coeff;
+            let fz = dz * coeff;
+            scratch.fxs[i] += fx;
+            scratch.fys[i] += fy;
+            scratch.fzs[i] += fz;
+            scratch.fxs[j] -= fx;
+            scratch.fys[j] -= fy;
+            scratch.fzs[j] -= fz;
+        }
+    }
+}
+
 pub fn add_gb_forces_with_cutoff(
     structure: &Structure,
     ff: &ForceField,
@@ -213,5 +321,35 @@ mod tests {
             assert!(f.norm().is_finite());
         }
         let _ = gb_energy(&s, ff); // sanity: energy still works
+    }
+
+    #[test]
+    fn soa_gb_matches_aos() {
+        // Same Lys + Glu chain as the finite-difference test; nontrivial
+        // charges drive nontrivial GB forces.
+        let s = build_extended_chain(&[AminoAcid::Lys, AminoAcid::Glu]).unwrap();
+        let ff = standard_ff();
+        let graph = geom::build_topology_graph(&s);
+        let n = s.atom_count();
+        let mut aos = vec![Vec3::zeros(); n];
+        add_gb_forces(&s, ff, &mut aos);
+
+        let mut scratch = crate::scratch::ForceScratch::new(&s, &graph, ff);
+        scratch.zero_forces();
+        add_gb_forces_soa(&mut scratch, &s, ff, GB_DEFAULT_CUTOFF_A);
+
+        for i in 0..n {
+            let pairs = [
+                ("x", aos[i].x, scratch.fxs[i]),
+                ("y", aos[i].y, scratch.fys[i]),
+                ("z", aos[i].z, scratch.fzs[i]),
+            ];
+            for (axis, aos_v, soa_v) in pairs {
+                assert!(
+                    (aos_v - soa_v).abs() < 1e-9,
+                    "atom {i} axis {axis}: AoS={aos_v:.6e}, SoA={soa_v:.6e}"
+                );
+            }
+        }
     }
 }

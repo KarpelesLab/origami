@@ -34,7 +34,7 @@
 //! [`AccelConstants`] so the integrator inner loop stays clean.
 
 use chem::ForceField;
-use energy::total_force_with_options;
+use energy::{total_force_with_scratch, ForceScratch};
 use energy::DEFAULT_CUTOFF_A;
 use geom::{Structure, TopologyGraph, Vec3};
 
@@ -137,8 +137,20 @@ where
     let half_dt = 0.5 * opts.dt_fs;
     let dof = (3 * n) as f64;
 
-    // Compute initial forces.
-    let mut forces = total_force_with_options(structure, graph, ff, DEFAULT_CUTOFF_A, opts.include_sasa);
+    // Allocate one scratch + force buffer for the whole run — the SoA
+    // nonbonded kernel reads/writes through this scratch, so we pay the
+    // O(n²) exclusion bitmap build exactly once.
+    let mut scratch = ForceScratch::new(structure, graph, ff);
+    let mut forces: Vec<Vec3> = Vec::with_capacity(n);
+    total_force_with_scratch(
+        structure,
+        graph,
+        ff,
+        DEFAULT_CUTOFF_A,
+        opts.include_sasa,
+        &mut scratch,
+        &mut forces,
+    );
 
     // Running stats (Welford).
     let mut sum_t = 0.0;
@@ -188,7 +200,15 @@ where
         apply_velocity_step(structure, &velocities, half_dt);
 
         // Recompute forces at the new positions.
-        forces = total_force_with_options(structure, graph, ff, DEFAULT_CUTOFF_A, opts.include_sasa);
+        total_force_with_scratch(
+            structure,
+            graph,
+            ff,
+            DEFAULT_CUTOFF_A,
+            opts.include_sasa,
+            &mut scratch,
+            &mut forces,
+        );
 
         // B (second half): v += a · dt/2
         for i in 0..n {

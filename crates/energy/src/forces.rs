@@ -63,6 +63,60 @@ pub fn total_force_with_options(
     forces
 }
 
+/// SoA-aware force aggregator. Same physics as `total_force_with_options`
+/// but the nonbonded LJ+Coulomb pair sum is computed through the SoA
+/// kernel that reads from `scratch`. The caller owns `scratch` and
+/// `forces` and reuses them across steps so the per-step allocation cost
+/// drops to zero.
+///
+/// `scratch.rebuild_params` and `scratch.rebuild_exclusions` must already
+/// have run (e.g. via `ForceScratch::new`). Positions are re-synced
+/// inside this call from `structure`, so the caller does not need to
+/// pre-sync.
+///
+/// `forces` is overwritten — caller does not need to zero it.
+pub fn total_force_with_scratch(
+    structure: &Structure,
+    graph: &TopologyGraph,
+    ff: &ForceField,
+    cutoff_a: f64,
+    include_sasa: bool,
+    scratch: &mut crate::scratch::ForceScratch,
+    forces: &mut Vec<Vec3>,
+) {
+    let n = structure.atom_count();
+    debug_assert_eq!(scratch.n, n, "scratch sized for a different structure");
+    if forces.len() != n {
+        forces.clear();
+        forces.resize(n, Vec3::zeros());
+    } else {
+        forces.iter_mut().for_each(|f| *f = Vec3::zeros());
+    }
+
+    let atom_types = build_atom_types(structure);
+    let positions: Vec<Vec3> = structure
+        .residues
+        .iter()
+        .flat_map(|r| r.atoms.iter().map(|a| a.position))
+        .collect();
+    add_bond_forces(&positions, graph, ff, &atom_types, forces);
+    add_angle_forces(&positions, graph, ff, &atom_types, forces);
+    add_dihedral_forces(&positions, graph, ff, &atom_types, forces);
+    add_improper_forces(&positions, graph, ff, &atom_types, forces);
+
+    // SoA nonbonded pair loop: sync + zero scratch, run, accumulate
+    // back into the AoS output buffer.
+    scratch.sync_positions(structure);
+    scratch.zero_forces();
+    crate::forces_nonbonded::add_nonbonded_forces_soa(scratch, cutoff_a);
+    scratch.accumulate_into(forces);
+
+    add_gb_forces(structure, ff, forces);
+    if include_sasa {
+        add_sasa_forces(structure, ff, forces);
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::needless_range_loop)]
 mod tests {
@@ -171,5 +225,26 @@ mod tests {
             }
         }
         eprintln!("max force discrepancy in total_force test: {} ({})", max_err, max_label);
+    }
+
+    #[test]
+    fn total_force_with_scratch_matches_aos() {
+        let s = build_extended_chain(&[
+            AminoAcid::Lys, AminoAcid::Ala, AminoAcid::Glu, AminoAcid::Phe,
+        ]).unwrap();
+        let g = build_topology_graph(&s);
+        let ff = standard_ff();
+        let aos = total_force_with_options(&s, &g, ff, DEFAULT_CUTOFF_A, false);
+
+        let mut scratch = crate::scratch::ForceScratch::new(&s, &g, ff);
+        let mut soa = Vec::new();
+        super::total_force_with_scratch(&s, &g, ff, DEFAULT_CUTOFF_A, false, &mut scratch, &mut soa);
+
+        assert_eq!(aos.len(), soa.len());
+        for (i, (a, b)) in aos.iter().zip(soa.iter()).enumerate() {
+            assert!((a.x - b.x).abs() < 1e-9, "atom {i} x: AoS={:.6e} SoA={:.6e}", a.x, b.x);
+            assert!((a.y - b.y).abs() < 1e-9, "atom {i} y: AoS={:.6e} SoA={:.6e}", a.y, b.y);
+            assert!((a.z - b.z).abs() < 1e-9, "atom {i} z: AoS={:.6e} SoA={:.6e}", a.z, b.z);
+        }
     }
 }

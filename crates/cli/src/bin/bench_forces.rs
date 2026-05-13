@@ -82,13 +82,28 @@ fn main() {
         forces.iter_mut().for_each(|f| *f = Vec3::zeros());
         add_improper_forces(&positions, &graph, ff, &atom_types, &mut forces);
     });
-    timeit("nonbonded (LJ+Coulomb) force", n_iter, || {
+    timeit("nonbonded (LJ+Coulomb) force [AoS]", n_iter, || {
         forces.iter_mut().for_each(|f| *f = Vec3::zeros());
         add_nonbonded_forces(&s, &graph, ff, DEFAULT_CUTOFF_A, &mut forces);
     });
-    timeit("GB force", n_iter, || {
+
+    // SoA path. Build scratch once outside the loop, then sync + zero
+    // + compute on each iteration — same per-call shape an integrator
+    // would use.
+    let mut scratch = energy::scratch::ForceScratch::new(&s, &graph, ff);
+    timeit("nonbonded (LJ+Coulomb) force [SoA]", n_iter, || {
+        scratch.sync_positions(&s);
+        scratch.zero_forces();
+        energy::forces_nonbonded::add_nonbonded_forces_soa(&mut scratch, DEFAULT_CUTOFF_A);
+    });
+    timeit("GB force [AoS]", n_iter, || {
         forces.iter_mut().for_each(|f| *f = Vec3::zeros());
         add_gb_forces(&s, ff, &mut forces);
+    });
+    timeit("GB force [SoA]", n_iter, || {
+        scratch.sync_positions(&s);
+        scratch.zero_forces();
+        energy::forces_gb::add_gb_forces_soa(&mut scratch, &s, ff, DEFAULT_CUTOFF_A);
     });
     timeit("SASA force (analytical)", (n_iter / 20).max(1), || {
         forces.iter_mut().for_each(|f| *f = Vec3::zeros());
@@ -97,7 +112,20 @@ fn main() {
 
     // Combined.
     println!();
-    timeit("total_force (no SASA)", n_iter, || {
+    timeit("total_force (no SASA) [AoS]", n_iter, || {
         forces = energy::total_force_with_options(&s, &graph, ff, DEFAULT_CUTOFF_A, false);
+    });
+    // SoA path used by the Langevin integrator — scratch allocated once,
+    // reused across calls.
+    timeit("total_force (no SASA) [SoA]", n_iter, || {
+        energy::total_force_with_scratch(
+            &s,
+            &graph,
+            ff,
+            DEFAULT_CUTOFF_A,
+            false,
+            &mut scratch,
+            &mut forces,
+        );
     });
 }

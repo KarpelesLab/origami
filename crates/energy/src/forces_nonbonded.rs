@@ -98,6 +98,96 @@ pub fn add_nonbonded_forces_default(
     add_nonbonded_forces(structure, graph, ff, DEFAULT_CUTOFF_A, forces);
 }
 
+/// SoA-aware nonbonded force kernel that reads/writes a
+/// [`crate::scratch::ForceScratch`]. The caller is expected to:
+///   1. Allocate the scratch once at simulation start (via
+///      `ForceScratch::new`).
+///   2. Sync positions into the scratch each step
+///      (`scratch.sync_positions(&structure)`).
+///   3. Zero the force buffers (`scratch.zero_forces()`).
+///   4. Call this kernel (plus any other SoA kernels).
+///   5. Read the SoA force out via `scratch.accumulate_into(&mut [Vec3])`.
+///
+/// The inner pair loop pulls positions from flat `[f64]` arrays and
+/// looks up the bonded/1-3/1-4 mask from a flat `[u8]` bitmap, both
+/// of which let the compiler avoid the `Vec3` AoS load pattern and
+/// the `Vec::contains` walk in the original AoS path.
+pub fn add_nonbonded_forces_soa(
+    scratch: &mut crate::scratch::ForceScratch,
+    cutoff_a: f64,
+) {
+    let n = scratch.n;
+    let cutoff_sq = cutoff_a * cutoff_a;
+    let kj_per_kcal = kcal_to_kj(1.0);
+    let coulomb_kj = kcal_to_kj(COULOMB_CONST_KCAL_A_PER_E2);
+    // CellList neighbour search — same logic as AoS path, just over
+    // the SoA position arrays.
+    let mut positions: Vec<Vec3> = Vec::with_capacity(n);
+    for i in 0..n {
+        positions.push(Vec3::new(scratch.xs[i], scratch.ys[i], scratch.zs[i]));
+    }
+    let cl = CellList::build(&positions, cutoff_a);
+
+    for (i, j, r) in cl.iter_pairs_within(&positions, cutoff_a) {
+        if scratch.is_excluded(i, j) {
+            continue;
+        }
+        let dx = scratch.xs[j] - scratch.xs[i];
+        let dy = scratch.ys[j] - scratch.ys[i];
+        let dz = scratch.zs[j] - scratch.zs[i];
+        let r2 = dx * dx + dy * dy + dz * dz;
+        if r2 > cutoff_sq || r2 < 1e-18 {
+            continue;
+        }
+
+        let one_four = scratch.is_one_four(i, j);
+        let (rmin_half_i, eps_i, rmin_half_j, eps_j) = if one_four {
+            (
+                scratch.rmin_half_14[i],
+                scratch.epsilon_14[i],
+                scratch.rmin_half_14[j],
+                scratch.epsilon_14[j],
+            )
+        } else {
+            (
+                scratch.rmin_half[i],
+                scratch.epsilon[i],
+                scratch.rmin_half[j],
+                scratch.epsilon[j],
+            )
+        };
+        let rmin_ij = rmin_half_i + rmin_half_j;
+        let eps_ij = (eps_i * eps_j).sqrt();
+
+        let inv_r2 = 1.0 / r2;
+        let ratio2 = rmin_ij * rmin_ij * inv_r2;
+        let ratio6 = ratio2 * ratio2 * ratio2;
+        let ratio12 = ratio6 * ratio6;
+
+        // F_i (LJ) coefficient in kJ/mol/Å².
+        let lj_coeff = 12.0 * eps_ij * inv_r2 * (ratio6 - ratio12) * kj_per_kcal;
+
+        // F_i (Coulomb) coefficient — only multiply if nonzero charges.
+        let qq = scratch.charges[i] * scratch.charges[j];
+        let coul_coeff = if qq != 0.0 {
+            -coulomb_kj * qq * inv_r2 / r
+        } else {
+            0.0
+        };
+
+        let coeff = lj_coeff + coul_coeff;
+        let fx = dx * coeff;
+        let fy = dy * coeff;
+        let fz = dz * coeff;
+        scratch.fxs[i] += fx;
+        scratch.fys[i] += fy;
+        scratch.fzs[i] += fz;
+        scratch.fxs[j] -= fx;
+        scratch.fys[j] -= fy;
+        scratch.fzs[j] -= fz;
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::needless_range_loop)]
 mod tests {
@@ -157,6 +247,36 @@ mod tests {
             }
         }
         let _ = positions; // silence unused warning if we change the body later
+    }
+
+    #[test]
+    fn soa_nonbonded_matches_aos() {
+        // SoA kernel and AoS kernel must produce identical forces on
+        // the same structure.
+        let s = build_extended_chain(&[AminoAcid::Lys, AminoAcid::Glu, AminoAcid::Ala]).unwrap();
+        let g = build_topology_graph(&s);
+        let ff = standard_ff();
+        let n = s.atom_count();
+
+        let mut forces_aos = vec![Vec3::zeros(); n];
+        add_nonbonded_forces(&s, &g, ff, DEFAULT_CUTOFF_A, &mut forces_aos);
+
+        let mut scratch = crate::scratch::ForceScratch::new(&s, &g, ff);
+        scratch.zero_forces();
+        add_nonbonded_forces_soa(&mut scratch, DEFAULT_CUTOFF_A);
+        let mut forces_soa = vec![Vec3::zeros(); n];
+        scratch.accumulate_into(&mut forces_soa);
+
+        let mut max_err: f64 = 0.0;
+        for i in 0..n {
+            let diff = forces_aos[i] - forces_soa[i];
+            max_err = max_err.max(diff.norm());
+        }
+        assert!(
+            max_err < 1e-9,
+            "SoA force differs from AoS by {} (max norm)",
+            max_err
+        );
     }
 
     #[test]

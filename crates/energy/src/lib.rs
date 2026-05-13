@@ -15,12 +15,16 @@ pub mod gb;
 pub mod nonbonded;
 pub mod powersasa;
 pub mod sasa;
+pub mod scratch;
 pub mod units;
 
 pub use bonded::{
     angle_energy, bond_energy, dihedral_energy, improper_energy, BondedBreakdown,
 };
-pub use forces::{total_force, total_force_with_cutoff, total_force_with_options};
+pub use forces::{
+    total_force, total_force_with_cutoff, total_force_with_options, total_force_with_scratch,
+};
+pub use scratch::ForceScratch;
 pub use gb::{gb_energy, GbBreakdown};
 pub use nonbonded::{nonbonded_energy, NonbondedBreakdown, DEFAULT_CUTOFF_A};
 pub use sasa::{sasa_energy, sasa_energy_with_dots, SasaBreakdown};
