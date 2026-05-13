@@ -57,13 +57,32 @@ inside a confined region, mimicking the ribosomal tunnel.
 
 Combined with `--with-sasa`, the hydrophobic-collapse term drives the
 nascent chain as soon as enough side chains are present to cluster.
-Chignolin (`YYDPETGTWY`, 10 residues), one residue per 0.5 ps,
-20 ps tail of Langevin at 310 K, γ = 2 ps⁻¹, hydrophobic γ-scale 0.25:
+Chignolin (`GYDPETGTWG`, 10 residues, PDB 1UAO), one residue per 0.5 ps,
+100 ps tail of Langevin at 310 K, γ = 2 ps⁻¹, hydrophobic γ-scale 0.25:
 
 ![Cotranslational chignolin growth + hydrophobic collapse](docs/animations/chignolin_cotsasa.gif)
 
 [Full quality MP4](docs/animations/chignolin_cotsasa.mp4) ·
-1 ps of simulated time per ~250 ms of video at 20 fps.
+1 ps of simulated time per ~83 ms of video at 30 fps.
+
+The Cα RMSD vs the 1UAO native fold over the 100 ps tail:
+
+| time after emergence | Cα RMSD vs 1UAO native |
+|---:|---:|
+| ~4 ps (chain just complete) | 7.32 Å |
+| 20 ps | 6.73 Å |
+| 40 ps | 4.05 Å |
+| **44 ps** (`docs/images/chignolin_cotsasa_43ps.png`) | **2.94 Å** (minimum) |
+| 100 ps | 3.06 Å |
+
+Full trace: [docs/data/chignolin_cotsasa_rmsd.tsv](docs/data/chignolin_cotsasa_rmsd.tsv).
+The chain compacts from extended (7.3 Å) into a sub-3 Å native-like
+basin during the tail. Compared to the pre-folded baseline below
+(1.82 Å from a pre-minimised extended chain), the cotranslational
+version reaches a slightly higher RMSD floor — the chain spends its
+first few ps growing rather than folding, so it has less wall-clock
+time available to relax. But the qualitative behaviour is the same:
+emerge, collapse, hover in a compact basin.
 
 **6. Actually fold something.** Start from a minimised extended chignolin
 (GYDPETGTWG, 10 residues) and run Langevin dynamics at 310 K. With just
