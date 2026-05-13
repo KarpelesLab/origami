@@ -430,6 +430,7 @@ fn vdw_radius(element: Element) -> f64 {
         Element::C => 1.70,
         Element::N => 1.55,
         Element::O => 1.52,
+        Element::P => 1.80,
         Element::S => 1.80,
     }
 }
@@ -441,6 +442,7 @@ fn cpk_color(element: Element) -> [f64; 3] {
         Element::C => [0.50, 0.50, 0.50],
         Element::N => [0.20, 0.30, 0.85],
         Element::O => [0.85, 0.20, 0.20],
+        Element::P => [1.00, 0.55, 0.20],
         Element::S => [1.00, 0.85, 0.20],
     }
 }

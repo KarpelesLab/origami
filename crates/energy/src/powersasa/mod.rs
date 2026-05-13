@@ -37,6 +37,7 @@ pub(crate) fn vdw_radius(e: Element) -> f64 {
         Element::C => 1.70,
         Element::N => 1.55,
         Element::O => 1.52,
+        Element::P => 1.80,
         Element::S => 1.80,
     }
 }

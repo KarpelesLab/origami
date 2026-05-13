@@ -61,6 +61,7 @@ fn intrinsic_radius(element: Element) -> f64 {
         Element::C => 1.70,
         Element::N => 1.55,
         Element::O => 1.50,
+        Element::P => 1.85, // AMBER mbondi2 value for phosphate
         Element::S => 1.80,
     }
 }
@@ -75,6 +76,7 @@ fn hct_scale(element: Element) -> f64 {
         Element::C => 0.72,
         Element::N => 0.79,
         Element::O => 0.85,
+        Element::P => 0.86, // AMBER mbondi2 phosphate HCT scale
         Element::S => 0.96,
     }
 }

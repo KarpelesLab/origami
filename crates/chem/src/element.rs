@@ -4,6 +4,10 @@ pub enum Element {
     C,
     N,
     O,
+    /// Phosphorus, used in nucleic-acid backbones. Added when
+    /// `chem::nucleotide` was introduced; protein-only code paths
+    /// continue to ignore it.
+    P,
     S,
 }
 
@@ -14,6 +18,7 @@ impl Element {
             Element::C => 'C',
             Element::N => 'N',
             Element::O => 'O',
+            Element::P => 'P',
             Element::S => 'S',
         }
     }
@@ -25,6 +30,7 @@ impl Element {
             Element::C => 12.011,
             Element::N => 14.007,
             Element::O => 15.999,
+            Element::P => 30.974,
             Element::S => 32.06,
         }
     }
@@ -36,6 +42,7 @@ impl Element {
             Element::C => 1.70,
             Element::N => 1.55,
             Element::O => 1.52,
+            Element::P => 1.80,
             Element::S => 1.80,
         }
     }
