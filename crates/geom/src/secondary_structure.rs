@@ -20,7 +20,6 @@
 
 use crate::measure::dihedral;
 use crate::structure::Structure;
-use crate::Vec3;
 
 /// Three-letter abbreviations consistent with DSSP / STRIDE.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,13 +129,6 @@ pub fn ss_counts(structure: &Structure) -> (usize, usize, usize) {
     (h, e, c)
 }
 
-/// Centroid-aware Ramachandran reference angles used by tests and by
-/// the `_pub` rebuild path elsewhere.
-#[allow(dead_code)]
-const _: () = {
-    let _ = std::mem::size_of::<SsType>();
-};
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,9 +161,4 @@ mod tests {
         assert_eq!(classify(deg(60.0), deg(60.0)), SsType::Coil);
     }
 
-    #[test]
-    fn unused_vec3() {
-        // Silence "unused import" warning when feature flags reshuffle.
-        let _ = Vec3::zeros();
-    }
 }

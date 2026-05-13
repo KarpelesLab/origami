@@ -190,6 +190,46 @@ enum Command {
         #[arg(long)]
         shake_h: bool,
     },
+    /// Replica-exchange molecular dynamics. Runs N Langevin trajectories
+    /// at different temperatures with periodic Metropolis swaps between
+    /// adjacent pairs, accelerating conformational sampling. The lowest-
+    /// T replica is the production trajectory.
+    Remd {
+        /// Input PDB (starting configuration; shared across all replicas).
+        input: PathBuf,
+        /// Output trajectory PDB for replica 0 (the production / lowest-T
+        /// run). Multi-MODEL.
+        #[arg(long)]
+        output_trajectory: PathBuf,
+        /// Comma-separated list of temperatures (K). Replica 0 = lowest.
+        /// A typical 4-replica ladder for protein folding: `300,360,430,520`.
+        #[arg(long, default_value = "300,360,430,520", value_delimiter = ',')]
+        temperatures: Vec<f64>,
+        /// Total simulated time per replica (ps).
+        #[arg(long, default_value_t = 5.0)]
+        time_ps: f64,
+        /// Swap attempt interval (ps).
+        #[arg(long, default_value_t = 0.5)]
+        swap_interval_ps: f64,
+        /// Integration timestep (fs).
+        #[arg(long, default_value_t = 1.0)]
+        dt: f64,
+        /// Save a frame every N integrator steps (production replica only).
+        #[arg(long, default_value_t = 100)]
+        save_every: usize,
+        /// Friction γ (ps⁻¹).
+        #[arg(long, default_value_t = 2.0)]
+        friction: f64,
+        /// PRNG seed.
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+        /// Include SASA (hydrophobic) forces.
+        #[arg(long)]
+        with_sasa: bool,
+        /// SHAKE the X-H bonds (enables dt = 2 fs).
+        #[arg(long)]
+        shake_h: bool,
+    },
     /// Minimize a PDB structure (energy gradient descent).
     Minimize {
         /// Input PDB.
@@ -317,6 +357,31 @@ fn main() -> Result<()> {
             with_sasa,
             shake_h,
         ),
+        Command::Remd {
+            input,
+            output_trajectory,
+            temperatures,
+            time_ps,
+            swap_interval_ps,
+            dt,
+            save_every,
+            friction,
+            seed,
+            with_sasa,
+            shake_h,
+        } => run_remd_cmd(
+            &input,
+            &output_trajectory,
+            temperatures,
+            time_ps,
+            swap_interval_ps,
+            dt,
+            save_every,
+            friction,
+            seed,
+            with_sasa,
+            shake_h,
+        ),
         Command::Analyze {
             input,
             reference,
@@ -412,6 +477,132 @@ fn run_render(
             width,
             height,
             out_path.display(),
+        );
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_remd_cmd(
+    input: &Path,
+    output_traj: &Path,
+    temperatures: Vec<f64>,
+    time_ps: f64,
+    swap_interval_ps: f64,
+    dt_fs: f64,
+    save_every: usize,
+    friction_ps_inv: f64,
+    seed: u64,
+    with_sasa: bool,
+    shake_h: bool,
+) -> Result<()> {
+    if temperatures.len() < 2 {
+        return Err(anyhow!(
+            "remd needs at least 2 temperatures, got {}",
+            temperatures.len()
+        ));
+    }
+    let file = fs::File::open(input)
+        .with_context(|| format!("opening {}", input.display()))?;
+    let structure = read_pdb(file)
+        .with_context(|| format!("reading {}", input.display()))?;
+    let graph = build_topology_graph(&structure);
+    let ff = standard_ff();
+
+    let opts = dynamics::remd::RemdOptions {
+        temperatures_k: temperatures.clone(),
+        dt_fs,
+        friction_ps_inv,
+        total_time_fs: time_ps * 1000.0,
+        swap_interval_fs: swap_interval_ps * 1000.0,
+        save_every,
+        seed,
+        include_sasa: with_sasa,
+        constrain_h_bonds: shake_h,
+    };
+
+    let mut sorted_temps = temperatures.clone();
+    sorted_temps.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let production_t = sorted_temps[0];
+
+    eprintln!(
+        "origami remd: {} atoms, {} residues, {} replicas at T={:?} K, dt={} fs, total {} ps, swap every {} ps{}{}",
+        structure.atom_count(),
+        structure.residues.len(),
+        sorted_temps.len(),
+        sorted_temps,
+        dt_fs,
+        time_ps,
+        swap_interval_ps,
+        if with_sasa { ", +SASA" } else { "" },
+        if shake_h { ", +SHAKE" } else { "" },
+    );
+
+    // Collect frames from replica 0 (production / lowest-T) into a
+    // trajectory PDB. Other replicas' frames are accepted by the
+    // callback but not saved (a future flag could control this).
+    let mut frames: Vec<geom::Structure> = Vec::new();
+    let mut last_report_time_fs = 0.0f64;
+    let summary = dynamics::remd::run_remd(&structure, &graph, ff, opts, |frame| {
+        if frame.replica_idx == 0 {
+            frames.push(frame.structure.clone());
+            if frame.time_fs - last_report_time_fs >= 1000.0 || frame.step == 0 {
+                eprintln!(
+                    "  T={:.0}K  step={:>6} t={:>8.1} fs   T_inst={:.1} K",
+                    frame.temperature_k,
+                    frame.step,
+                    frame.time_fs,
+                    frame.instantaneous_temperature_k,
+                );
+                last_report_time_fs = frame.time_fs;
+            }
+        }
+    });
+
+    let title = format!(
+        "REMD production T={production_t}K, {} replicas, {} ps",
+        sorted_temps.len(),
+        time_ps
+    );
+    let mut out = fs::File::create(output_traj)
+        .with_context(|| format!("creating {}", output_traj.display()))?;
+    write_pdb_trajectory(&mut out, &title, frames.iter())
+        .context("writing trajectory PDB")?;
+    eprintln!(
+        "wrote {} frames from replica 0 → {}",
+        frames.len(),
+        output_traj.display()
+    );
+
+    let ratios = summary.acceptance_ratios();
+    eprintln!();
+    eprintln!("REMD summary:");
+    eprintln!("  atoms: {}, replicas: {}", summary.atoms_count, summary.n_replicas);
+    for (i, r) in summary.per_replica.iter().enumerate() {
+        eprintln!(
+            "  replica {} @ T={:.0} K: PE={:.1} kJ/mol, KE={:.1} kJ/mol, {}{}",
+            i,
+            r.temperature_k,
+            r.final_potential_energy_kj_mol,
+            r.final_kinetic_energy_kj_mol,
+            if r.diverged { "DIVERGED" } else { "ok" },
+            if r.shake_failures > 0 {
+                format!(" ({} SHAKE failures)", r.shake_failures)
+            } else {
+                String::new()
+            },
+        );
+    }
+    eprintln!("  swap pairs (i ↔ i+1):");
+    for (i, &att) in summary.swap_attempts.iter().enumerate() {
+        let acc = summary.swap_accepts[i];
+        eprintln!(
+            "    {}↔{}: {}/{} accepts ({:.1}%)",
+            i,
+            i + 1,
+            acc,
+            att,
+            100.0 * ratios[i],
         );
     }
     Ok(())

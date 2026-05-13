@@ -11,6 +11,7 @@ pub mod langevin;
 pub mod lbfgs;
 pub mod line_search;
 pub mod minimize;
+pub mod remd;
 pub mod rng;
 pub mod shake;
 pub mod steepest_descent;
