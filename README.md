@@ -300,12 +300,15 @@ origami render trp_cage.pdb --output trp_cage.png --width 800 --height 600
 origami render traj.pdb --output-dir frames/ --width 800 --height 600 \
     --frame-dt-fs 100
 
-# Trajectory analysis: per-frame Cα RMSD, Rg, end-to-end; residue-residue
-# contact-frequency map averaged over fully-grown frames.
+# Trajectory analysis: per-frame Cα RMSD, Rg, end-to-end, DSSP secondary
+# structure (H/E/C string + helix/strand %), optional residue-residue
+# contact-frequency map, optional RMSD-clustering of frames into fold
+# basins.
 origami analyze cotrans.pdb \
     --reference crates/io/tests/fixtures/1UAO_chignolin.pdb \
     --output metrics.tsv \
-    --contact-map contacts.tsv --contact-cutoff 8.0
+    --contact-map contacts.tsv --contact-cutoff 8.0 \
+    --cluster-cutoff 1.5
 ```
 
 ## Layout

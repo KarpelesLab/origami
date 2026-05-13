@@ -284,6 +284,12 @@ enum Command {
         /// size histogram.
         #[arg(long)]
         cluster_cutoff: Option<f64>,
+        /// When clustering is on, also write one representative PDB
+        /// per cluster — the cluster medoid (frame with minimal
+        /// summed Cα RMSD to every other frame in its cluster).
+        /// Files go to `<prefix>0.pdb`, `<prefix>1.pdb`, …
+        #[arg(long)]
+        cluster_out_prefix: Option<PathBuf>,
     },
 }
 
@@ -395,6 +401,7 @@ fn main() -> Result<()> {
             contact_map,
             contact_cutoff,
             cluster_cutoff,
+            cluster_out_prefix,
         } => run_analyze(
             &input,
             reference.as_deref(),
@@ -402,6 +409,7 @@ fn main() -> Result<()> {
             contact_map.as_deref(),
             contact_cutoff,
             cluster_cutoff,
+            cluster_out_prefix.as_deref(),
         ),
     }
 }
@@ -1009,6 +1017,7 @@ fn run_analyze(
     contact_map: Option<&Path>,
     contact_cutoff_a: f64,
     cluster_cutoff_a: Option<f64>,
+    cluster_out_prefix: Option<&Path>,
 ) -> Result<()> {
     let traj_bytes = fs::read(input)
         .with_context(|| format!("reading {}", input.display()))?;
@@ -1042,6 +1051,37 @@ fn run_analyze(
         eprintln!("clustering @ {:.2} Å Cα-RMSD cutoff: {} clusters", cutoff, sizes.len());
         for (cid, count) in sizes.iter().take(10) {
             eprintln!("  cluster {cid:>3}: {count:>4} frames ({:.1}%)", 100.0 * *count as f64 / frames.len() as f64);
+        }
+        // Optional: dump one representative PDB per cluster (the medoid).
+        if let Some(prefix) = cluster_out_prefix {
+            let medoids = geom::cluster_medoids(&frames, &labels);
+            for (cid, &frame_idx) in medoids.iter().enumerate() {
+                let path = prefix
+                    .as_os_str()
+                    .to_owned();
+                let mut p = std::path::PathBuf::from(path);
+                p.set_file_name(format!(
+                    "{}{cid}.pdb",
+                    prefix.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+                ));
+                if let Some(parent) = p.parent() {
+                    if !parent.as_os_str().is_empty() {
+                        fs::create_dir_all(parent).ok();
+                    }
+                }
+                let mut f = fs::File::create(&p)
+                    .with_context(|| format!("creating {}", p.display()))?;
+                io::write_pdb(
+                    &mut f,
+                    &frames[frame_idx],
+                    &format!("cluster {cid} medoid (frame {frame_idx})"),
+                )?;
+            }
+            eprintln!(
+                "wrote {} cluster representative PDBs ({} prefix)",
+                medoids.len(),
+                prefix.display(),
+            );
         }
         labels
     } else {

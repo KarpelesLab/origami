@@ -98,6 +98,49 @@ pub fn cluster_trajectory(frames: &[Structure], cutoff_a: f64) -> Vec<usize> {
     cluster.iter().map(|c| *remap.get(c).unwrap_or(&0)).collect()
 }
 
+/// For each cluster, pick the medoid frame — the frame whose summed
+/// Cα RMSD to every other frame in the same cluster is minimal. This
+/// is the "most representative" frame of the cluster (the centroid
+/// in RMSD space when the cluster has fewer than ~10 members; for
+/// larger clusters the medoid is a good approximation that doesn't
+/// require fractional coordinates). Singleton clusters return their
+/// only frame.
+///
+/// Returns one frame index per cluster, in cluster-label order
+/// (matching the order `cluster_sizes` produces).
+pub fn cluster_medoids(frames: &[Structure], labels: &[usize]) -> Vec<usize> {
+    use std::collections::BTreeMap;
+    let mut by_cluster: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for (idx, &lbl) in labels.iter().enumerate() {
+        by_cluster.entry(lbl).or_default().push(idx);
+    }
+    let mut out: Vec<(usize, usize)> = Vec::with_capacity(by_cluster.len());
+    for (lbl, members) in by_cluster {
+        if members.len() == 1 {
+            out.push((lbl, members[0]));
+            continue;
+        }
+        let mut best_idx = members[0];
+        let mut best_sum = f64::INFINITY;
+        for &i in &members {
+            let mut s = 0.0;
+            for &j in &members {
+                if i == j {
+                    continue;
+                }
+                s += rmsd_ca(&frames[i], &frames[j]).unwrap_or(0.0);
+            }
+            if s < best_sum {
+                best_sum = s;
+                best_idx = i;
+            }
+        }
+        out.push((lbl, best_idx));
+    }
+    out.sort_by_key(|(lbl, _)| *lbl);
+    out.into_iter().map(|(_, idx)| idx).collect()
+}
+
 /// Helper: aggregate cluster labels into a `(label → size)` list,
 /// sorted by size descending.
 pub fn cluster_sizes(labels: &[usize]) -> Vec<(usize, usize)> {
