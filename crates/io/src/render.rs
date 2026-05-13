@@ -24,6 +24,14 @@ pub struct RenderOptions {
     pub bond_radius_a: f64,
     /// Vertical field-of-view in degrees.
     pub fov_deg: f64,
+    /// If set, override the auto-computed centroid with this point.
+    /// Used by the trajectory renderer to keep the camera locked across
+    /// frames (without it the molecule appears to bounce around as the
+    /// per-frame centroid drifts).
+    pub fixed_centroid: Option<Vec3>,
+    /// If set, override the auto-computed bounding radius. Pair with
+    /// `fixed_centroid` to fully pin the camera distance.
+    pub fixed_bounding_radius: Option<f64>,
 }
 
 impl Default for RenderOptions {
@@ -36,8 +44,35 @@ impl Default for RenderOptions {
             atom_scale: 0.35,
             bond_radius_a: 0.18,
             fov_deg: 30.0,
+            fixed_centroid: None,
+            fixed_bounding_radius: None,
         }
     }
+}
+
+/// Compute the (centroid, bounding-radius) pair for a structure as the
+/// renderer would. Exposed so a trajectory caller can scan all frames
+/// once and feed the union extents back through
+/// `RenderOptions::fixed_centroid` + `fixed_bounding_radius`.
+pub fn structure_bounds(structure: &Structure, show_hydrogens: bool, atom_scale: f64) -> (Vec3, f64) {
+    let mut centers: Vec<(Vec3, f64)> = Vec::new();
+    for residue in &structure.residues {
+        for atom in &residue.atoms {
+            if !show_hydrogens && atom.element == Element::H {
+                continue;
+            }
+            centers.push((atom.position, vdw_radius(atom.element) * atom_scale));
+        }
+    }
+    if centers.is_empty() {
+        return (Vec3::zeros(), 1.0);
+    }
+    let centroid = centers.iter().fold(Vec3::zeros(), |a, (p, _)| a + *p) / centers.len() as f64;
+    let radius = centers
+        .iter()
+        .map(|(p, r)| (*p - centroid).norm() + r)
+        .fold(0.0_f64, f64::max);
+    (centroid, radius)
 }
 
 /// Render the structure to an RGBA image.
@@ -84,14 +119,18 @@ pub fn render(structure: &Structure, opts: &RenderOptions) -> RgbaImage {
         });
     }
 
-    // 3. Set up the camera. Centre on the structure's centroid, look down
-    //    +z (toward the structure from +z). Distance picked so the
-    //    bounding sphere fits the vertical FOV with margin.
-    let centroid = atoms.iter().fold(Vec3::zeros(), |acc, a| acc + a.center) / atoms.len() as f64;
-    let bounding_radius = atoms
-        .iter()
-        .map(|a| (a.center - centroid).norm() + a.radius)
-        .fold(0.0_f64, f64::max);
+    // 3. Set up the camera. Centre on the structure's centroid (or the
+    //    caller-supplied fixed centroid), look down +z. Distance picked
+    //    so the bounding sphere fits the vertical FOV with margin.
+    let centroid = opts.fixed_centroid.unwrap_or_else(|| {
+        atoms.iter().fold(Vec3::zeros(), |acc, a| acc + a.center) / atoms.len() as f64
+    });
+    let bounding_radius = opts.fixed_bounding_radius.unwrap_or_else(|| {
+        atoms
+            .iter()
+            .map(|a| (a.center - centroid).norm() + a.radius)
+            .fold(0.0_f64, f64::max)
+    });
     let fov = opts.fov_deg.to_radians();
     let cam_dist = (bounding_radius / (fov / 2.0).tan()) * 1.25 + 5.0;
     let camera = Camera::new(

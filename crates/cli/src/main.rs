@@ -15,7 +15,8 @@ use energy::{
 };
 use geom::{build_extended_chain, build_topology_graph};
 use io::{
-    read_pdb, read_pdb_trajectory, render, write_pdb, write_pdb_trajectory, RenderOptions,
+    read_pdb, read_pdb_trajectory, render, structure_bounds, write_pdb, write_pdb_trajectory,
+    RenderOptions,
 };
 use translate::{find_orfs, parse_fasta, translate_codons};
 use translate::translate::{one_letter_string, three_letter_string};
@@ -135,6 +136,11 @@ enum Command {
         /// Tunnel length in Å.
         #[arg(long, default_value_t = 80.0)]
         tunnel_length: f64,
+        /// Include the SASA hydrophobic term in the Langevin forces.
+        /// Drives hydrophobic collapse as the chain emerges; matches the
+        /// `--with-sasa` flag on `origami dynamics`. Off by default.
+        #[arg(long)]
+        with_sasa: bool,
     },
     /// Run Langevin molecular dynamics at constant temperature, writing
     /// a multi-MODEL trajectory PDB.
@@ -232,6 +238,7 @@ fn main() -> Result<()> {
             with_tunnel,
             tunnel_radius,
             tunnel_length,
+            with_sasa,
         } => run_cotranslate_cmd(
             &seq,
             &output_trajectory,
@@ -245,6 +252,7 @@ fn main() -> Result<()> {
             with_tunnel,
             tunnel_radius,
             tunnel_length,
+            with_sasa,
         ),
         Command::Dynamics {
             input,
@@ -293,8 +301,34 @@ fn run_render(
             .with_context(|| format!("reading {}", input.display()))?;
         fs::create_dir_all(dir)
             .with_context(|| format!("creating {}", dir.display()))?;
+
+        // Lock the camera across all frames using the union extents of
+        // the trajectory, so the molecule appears to grow / fold in
+        // place instead of bouncing around as the per-frame centroid
+        // drifts. Centroid = mean of per-frame centroids; bounding
+        // radius = max over frames of (per-frame centroid offset from
+        // global + per-frame bounding radius), so the camera always
+        // contains every frame.
+        let mut centroid_sum = Vec3::zeros();
+        let mut per_frame: Vec<(Vec3, f64)> = Vec::with_capacity(frames.len());
+        for s in &frames {
+            let b = structure_bounds(s, show_hydrogens, opts.atom_scale);
+            centroid_sum = centroid_sum + b.0;
+            per_frame.push(b);
+        }
+        let global_centroid = centroid_sum / frames.len().max(1) as f64;
+        let global_radius = per_frame
+            .iter()
+            .map(|(c, r)| (*c - global_centroid).norm() + *r)
+            .fold(0.0_f64, f64::max);
+        let frame_opts = RenderOptions {
+            fixed_centroid: Some(global_centroid),
+            fixed_bounding_radius: Some(global_radius),
+            ..opts
+        };
+
         for (idx, structure) in frames.iter().enumerate() {
-            let img = render(structure, &opts);
+            let img = render(structure, &frame_opts);
             let path = dir.join(format!("frame_{:04}.png", idx + 1));
             img.save(&path)
                 .with_context(|| format!("writing {}", path.display()))?;
@@ -416,6 +450,7 @@ fn run_cotranslate_cmd(
     with_tunnel: bool,
     tunnel_radius_a: f64,
     tunnel_length_a: f64,
+    with_sasa: bool,
 ) -> Result<()> {
     let sequence = parse_aa_seq(seq_str)?;
     let ribosome = UniformRibosome::new(sequence.clone(), interval_fs);
@@ -429,7 +464,7 @@ fn run_cotranslate_cmd(
         save_every,
         seed,
         randomise_initial_velocities: true,
-        include_sasa: false,
+        include_sasa: with_sasa,
     };
 
     let tunnel = if with_tunnel {
@@ -447,7 +482,7 @@ fn run_cotranslate_cmd(
         tunnel.as_ref().map(|t| t as &dyn dynamics::ExternalPotential);
 
     eprintln!(
-        "origami cotranslate: {} residues, interval={} fs, dt={} fs, T={} K, γ={} ps⁻¹{}",
+        "origami cotranslate: {} residues, interval={} fs, dt={} fs, T={} K, γ={} ps⁻¹{}{}",
         sequence.len(),
         interval_fs,
         dt_fs,
@@ -461,6 +496,7 @@ fn run_cotranslate_cmd(
         } else {
             String::new()
         },
+        if with_sasa { ", +SASA" } else { "" },
     );
 
     let tail_steps = (tail_fs / dt_fs).round() as usize;
