@@ -183,6 +183,12 @@ enum Command {
         /// contribution PSA.2 currently provides.
         #[arg(long)]
         with_sasa: bool,
+        /// Constrain every X-H bond length with SHAKE. Removes the
+        /// hydrogen-stretch high-frequency mode that otherwise forces
+        /// dt ≤ 1 fs; combine with `--dt 2.0` for a 2× longer
+        /// trajectory per wall-second.
+        #[arg(long)]
+        shake_h: bool,
     },
     /// Minimize a PDB structure (energy gradient descent).
     Minimize {
@@ -297,6 +303,7 @@ fn main() -> Result<()> {
             seed,
             zero_initial_velocity,
             with_sasa,
+            shake_h,
         } => run_dynamics(
             &input,
             &output_trajectory,
@@ -308,6 +315,7 @@ fn main() -> Result<()> {
             seed,
             !zero_initial_velocity,
             with_sasa,
+            shake_h,
         ),
         Command::Analyze {
             input,
@@ -421,6 +429,7 @@ fn run_dynamics(
     seed: u64,
     randomise_initial_velocities: bool,
     include_sasa: bool,
+    shake_h: bool,
 ) -> Result<()> {
     let file = fs::File::open(input)
         .with_context(|| format!("opening {}", input.display()))?;
@@ -438,6 +447,7 @@ fn run_dynamics(
         seed,
         randomise_initial_velocities,
         include_sasa,
+        constrain_h_bonds: shake_h,
     };
 
     eprintln!(
@@ -515,6 +525,7 @@ fn run_cotranslate_cmd(
         seed,
         randomise_initial_velocities: true,
         include_sasa: with_sasa,
+        constrain_h_bonds: false,
     };
 
     let tunnel = if with_tunnel {

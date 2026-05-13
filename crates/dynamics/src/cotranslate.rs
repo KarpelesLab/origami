@@ -464,6 +464,7 @@ mod tests {
             seed: 1,
             randomise_initial_velocities: true,
             include_sasa: false,
+            constrain_h_bonds: false,
         };
         let ff = standard_ff();
         let mut frames = 0usize;

@@ -28,6 +28,7 @@ fn cotranslate_ala5_grows_to_five_residues() {
         seed: 7,
         randomise_initial_velocities: true,
         include_sasa: false,
+        constrain_h_bonds: false,
     };
     let ff = standard_ff();
 
@@ -81,6 +82,7 @@ fn cotranslate_with_tunnel_keeps_chain_inside_radius() {
         seed: 11,
         randomise_initial_velocities: true,
         include_sasa: false,
+        constrain_h_bonds: false,
     };
     let ff = standard_ff();
 

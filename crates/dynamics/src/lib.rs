@@ -12,6 +12,7 @@ pub mod lbfgs;
 pub mod line_search;
 pub mod minimize;
 pub mod rng;
+pub mod shake;
 pub mod steepest_descent;
 
 pub use cotranslate::{

@@ -36,6 +36,7 @@ fn trp_cage_native_stays_near_native_during_2ps_md() {
         seed: 5,
         randomise_initial_velocities: true,
         include_sasa: false,
+        constrain_h_bonds: false,
     };
     let summary = run_langevin(&mut s, &g, ff, opts, |_| {});
     assert!(!summary.diverged, "trajectory diverged");

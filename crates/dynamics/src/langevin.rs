@@ -70,6 +70,12 @@ pub struct LangevinOptions {
     /// Include SASA forces (PSA.2). Slow; off by default since the
     /// numerical SASA gradient costs ~100 ms per call on Trp-cage.
     pub include_sasa: bool,
+    /// Apply SHAKE iterative bond-length constraints to every X-H
+    /// bond after each position half-step. Freezes the high-frequency
+    /// hydrogen stretches so the integrator can step at dt = 2 fs
+    /// without the bond-vibration aliasing that forces dt ≤ 1 fs in
+    /// unconstrained MD. Off by default.
+    pub constrain_h_bonds: bool,
 }
 
 impl Default for LangevinOptions {
@@ -83,6 +89,7 @@ impl Default for LangevinOptions {
             seed: 0,
             randomise_initial_velocities: true,
             include_sasa: false,
+            constrain_h_bonds: false,
         }
     }
 }
@@ -106,6 +113,11 @@ pub struct LangevinSummary {
     pub final_kinetic_energy_kj_mol: f64,
     pub atoms_count: usize,
     pub diverged: bool,
+    /// Count of integrator half-steps where the SHAKE iteration did
+    /// not converge within `SHAKE_MAX_ITERS`. Zero in a healthy run;
+    /// non-zero with `constrain_h_bonds = true` indicates the timestep
+    /// is too large for some constraint to settle.
+    pub shake_failures: usize,
 }
 
 /// One BAOAB Langevin trajectory.
@@ -152,6 +164,39 @@ where
         &mut forces,
     );
 
+    // Optional SHAKE constraints (X-H bonds). Build once at run start;
+    // the constraint list is static for the trajectory. The reference
+    // / current position buffers are kept around for the loop and
+    // rewritten in place each step.
+    let inv_masses: Vec<f64> = masses.iter().map(|m| 1.0 / m).collect();
+    let constraints: Vec<crate::shake::Constraint> = if opts.constrain_h_bonds {
+        // The same per-atom type list `energy::forces_bonded` uses.
+        let atom_types = energy::forces_bonded::build_atom_types(structure);
+        crate::shake::build_h_bond_constraints(structure, graph, ff, &atom_types)
+    } else {
+        Vec::new()
+    };
+    let use_shake = !constraints.is_empty();
+    // Each bond constraint removes one degree of freedom. The
+    // Maxwell-Boltzmann variance the O step injects then gets partly
+    // projected away by SHAKE; inflating σ² by the DOF ratio keeps the
+    // post-projection KE matched to (3N/2) k_B T_target so the
+    // thermostat actually reaches the requested temperature. Without
+    // this scaling, a Trp-cage run at 310 K equilibrates to ~245 K
+    // because the H-atom velocity components get clipped.
+    let total_dof = (3 * n) as f64;
+    let dof_correction = if use_shake {
+        let removed = constraints.len() as f64;
+        total_dof / (total_dof - removed).max(1.0)
+    } else {
+        1.0
+    };
+    let mut pos_buf: Vec<Vec3> = vec![Vec3::zeros(); n];
+    let mut ref_buf: Vec<Vec3> = vec![Vec3::zeros(); n];
+    let mut shake_failures = 0usize;
+    const SHAKE_TOL_SQ: f64 = 1e-6;
+    const SHAKE_MAX_ITERS: usize = 64;
+
     // Running stats (Welford).
     let mut sum_t = 0.0;
     let mut sum_t2 = 0.0;
@@ -182,12 +227,41 @@ where
             velocities[i] += forces[i] * (inv_m_accel * half_dt);
         }
         // A (first half): r += v · dt/2
+        if use_shake {
+            flatten_positions_into(structure, &mut ref_buf);
+        }
         apply_velocity_step(structure, &velocities, half_dt);
+        if use_shake {
+            flatten_positions_into(structure, &mut pos_buf);
+            if crate::shake::shake_iterate(
+                &mut pos_buf,
+                &ref_buf,
+                &inv_masses,
+                &constraints,
+                SHAKE_TOL_SQ,
+                SHAKE_MAX_ITERS,
+            )
+            .is_none()
+            {
+                shake_failures += 1;
+            }
+            // Project velocities onto the constrained displacement —
+            // SHAKE moved atoms by (pos_buf − unconstrained_pos), and
+            // without folding that back into v we silently inject
+            // kinetic energy. The implied velocity that *actually*
+            // advanced atoms from ref → pos_buf is
+            //     v_consistent = (pos_buf − ref_buf) / half_dt.
+            for i in 0..n {
+                velocities[i] = (pos_buf[i] - ref_buf[i]) / half_dt;
+            }
+            unflatten_positions_from(structure, &pos_buf);
+        }
 
         // O: v ← α v + σ ξ, σ² = (1 − α²) k_B T / m · ACCEL_FACTOR
         let one_minus_alpha2 = 1.0 - alpha * alpha;
         for i in 0..n {
-            let sigma = (one_minus_alpha2 * kbt * ACCEL_FACTOR / masses[i]).sqrt();
+            let sigma =
+                (one_minus_alpha2 * kbt * dof_correction * ACCEL_FACTOR / masses[i]).sqrt();
             let xi_x = rng.gaussian();
             let xi_y = rng.gaussian();
             let xi_z = rng.gaussian();
@@ -197,7 +271,29 @@ where
         }
 
         // A (second half).
+        if use_shake {
+            flatten_positions_into(structure, &mut ref_buf);
+        }
         apply_velocity_step(structure, &velocities, half_dt);
+        if use_shake {
+            flatten_positions_into(structure, &mut pos_buf);
+            if crate::shake::shake_iterate(
+                &mut pos_buf,
+                &ref_buf,
+                &inv_masses,
+                &constraints,
+                SHAKE_TOL_SQ,
+                SHAKE_MAX_ITERS,
+            )
+            .is_none()
+            {
+                shake_failures += 1;
+            }
+            for i in 0..n {
+                velocities[i] = (pos_buf[i] - ref_buf[i]) / half_dt;
+            }
+            unflatten_positions_from(structure, &pos_buf);
+        }
 
         // Recompute forces at the new positions.
         total_force_with_scratch(
@@ -266,6 +362,26 @@ where
         final_kinetic_energy_kj_mol: ke_final,
         atoms_count: n,
         diverged,
+        shake_failures,
+    }
+}
+
+fn flatten_positions_into(structure: &Structure, out: &mut Vec<Vec3>) {
+    out.clear();
+    for r in &structure.residues {
+        for a in &r.atoms {
+            out.push(a.position);
+        }
+    }
+}
+
+fn unflatten_positions_from(structure: &mut Structure, src: &[Vec3]) {
+    let mut idx = 0usize;
+    for r in &mut structure.residues {
+        for a in &mut r.atoms {
+            a.position = src[idx];
+            idx += 1;
+        }
     }
 }
 
