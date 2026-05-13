@@ -208,6 +208,35 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
         }
     }
 
+    // ---- Disulfide bridges ----
+    // CYS-CYS SG atoms within ~2.5 Å form an S-S covalent bond. This is
+    // detected geometrically rather than declared, because the input
+    // structure (PDB file or built chain) is the source of truth for
+    // which cysteines are oxidised. Threshold 2.5 Å is generous: native
+    // disulfides sit at ~2.05 Å, and we don't want to catch sub-vdW-
+    // contact spectator pairs (vdW S radius is 1.8 Å, so any pair with
+    // SG–SG > ~3.6 Å is definitively not bonded).
+    let mut cys_sg: Vec<(usize, crate::Vec3)> = Vec::new();
+    for (ri, res) in structure.residues.iter().enumerate() {
+        if res.aa != AminoAcid::Cys {
+            continue;
+        }
+        if let (Some(idx), Some(pos)) = (lookup(ri, "SG"), res.position("SG")) {
+            cys_sg.push((idx, pos));
+        }
+    }
+    const DISULFIDE_MAX_A: f64 = 2.5;
+    const DISULFIDE_MAX_SQ: f64 = DISULFIDE_MAX_A * DISULFIDE_MAX_A;
+    for i in 0..cys_sg.len() {
+        for j in (i + 1)..cys_sg.len() {
+            let (idx_i, pi) = cys_sg[i];
+            let (idx_j, pj) = cys_sg[j];
+            if (pi - pj).norm_squared() <= DISULFIDE_MAX_SQ {
+                add_bond(&mut bonds, idx_i, idx_j);
+            }
+        }
+    }
+
     // Sort for stable iteration.
     let mut bonds: Vec<Bond> = bonds.into_iter().collect();
     bonds.sort_by_key(|b| (b.a, b.b));
@@ -468,5 +497,61 @@ mod tests {
         let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala]).unwrap();
         let g = build_topology_graph(&s);
         assert!(!g.impropers.is_empty(), "expected at least the peptide-bond improper");
+    }
+
+    #[test]
+    fn no_disulfide_in_extended_cys_chain() {
+        // Two cysteines built as an extended chain have their SG atoms
+        // well separated (~5+ Å), so no S-S bond should be detected.
+        let s = build_extended_chain(&[AminoAcid::Cys, AminoAcid::Cys]).unwrap();
+        let g = build_topology_graph(&s);
+        let sg_indices: Vec<usize> = collect_sg_indices(&s);
+        assert_eq!(sg_indices.len(), 2);
+        assert!(
+            !g.is_bonded(sg_indices[0], sg_indices[1]),
+            "extended Cys-Cys should not auto-bond"
+        );
+    }
+
+    #[test]
+    fn disulfide_detected_when_sg_atoms_close() {
+        // Build Cys-Cys then nudge the second SG to within 2.05 Å of
+        // the first SG. The graph builder should pick this up as an
+        // S-S bridge.
+        let mut s = build_extended_chain(&[AminoAcid::Cys, AminoAcid::Cys]).unwrap();
+        let sg0 = s.residues[0]
+            .atoms
+            .iter()
+            .find(|a| a.name == "SG")
+            .unwrap()
+            .position;
+        // Place residue 1's SG at sg0 + 2.029 Å along x — the CHARMM
+        // SM-SM equilibrium distance.
+        for atom in &mut s.residues[1].atoms {
+            if atom.name == "SG" {
+                atom.position = sg0 + crate::Vec3::new(2.029, 0.0, 0.0);
+            }
+        }
+        let g = build_topology_graph(&s);
+        let sg_indices: Vec<usize> = collect_sg_indices(&s);
+        assert_eq!(sg_indices.len(), 2);
+        assert!(
+            g.is_bonded(sg_indices[0], sg_indices[1]),
+            "Cys-Cys at SG-SG = 2.029 Å should be auto-bonded"
+        );
+    }
+
+    fn collect_sg_indices(s: &crate::structure::Structure) -> Vec<usize> {
+        let mut out = Vec::new();
+        let mut idx = 0;
+        for r in &s.residues {
+            for a in &r.atoms {
+                if a.name == "SG" {
+                    out.push(idx);
+                }
+                idx += 1;
+            }
+        }
+        out
     }
 }

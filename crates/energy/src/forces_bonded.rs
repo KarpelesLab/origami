@@ -316,6 +316,72 @@ mod tests {
     }
 
     #[test]
+    fn disulfide_bond_force_nonzero_when_stretched() {
+        // Cys-Cys with the second SG moved so SG-SG = 2.5 Å (above the
+        // 2.029 Å equilibrium for SM-SM). The disulfide is detected,
+        // contributes to add_bond_forces, and the full bonded gradient
+        // matches finite differences atom-by-atom at the SG atoms. We
+        // can't assert Newton's third law on just the SG pair because
+        // each SG also feels a *very* stretched CB-SG bond after the
+        // displacement; the finite-diff agreement is the right check
+        // (it sees the full bonded energy, just like the analytical
+        // gradient does).
+        let mut s = build_extended_chain(&[AminoAcid::Cys, AminoAcid::Cys]).unwrap();
+        let sg0 = s.residues[0]
+            .atoms
+            .iter()
+            .find(|a| a.name == "SG")
+            .unwrap()
+            .position;
+        for atom in &mut s.residues[1].atoms {
+            if atom.name == "SG" {
+                atom.position = sg0 + Vec3::new(2.5, 0.0, 0.0);
+            }
+        }
+        let g = build_topology_graph(&s);
+        let ff = standard_ff();
+        let atom_types = build_atom_types(&s);
+        let positions = flatten_positions(&s);
+        let n = positions.len();
+        let mut forces = vec![Vec3::zeros(); n];
+        add_bond_forces(&positions, &g, ff, &atom_types, &mut forces);
+
+        // Find both SG indices.
+        let mut sg_indices = Vec::new();
+        let mut idx = 0;
+        for r in &s.residues {
+            for a in &r.atoms {
+                if a.name == "SG" {
+                    sg_indices.push(idx);
+                }
+                idx += 1;
+            }
+        }
+        assert_eq!(sg_indices.len(), 2);
+        // The disulfide must be in the bond list.
+        assert!(
+            g.is_bonded(sg_indices[0], sg_indices[1]),
+            "SG-SG bond must be detected"
+        );
+        // Each SG has a finite, non-zero force.
+        for &sg in &sg_indices {
+            assert!(forces[sg].norm().is_finite() && forces[sg].norm() > 0.0);
+        }
+        // Full bonded gradient matches finite-difference at SG.
+        // Loose tolerance because the geometry is far from equilibrium
+        // so individual terms are large (~1e4 kJ/mol/Å); we just need
+        // the analytical and numerical answers to agree relatively.
+        for &sg in &sg_indices {
+            for axis in 0..3 {
+                finite_diff_check(
+                    &s, &forces, sg, axis, ff, &g, &atom_types,
+                    1e-5, bond_energy, 2.0, "disulfide-bond",
+                );
+            }
+        }
+    }
+
+    #[test]
     fn angle_force_finite_difference() {
         let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala]).unwrap();
         let g = build_topology_graph(&s);

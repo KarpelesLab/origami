@@ -186,8 +186,29 @@ pub fn standard() -> &'static ForceField {
         let rtf = include_str!("../../../data/charmm36/top_all36_prot.rtf");
         let mut ff = parse(par);
         parse_rtf_charges(rtf, &mut ff);
+        patch_disulfide_bond(&mut ff);
         ff
     })
+}
+
+/// Register a CYS-CYS disulfide (SG-SG) bond by mapping CHARMM's SM-SM
+/// parameters onto our `S` atom type (which is what `classify` assigns
+/// to CYS SG). The CHARMM `PRES DISU` patch reassigns SG from the free-
+/// CYS sulfur type to `SM` (disulfide-bridged sulfur) and deletes the
+/// HG hydrogens; we skip the type swap and the HG removal — the bond
+/// constants and equilibrium distance match closely enough between the
+/// two sulfur environments that the small charge/typing differences
+/// only shift LJ + Coulomb terms by a few kJ/mol per disulfide, which
+/// is below the noise of the rest of the field.
+///
+/// CHARMM SM-SM bond:  K = 173 kcal/mol/Å² (no leading ½ — CHARMM
+/// convention V = K(r − r₀)²),  r₀ = 2.029 Å.
+fn patch_disulfide_bond(ff: &mut ForceField) {
+    let key = canonical_pair(AtomType::S, AtomType::S);
+    ff.bonds.entry(key).or_insert(BondParams {
+        k: 173.0,
+        r0: 2.029,
+    });
 }
 
 /// Parse a CHARMM .prm file. Wildcard atom-type tokens (`X`) are recognised.
