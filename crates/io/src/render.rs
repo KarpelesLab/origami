@@ -10,7 +10,7 @@ use chem::Element;
 use geom::{build_topology_graph, Structure, Vec3};
 use image::{Rgba, RgbaImage};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct RenderOptions {
     pub width: u32,
     pub height: u32,
@@ -32,6 +32,18 @@ pub struct RenderOptions {
     /// If set, override the auto-computed bounding radius. Pair with
     /// `fixed_centroid` to fully pin the camera distance.
     pub fixed_bounding_radius: Option<f64>,
+    /// Optional text overlay drawn at the top-left corner of the image
+    /// after raycasting. Used by the trajectory renderer to print the
+    /// frame's simulation time (e.g. `t = 12.40 ps`). Drawn with a
+    /// built-in 5×7 bitmap font; rendered glyph height is
+    /// `overlay_text_scale × 7` pixels.
+    pub overlay_text: Option<String>,
+    /// Pixel scale factor for `overlay_text` glyphs. Default 3 → 15 px
+    /// wide / 21 px tall characters at 800 × 600.
+    pub overlay_text_scale: u32,
+    /// RGB tint of the overlay text. Defaults to a near-white that
+    /// reads cleanly against the dark molecular background.
+    pub overlay_text_color: [u8; 3],
 }
 
 impl Default for RenderOptions {
@@ -46,6 +58,9 @@ impl Default for RenderOptions {
             fov_deg: 30.0,
             fixed_centroid: None,
             fixed_bounding_radius: None,
+            overlay_text: None,
+            overlay_text_scale: 3,
+            overlay_text_color: [220, 220, 220],
         }
     }
 }
@@ -190,10 +205,82 @@ pub fn render(structure: &Structure, opts: &RenderOptions) -> RgbaImage {
             img.put_pixel(i, j, Rgba([r, g, b, 255]));
         }
     }
+
+    // Optional overlay (e.g. simulation time stamp for trajectory frames).
+    if let Some(text) = &opts.overlay_text {
+        let scale = opts.overlay_text_scale.max(1);
+        // Inset from top-left by one glyph height — looks balanced
+        // against the dark border.
+        let margin = scale * FONT_HEIGHT.min(7);
+        draw_text(&mut img, text, margin, margin, scale, opts.overlay_text_color);
+    }
+
     img
 }
 
 // ---------- Internals ----------
+
+// Built-in 5×7 bitmap font covering only what the trajectory time
+// overlay needs (digits + "t = . p s f n" and space). Each glyph is
+// seven u8 rows; the low 5 bits of each row are pixels, MSB = leftmost
+// pixel. This is enough for strings of the form "t = 12.40 ps".
+const FONT_WIDTH: u32 = 5;
+const FONT_HEIGHT: u32 = 7;
+const FONT_KERN: u32 = 1; // inter-character gap in pixels (× scale)
+
+fn font_glyph(c: char) -> Option<[u8; 7]> {
+    match c {
+        '0' => Some([0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110]),
+        '1' => Some([0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110]),
+        '2' => Some([0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111]),
+        '3' => Some([0b01110, 0b10001, 0b00001, 0b00110, 0b00001, 0b10001, 0b01110]),
+        '4' => Some([0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010]),
+        '5' => Some([0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110]),
+        '6' => Some([0b01110, 0b10001, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110]),
+        '7' => Some([0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000]),
+        '8' => Some([0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110]),
+        '9' => Some([0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b10001, 0b01110]),
+        't' => Some([0b01000, 0b01000, 0b11110, 0b01000, 0b01000, 0b01000, 0b00111]),
+        '=' => Some([0b00000, 0b11111, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000]),
+        '.' => Some([0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00110]),
+        ' ' => Some([0; 7]),
+        'p' => Some([0b00000, 0b00000, 0b11110, 0b10001, 0b11110, 0b10000, 0b10000]),
+        's' => Some([0b00000, 0b00000, 0b01111, 0b10000, 0b01110, 0b00001, 0b11110]),
+        'f' => Some([0b00111, 0b01001, 0b01000, 0b11110, 0b01000, 0b01000, 0b01000]),
+        'n' => Some([0b00000, 0b00000, 0b11110, 0b10001, 0b10001, 0b10001, 0b10001]),
+        _ => None,
+    }
+}
+
+/// Stamp `text` onto `img` at `(x_origin, y_origin)` using the 5×7
+/// bitmap font, scaled `scale ×`. Each set pixel becomes a `scale × scale`
+/// block of `color`. Pixels that fall outside the image are silently
+/// skipped — keeps overlays robust to short canvases.
+fn draw_text(img: &mut RgbaImage, text: &str, x_origin: u32, y_origin: u32, scale: u32, color: [u8; 3]) {
+    let scale = scale.max(1);
+    let mut x_cursor = x_origin;
+    for c in text.chars() {
+        let glyph = font_glyph(c).unwrap_or([0; 7]);
+        for (row, bits) in glyph.iter().enumerate() {
+            for col in 0..FONT_WIDTH {
+                if bits & (1 << (FONT_WIDTH - 1 - col)) != 0 {
+                    let px0 = x_cursor + col * scale;
+                    let py0 = y_origin + row as u32 * scale;
+                    for dy in 0..scale {
+                        for dx in 0..scale {
+                            let px = px0 + dx;
+                            let py = py0 + dy;
+                            if px < img.width() && py < img.height() {
+                                img.put_pixel(px, py, Rgba([color[0], color[1], color[2], 255]));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        x_cursor += (FONT_WIDTH + FONT_KERN) * scale;
+    }
+}
 
 struct RenderAtom {
     center: Vec3,

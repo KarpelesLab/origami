@@ -92,6 +92,13 @@ enum Command {
         /// Include hydrogen atoms (hidden by default).
         #[arg(long)]
         show_hydrogens: bool,
+        /// Simulation time per saved frame in femtoseconds. When set
+        /// along with `--output-dir`, each frame is stamped with a
+        /// `t = N.NN ps` overlay in the top-left corner (units auto-
+        /// pick: fs / ps / ns based on magnitude). Compute as
+        /// `dt × save_every` from the dynamics / cotranslate run.
+        #[arg(long)]
+        frame_dt_fs: Option<f64>,
     },
     /// Co-translational chain growth: assemble the chain residue-by-
     /// residue at a constant codon rate while Langevin dynamics relaxes
@@ -247,8 +254,8 @@ fn main() -> Result<()> {
         Command::Minimize { input, output, algorithm, max_steps, tol, max_step, with_sasa } => {
             run_minimize(&input, &output, algorithm, max_steps, tol, max_step, with_sasa)
         }
-        Command::Render { input, output, output_dir, width, height, show_hydrogens } => {
-            run_render(&input, output.as_deref(), output_dir.as_deref(), width, height, show_hydrogens)
+        Command::Render { input, output, output_dir, width, height, show_hydrogens, frame_dt_fs } => {
+            run_render(&input, output.as_deref(), output_dir.as_deref(), width, height, show_hydrogens, frame_dt_fs)
         }
         Command::Cotranslate {
             seq,
@@ -325,6 +332,7 @@ fn run_render(
     width: u32,
     height: u32,
     show_hydrogens: bool,
+    frame_dt_fs: Option<f64>,
 ) -> Result<()> {
     let file = fs::File::open(input)
         .with_context(|| format!("opening {}", input.display()))?;
@@ -359,13 +367,17 @@ fn run_render(
             .iter()
             .map(|(c, r)| (*c - global_centroid).norm() + *r)
             .fold(0.0_f64, f64::max);
-        let frame_opts = RenderOptions {
+        let base_frame_opts = RenderOptions {
             fixed_centroid: Some(global_centroid),
             fixed_bounding_radius: Some(global_radius),
             ..opts
         };
 
         for (idx, structure) in frames.iter().enumerate() {
+            let mut frame_opts = base_frame_opts.clone();
+            if let Some(dt) = frame_dt_fs {
+                frame_opts.overlay_text = Some(format_sim_time(idx as f64 * dt));
+            }
             let img = render(structure, &frame_opts);
             let path = dir.join(format!("frame_{:04}.png", idx + 1));
             img.save(&path)
@@ -909,6 +921,20 @@ fn run_analyze(
         );
     }
     Ok(())
+}
+
+/// Format a simulation time in femtoseconds as a short string suitable
+/// for the trajectory-frame overlay. The font only has digits + `.`,
+/// space, and the unit letters `f p n s`, so the output is restricted
+/// to those characters.
+fn format_sim_time(t_fs: f64) -> String {
+    if t_fs < 1000.0 {
+        format!("t = {:.0} fs", t_fs)
+    } else if t_fs < 1_000_000.0 {
+        format!("t = {:.2} ps", t_fs / 1000.0)
+    } else {
+        format!("t = {:.3} ns", t_fs / 1_000_000.0)
+    }
 }
 
 fn mode_residue_count(frames: &[geom::Structure]) -> usize {
