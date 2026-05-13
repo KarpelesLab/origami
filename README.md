@@ -55,6 +55,16 @@ and running Langevin dynamics for the time slice up to the next emission.
 An optional cylindrical exit-tunnel constraint keeps the nascent chain
 inside a confined region, mimicking the ribosomal tunnel.
 
+Combined with `--with-sasa`, the hydrophobic-collapse term drives the
+nascent chain as soon as enough side chains are present to cluster.
+Chignolin (`YYDPETGTWY`, 10 residues), one residue per 0.5 ps,
+20 ps tail of Langevin at 310 K, γ = 2 ps⁻¹, hydrophobic γ-scale 0.25:
+
+![Cotranslational chignolin growth + hydrophobic collapse](docs/animations/chignolin_cotsasa.gif)
+
+[Full quality MP4](docs/animations/chignolin_cotsasa.mp4) ·
+1 ps of simulated time per ~250 ms of video at 20 fps.
+
 **6. Actually fold something.** Start from a minimised extended chignolin
 (GYDPETGTWG, 10 residues) and run Langevin dynamics at 310 K. With just
 LJ + Coulomb + GB (no hydrophobic forces) over 500 ps:
@@ -136,17 +146,20 @@ Langevin dynamics from the Trp-cage native conformation keeps Cα RMSD under
 1 Å.
 
 Performance benchmarks (release build, single-core Apple Silicon):
-- Trp-cage (300 atoms), no SASA: **527 fs/s** (≈ 45 ns/day)
-- Trp-cage, **with** analytical SASA: **30 fs/s** (≈ 2.6 ns/day)
-- Chignolin (134 atoms), no SASA: 2 165 fs/s (≈ 187 ns/day)
-- Force-term breakdown on Trp-cage (1.9 ms/step without SASA):
-  nonbonded LJ+Coulomb 1.07 ms (56 %), GB 0.75 ms (39 %), all bonded
-  terms together 0.06 ms (3 %), analytical SASA 31 ms when enabled.
+- Trp-cage (300 atoms), no SASA: **885 fs/s** (≈ 76 ns/day)
+- Trp-cage, **with** analytical SASA: ~30 fs/s (≈ 2.6 ns/day)
+- Chignolin (134 atoms), no SASA: **3 509 fs/s** (≈ 303 ns/day)
+- Force-term breakdown on Trp-cage (1.16 ms/step without SASA):
+  nonbonded LJ+Coulomb 0.38 ms (33 %), GB 0.71 ms (61 %), all bonded
+  terms together 0.06 ms (5 %), analytical SASA 31 ms when enabled.
 - Numerical-vs-analytical SASA force: 10 048 ms → 31 ms per step
   (325× speedup, max numerical-vs-analytical agreement 4.5×10⁻⁹).
+- SoA-flat exclusion bitmap on nonbonded pair loop: kernel-level 3.3×
+  speedup on Trp-cage (1.25 → 0.38 ms), 1.7× on the whole force
+  evaluation (2.0 → 1.16 ms).
 
-Up next: SoA / SIMD on the two O(N²) pair-sum kernels, GB cell-list
-cutoff, then larger folds and longer trajectories.
+Up next: SoA on the GB Born-radii integral, parallel force evaluation
+across cores, then larger folds and longer trajectories.
 
 ## Build
 

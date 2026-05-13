@@ -31,8 +31,7 @@
 //!     forces directly.
 
 use chem::{AminoAcid, ForceField};
-use energy::total_force_with_options;
-use energy::DEFAULT_CUTOFF_A;
+use energy::{total_force_with_scratch, ForceScratch, DEFAULT_CUTOFF_A};
 use geom::{
     append_residue, build_topology_graph, Structure, Vec3, DEFAULT_OMEGA, DEFAULT_PHI, DEFAULT_PSI,
 };
@@ -204,10 +203,18 @@ where
         // Append the residue.
         append_residue(&mut structure, seq[i], DEFAULT_PHI, DEFAULT_PSI, DEFAULT_OMEGA)
             .expect("chain extension failed");
-        // Minimise briefly to relieve any local clashes from the
-        // extended-geometry placement before launching dynamics on the
-        // new conformation. Without this, a steep LJ wall right after
-        // appending could drive a single-step explosion on small chains.
+        // Minimise after each append to relieve clashes between the
+        // newly-placed residue (NeRF-built at idealised internal
+        // coordinates) and the already-wiggled existing chain. Brief
+        // (25 steps, 0.05 Å cap) was too tight: by the time chignolin
+        // reached residue 8, the chain had drifted enough that the
+        // next residue's NeRF placement could land inside another
+        // atom's LJ well, and the constrained minimisation couldn't
+        // climb out within its step budget. Langevin then ran on a
+        // diverging state and atoms flew to infinity.
+        //
+        // Wider tolerance and step cap give the minimiser room to
+        // resolve those clashes before dynamics resumes.
         let graph_after_append = build_topology_graph(&structure);
         let _ = minimize(
             &mut structure,
@@ -215,10 +222,10 @@ where
             ff,
             MinimizeOptions {
                 algorithm: Algorithm::Lbfgs,
-                max_steps: 25,
-                gradient_tol: 50.0,
-                energy_tol: 1.0,
-                max_step_a: 0.05,
+                max_steps: 200,
+                gradient_tol: 10.0,
+                energy_tol: 0.1,
+                max_step_a: 0.1,
                 include_sasa: false,
             },
         );
@@ -309,8 +316,17 @@ fn run_slice<F>(
     let dof = (3 * n) as f64;
 
     let graph = build_topology_graph(structure);
-    let mut forces =
-        total_force_with_options(structure, &graph, ff, DEFAULT_CUTOFF_A, opts.include_sasa);
+    let mut scratch = ForceScratch::new(structure, &graph, ff);
+    let mut forces: Vec<Vec3> = Vec::with_capacity(n);
+    total_force_with_scratch(
+        structure,
+        &graph,
+        ff,
+        DEFAULT_CUTOFF_A,
+        opts.include_sasa,
+        &mut scratch,
+        &mut forces,
+    );
     if let Some(ext) = external {
         ext.add_force(structure, &mut forces);
     }
@@ -333,7 +349,15 @@ fn run_slice<F>(
         // A
         crate::langevin::apply_velocity_step_pub(structure, velocities, half_dt);
         // Force re-eval at new positions.
-        forces = total_force_with_options(structure, &graph, ff, DEFAULT_CUTOFF_A, opts.include_sasa);
+        total_force_with_scratch(
+            structure,
+            &graph,
+            ff,
+            DEFAULT_CUTOFF_A,
+            opts.include_sasa,
+            &mut scratch,
+            &mut forces,
+        );
         if let Some(ext) = external {
             ext.add_force(structure, &mut forces);
         }
