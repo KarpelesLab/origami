@@ -1,5 +1,6 @@
 pub mod analysis;
 pub mod builder;
+pub mod dssp;
 pub mod measure;
 pub mod neighbours;
 pub mod nerf;
@@ -10,6 +11,9 @@ pub mod topology_graph;
 
 pub use analysis::{
     contact_map_ca, end_to_end_ca, radius_of_gyration_ca, radius_of_gyration_points,
+};
+pub use dssp::{
+    assign_dssp, dssp_counts, dssp_string, find_hbonds, DsspType, HBondTable,
 };
 pub use secondary_structure::{
     classify as classify_phi_psi, phi, psi, secondary_structure_string, ss_counts, SsType,

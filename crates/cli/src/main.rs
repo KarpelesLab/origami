@@ -1049,10 +1049,19 @@ fn run_analyze(
         let rmsd_s = rmsd.map(|v| format!("{v:.3}")).unwrap_or_else(|| "NaN".into());
         let rg_s = rg.map(|v| format!("{v:.3}")).unwrap_or_else(|| "NaN".into());
         let e2e_s = e2e.map(|v| format!("{v:.3}")).unwrap_or_else(|| "NaN".into());
-        // Ramachandran-region secondary structure (H / E / C).
-        let ss_string = geom::secondary_structure_string(frame);
+        // DSSP-based secondary structure (Kabsch-Sander H-bond
+        // detection). If the structure has no explicit `H` atoms
+        // (e.g. heavy-atom-only PDB without our chain builder's
+        // hydrogens), the H-bond detector finds nothing and the
+        // string is all-`C` — fall back to Ramachandran in that case.
         let n_res = frame.residues.len();
-        let (n_h, n_e, _n_c) = geom::ss_counts(frame);
+        let mut ss_string = geom::dssp_string(frame);
+        let mut counts = geom::dssp_counts(frame);
+        if counts.0 == 0 && counts.1 == 0 && n_res >= 4 {
+            ss_string = geom::secondary_structure_string(frame);
+            counts = geom::ss_counts(frame);
+        }
+        let (n_h, n_e, _n_c) = counts;
         let pct_helix = if n_res > 0 {
             100.0 * n_h as f64 / n_res as f64
         } else {
