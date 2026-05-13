@@ -6,10 +6,24 @@
 //! parameters when present (epsilon_14 / rmin_half_14) or the regular
 //! parameters; full Coulomb strength is used (CHARMM's e14fac = 1.0).
 //!
-//! Smoothing at the cutoff is **not** applied in M3 — we sum the bare
-//! potential and stop at `r ≤ CUTOFF`. This is fine for static energy
-//! evaluation; for M5 dynamics we'll add a force-shift term to keep the
-//! force smooth at the cutoff.
+//! ## Cutoff treatment
+//!
+//! LJ is summed bare and stopped at `r ≤ CUTOFF`. Its 1/r⁶ decay is
+//! steep enough that the discontinuity at the cutoff is small (< 0.1 %
+//! of well depth at r ≥ 8 Å in CHARMM), and any LJ shift adds bias to
+//! the well depth that we'd rather not absorb.
+//!
+//! Coulomb is treated with a **reaction-field** correction (Tironi,
+//! Sperb, Smith, van Gunsteren, JCP 102, 5451, 1995) at the ε_RF → ∞
+//! limit, which is the right setting when the GB term is providing
+//! the dielectric screening:
+//!
+//!   V_RF(r) = (k qᵢ qⱼ) · [1/r + r²/(2 Rc³) − 3/(2 Rc)]   for r ≤ Rc
+//!
+//! Both V_RF(Rc) and dV_RF/dr|_{r=Rc} are zero by construction, so the
+//! integrator sees a smooth pair potential and a smooth pair force at
+//! the cutoff (no impulse / energy drift). The short-r limit recovers
+//! bare Coulomb up to a constant offset.
 
 use chem::{classify, AtomType, ForceField};
 use geom::{CellList, Structure, TopologyGraph, Vec3};
@@ -17,10 +31,57 @@ use geom::{CellList, Structure, TopologyGraph, Vec3};
 use crate::units::kcal_to_kj;
 
 /// CHARMM Coulomb constant: 332.0637 kcal·Å / (mol·e²).
-const COULOMB_CONST_KCAL_A_PER_E2: f64 = 332.0637;
+pub const COULOMB_CONST_KCAL_A_PER_E2: f64 = 332.0637;
 
 /// Default Lennard-Jones / Coulomb cutoff in Å. Standard CHARMM choice.
 pub const DEFAULT_CUTOFF_A: f64 = 10.0;
+
+/// Pre-computed reaction-field constants for a given cutoff Rc, at
+/// ε_RF → ∞ (matching our GB-screened solvent treatment).
+#[derive(Debug, Clone, Copy)]
+pub struct CoulombRf {
+    /// `1 / (2 Rc³)` — multiplies r² in the energy.
+    pub kappa: f64,
+    /// `3 / (2 Rc)` — the constant offset that drives V → 0 at Rc.
+    pub c: f64,
+    /// `1 / Rc³` — cached for the force coefficient.
+    pub inv_rc3: f64,
+}
+
+impl CoulombRf {
+    #[inline]
+    pub fn for_cutoff(rc_a: f64) -> Self {
+        let rc3 = rc_a * rc_a * rc_a;
+        Self {
+            kappa: 1.0 / (2.0 * rc3),
+            c: 3.0 / (2.0 * rc_a),
+            inv_rc3: 1.0 / rc3,
+        }
+    }
+
+    /// Reaction-field Coulomb pair energy in kcal/mol:
+    /// `k qᵢ qⱼ · (1/r + κ r² − c)`. Both endpoints (r→0 small-r limit
+    /// and r=Rc) are well-defined: at Rc the term in parentheses is
+    /// 1/Rc + Rc/(2·Rc²) − 3/(2·Rc) = 0.
+    #[inline]
+    pub fn pair_energy_kcal(&self, qq: f64, r: f64) -> f64 {
+        COULOMB_CONST_KCAL_A_PER_E2 * qq * (1.0 / r + self.kappa * r * r - self.c)
+    }
+
+    /// Coefficient `α` such that the pair force on atom i (kcal/mol/Å)
+    /// is `α · (r_j − r_i)`. Derived from F_i = −∇_i V_RF:
+    ///   F_i = k qᵢ qⱼ · (1/r² − r/Rc³) · r̂_ji
+    /// and `r̂_ji = (r_j − r_i) / r`, so the multiplier on the displacement
+    /// vector itself is `α = −k qᵢ qⱼ · (1/r³ − 1/Rc³)`. The minus sign
+    /// matches the existing convention (`F = rij · α`, with `rij =
+    /// positions[j] − positions[i]`). At r = Rc the bracket vanishes,
+    /// giving a smooth force at the cutoff.
+    #[inline]
+    pub fn force_coefficient_kcal_per_a(&self, qq: f64, r: f64) -> f64 {
+        let inv_r3 = 1.0 / (r * r * r);
+        -COULOMB_CONST_KCAL_A_PER_E2 * qq * (inv_r3 - self.inv_rc3)
+    }
+}
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NonbondedBreakdown {
@@ -61,6 +122,7 @@ pub fn nonbonded_energy(
     let mut br = NonbondedBreakdown::default();
     let mut lj_kcal = 0.0;
     let mut coul_kcal = 0.0;
+    let rf = CoulombRf::for_cutoff(cutoff_a);
 
     for (i, j, r) in cl.iter_pairs_within(&positions, cutoff_a) {
         // 1-2 and 1-3 exclusions: zero non-bonded contribution.
@@ -92,11 +154,12 @@ pub fn nonbonded_energy(
         // CHARMM LJ form: V = ε [(Rmin/r)^12 − 2(Rmin/r)^6]
         lj_kcal += eps_ij * (ratio12 - 2.0 * ratio6);
 
-        // Coulomb (vacuum dielectric — solvent screening is handled by the
-        // GB term in M3f).
+        // Coulomb (vacuum dielectric — solvent screening is handled by
+        // the GB term). Reaction-field correction makes both V and F
+        // continuous at the cutoff.
         let qq = charges[i] * charges[j];
         if qq != 0.0 {
-            coul_kcal += COULOMB_CONST_KCAL_A_PER_E2 * qq / r;
+            coul_kcal += rf.pair_energy_kcal(qq, r);
         }
 
         br.pair_count += 1;

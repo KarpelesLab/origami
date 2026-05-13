@@ -7,11 +7,8 @@
 use chem::{classify, AtomType, ForceField};
 use geom::{CellList, Structure, TopologyGraph, Vec3};
 
-use crate::nonbonded::DEFAULT_CUTOFF_A;
+use crate::nonbonded::{CoulombRf, DEFAULT_CUTOFF_A};
 use crate::units::kcal_to_kj;
-
-/// Same Coulomb constant as the energy code.
-const COULOMB_CONST_KCAL_A_PER_E2: f64 = 332.0637;
 
 /// Add LJ + Coulomb forces (in kJ/mol/Å) to the supplied buffer. `cutoff_a`
 /// is the same cutoff used for the energy.
@@ -38,6 +35,7 @@ pub fn add_nonbonded_forces(
     }
 
     let cl = CellList::build(&positions, cutoff_a);
+    let rf = CoulombRf::for_cutoff(cutoff_a);
 
     for (i, j, r) in cl.iter_pairs_within(&positions, cutoff_a) {
         if graph.is_bonded(i, j) || graph.is_one_three(i, j) {
@@ -72,11 +70,12 @@ pub fn add_nonbonded_forces(
         let lj_coeff = kcal_to_kj(lj_coeff_kcal);
         let f_lj = rij * lj_coeff;
 
-        // F_i (Coulomb) = −(k qᵢqⱼ / r³) × (r_j − r_i)
+        // F_i (reaction-field Coulomb) — α · (r_j − r_i) with α from
+        // CoulombRf::force_coefficient_kcal_per_a. Matches the energy
+        // path: V → 0 and dV/dr → 0 at r = Rc.
         let qq = charges[i] * charges[j];
         let coul_coeff = if qq != 0.0 {
-            let v = -COULOMB_CONST_KCAL_A_PER_E2 * qq * inv_r2 / r;
-            kcal_to_kj(v)
+            kcal_to_kj(rf.force_coefficient_kcal_per_a(qq, r))
         } else {
             0.0
         };
@@ -119,7 +118,9 @@ pub fn add_nonbonded_forces_soa(
     let n = scratch.n;
     let cutoff_sq = cutoff_a * cutoff_a;
     let kj_per_kcal = kcal_to_kj(1.0);
-    let coulomb_kj = kcal_to_kj(COULOMB_CONST_KCAL_A_PER_E2);
+    let rf = CoulombRf::for_cutoff(cutoff_a);
+    let inv_rc3 = rf.inv_rc3;
+    let coulomb_kj = kcal_to_kj(crate::nonbonded::COULOMB_CONST_KCAL_A_PER_E2);
     // CellList neighbour search — same logic as AoS path, just over
     // the SoA position arrays.
     let mut positions: Vec<Vec3> = Vec::with_capacity(n);
@@ -167,10 +168,13 @@ pub fn add_nonbonded_forces_soa(
         // F_i (LJ) coefficient in kJ/mol/Å².
         let lj_coeff = 12.0 * eps_ij * inv_r2 * (ratio6 - ratio12) * kj_per_kcal;
 
-        // F_i (Coulomb) coefficient — only multiply if nonzero charges.
+        // F_i (reaction-field Coulomb) — α · (r_j − r_i) with
+        // α = −k_kJ · qq · (1/r³ − 1/Rc³). At r = Rc the bracket is
+        // zero, so the SoA path matches the AoS path's smooth-cutoff
+        // behaviour exactly.
         let qq = scratch.charges[i] * scratch.charges[j];
         let coul_coeff = if qq != 0.0 {
-            -coulomb_kj * qq * inv_r2 / r
+            -coulomb_kj * qq * (inv_r2 / r - inv_rc3)
         } else {
             0.0
         };
