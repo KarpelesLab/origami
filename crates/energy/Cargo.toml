@@ -11,6 +11,7 @@ description = "Force-field energy terms for origami."
 chem = { path = "../chem" }
 geom = { path = "../geom" }
 nalgebra.workspace = true
+rayon.workspace = true
 
 [dev-dependencies]
 approx.workspace = true

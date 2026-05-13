@@ -66,6 +66,19 @@ fn main() {
 
     let mut forces = vec![Vec3::zeros(); n];
 
+    // Quick pair count for the cell-list (informs threshold tuning).
+    let pair_n = {
+        let positions: Vec<Vec3> = s
+            .residues
+            .iter()
+            .flat_map(|r| r.atoms.iter().map(|a| a.position))
+            .collect();
+        let cl = geom::CellList::build(&positions, energy::DEFAULT_CUTOFF_A);
+        cl.iter_pairs_within(&positions, energy::DEFAULT_CUTOFF_A).count()
+    };
+    println!("  {} pairs after cell-list cutoff", pair_n);
+    println!();
+
     timeit("bond force", n_iter, || {
         forces.iter_mut().for_each(|f| *f = Vec3::zeros());
         add_bond_forces(&positions, &graph, ff, &atom_types, &mut forces);

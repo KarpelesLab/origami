@@ -28,8 +28,8 @@
 use chem::{classify, AminoAcid, AtomType, ForceField};
 use geom::{Structure, TopologyGraph};
 
-const EXCLUDED_BIT: u8 = 1 << 0;
-const ONE_FOUR_BIT: u8 = 1 << 1;
+pub const EXCLUDED_BIT: u8 = 1 << 0;
+pub const ONE_FOUR_BIT: u8 = 1 << 1;
 
 #[derive(Debug, Clone)]
 pub struct ForceScratch {
@@ -52,6 +52,17 @@ pub struct ForceScratch {
     pub atom_types: Vec<AtomType>,
     /// Flat exclusion mask, n² bytes, indexed `i * n + j`.
     pub excl: Vec<u8>,
+    /// Per-thread force accumulators for the rayon-parallel pair loop.
+    /// Each entry is `(fx, fy, fz)` of length `n`. Allocated once at
+    /// `new` (one entry per rayon worker) and zeroed at the start of
+    /// each parallel force call instead of being re-allocated, which
+    /// was previously the dominant overhead per `add_nonbonded_forces_soa`
+    /// call. Stored as flat `n_threads × n` contiguous Vecs so each
+    /// worker can grab a disjoint slice via `chunks_mut`.
+    pub par_fx: Vec<f64>,
+    pub par_fy: Vec<f64>,
+    pub par_fz: Vec<f64>,
+    pub n_par_threads: usize,
 }
 
 impl ForceScratch {
@@ -59,6 +70,7 @@ impl ForceScratch {
     /// Allocates everything; this is the one expensive call.
     pub fn new(structure: &Structure, graph: &TopologyGraph, ff: &ForceField) -> Self {
         let n = structure.atom_count();
+        let n_threads = rayon::current_num_threads().max(1);
         let mut s = Self {
             n,
             xs: vec![0.0; n],
@@ -74,6 +86,10 @@ impl ForceScratch {
             epsilon_14: vec![0.0; n],
             atom_types: Vec::with_capacity(n),
             excl: vec![0u8; n * n],
+            par_fx: vec![0.0; n_threads * n],
+            par_fy: vec![0.0; n_threads * n],
+            par_fz: vec![0.0; n_threads * n],
+            n_par_threads: n_threads,
         };
         s.rebuild_params(structure, ff);
         s.rebuild_exclusions(graph);

@@ -6,9 +6,20 @@
 
 use chem::{classify, AtomType, ForceField};
 use geom::{CellList, Structure, TopologyGraph, Vec3};
+use rayon::prelude::*;
 
 use crate::nonbonded::{CoulombRf, DEFAULT_CUTOFF_A};
 use crate::units::kcal_to_kj;
+
+/// Pair counts below this trip the serial path. Rayon's work-stealing
+/// overhead (~µs per spawn) wins back on this many pairs against the
+/// per-pair work (~10s of ns). Tuned on Apple M3 Pro from the
+/// `bench_forces` numbers — chignolin (7 k pairs, 134 atoms) is faster
+/// serial, Trp-cage (24 k pairs, 300 atoms) is break-even, villin
+/// (48 k pairs, 520 atoms) is ~1.7× faster parallel. Threshold sits
+/// between Trp-cage and villin so the integrator picks the right path
+/// without configuration.
+const SOA_PARALLEL_PAIR_THRESHOLD: usize = 30_000;
 
 /// Add LJ + Coulomb forces (in kJ/mol/Å) to the supplied buffer. `cutoff_a`
 /// is the same cutoff used for the energy.
@@ -121,6 +132,7 @@ pub fn add_nonbonded_forces_soa(
     let rf = CoulombRf::for_cutoff(cutoff_a);
     let inv_rc3 = rf.inv_rc3;
     let coulomb_kj = kcal_to_kj(crate::nonbonded::COULOMB_CONST_KCAL_A_PER_E2);
+
     // CellList neighbour search — same logic as AoS path, just over
     // the SoA position arrays.
     let mut positions: Vec<Vec3> = Vec::with_capacity(n);
@@ -129,33 +141,46 @@ pub fn add_nonbonded_forces_soa(
     }
     let cl = CellList::build(&positions, cutoff_a);
 
-    for (i, j, r) in cl.iter_pairs_within(&positions, cutoff_a) {
-        if scratch.is_excluded(i, j) {
-            continue;
+    // Collect pairs into a Vec so rayon can split them across threads.
+    // The cell-list iterator is sequential; we pay one Vec allocation
+    // per force call. For Trp-cage / chignolin sizes this is a few
+    // thousand entries (16 B each), negligible against the pair-loop
+    // cost.
+    let pairs: Vec<(usize, usize, f64)> =
+        cl.iter_pairs_within(&positions, cutoff_a).collect();
+
+    // Destructure scratch into explicit immutable / mutable borrows so
+    // the inner closure can be a plain `Fn` capturing only `&[f64]`s.
+    let xs = scratch.xs.as_slice();
+    let ys = scratch.ys.as_slice();
+    let zs = scratch.zs.as_slice();
+    let charges = scratch.charges.as_slice();
+    let rmin_half = scratch.rmin_half.as_slice();
+    let epsilon = scratch.epsilon.as_slice();
+    let rmin_half_14 = scratch.rmin_half_14.as_slice();
+    let epsilon_14 = scratch.epsilon_14.as_slice();
+    let excl = scratch.excl.as_slice();
+
+    // One pair → updates to per-pair (fx, fy, fz) accumulators. Returns
+    // (fx, fy, fz) ready to be added to atom i and subtracted from
+    // atom j (or `None` if the pair is excluded / out of cutoff).
+    let compute_pair = move |i: usize, j: usize, r: f64| -> Option<(f64, f64, f64)> {
+        let mask = excl[i * n + j];
+        if (mask & crate::scratch::EXCLUDED_BIT) != 0 {
+            return None;
         }
-        let dx = scratch.xs[j] - scratch.xs[i];
-        let dy = scratch.ys[j] - scratch.ys[i];
-        let dz = scratch.zs[j] - scratch.zs[i];
+        let dx = xs[j] - xs[i];
+        let dy = ys[j] - ys[i];
+        let dz = zs[j] - zs[i];
         let r2 = dx * dx + dy * dy + dz * dz;
         if r2 > cutoff_sq || r2 < 1e-18 {
-            continue;
+            return None;
         }
-
-        let one_four = scratch.is_one_four(i, j);
+        let one_four = (mask & crate::scratch::ONE_FOUR_BIT) != 0;
         let (rmin_half_i, eps_i, rmin_half_j, eps_j) = if one_four {
-            (
-                scratch.rmin_half_14[i],
-                scratch.epsilon_14[i],
-                scratch.rmin_half_14[j],
-                scratch.epsilon_14[j],
-            )
+            (rmin_half_14[i], epsilon_14[i], rmin_half_14[j], epsilon_14[j])
         } else {
-            (
-                scratch.rmin_half[i],
-                scratch.epsilon[i],
-                scratch.rmin_half[j],
-                scratch.epsilon[j],
-            )
+            (rmin_half[i], epsilon[i], rmin_half[j], epsilon[j])
         };
         let rmin_ij = rmin_half_i + rmin_half_j;
         let eps_ij = (eps_i * eps_j).sqrt();
@@ -165,30 +190,81 @@ pub fn add_nonbonded_forces_soa(
         let ratio6 = ratio2 * ratio2 * ratio2;
         let ratio12 = ratio6 * ratio6;
 
-        // F_i (LJ) coefficient in kJ/mol/Å².
         let lj_coeff = 12.0 * eps_ij * inv_r2 * (ratio6 - ratio12) * kj_per_kcal;
-
-        // F_i (reaction-field Coulomb) — α · (r_j − r_i) with
-        // α = −k_kJ · qq · (1/r³ − 1/Rc³). At r = Rc the bracket is
-        // zero, so the SoA path matches the AoS path's smooth-cutoff
-        // behaviour exactly.
-        let qq = scratch.charges[i] * scratch.charges[j];
+        let qq = charges[i] * charges[j];
         let coul_coeff = if qq != 0.0 {
             -coulomb_kj * qq * (inv_r2 / r - inv_rc3)
         } else {
             0.0
         };
-
         let coeff = lj_coeff + coul_coeff;
-        let fx = dx * coeff;
-        let fy = dy * coeff;
-        let fz = dz * coeff;
-        scratch.fxs[i] += fx;
-        scratch.fys[i] += fy;
-        scratch.fzs[i] += fz;
-        scratch.fxs[j] -= fx;
-        scratch.fys[j] -= fy;
-        scratch.fzs[j] -= fz;
+        Some((dx * coeff, dy * coeff, dz * coeff))
+    };
+
+    if pairs.len() < SOA_PARALLEL_PAIR_THRESHOLD {
+        // Serial: write straight into scratch (no thread-local merge).
+        for &(i, j, r) in &pairs {
+            if let Some((fx, fy, fz)) = compute_pair(i, j, r) {
+                scratch.fxs[i] += fx;
+                scratch.fys[i] += fy;
+                scratch.fzs[i] += fz;
+                scratch.fxs[j] -= fx;
+                scratch.fys[j] -= fy;
+                scratch.fzs[j] -= fz;
+            }
+        }
+        return;
+    }
+
+    // Parallel: split `pairs` into n_threads chunks. Each worker writes
+    // into its own slice of the pre-allocated `par_fx/y/z` buffers.
+    // After the parallel section a serial reduction sums all thread
+    // slices back into scratch.f{x,y,z}s. The per-thread buffers are
+    // allocated once at scratch construction (caller-owned scratch) so
+    // there is no per-call malloc in this hot path.
+    let n_threads = scratch.n_par_threads;
+    let chunk_size = pairs.len().div_ceil(n_threads).max(1);
+
+    // Zero the per-thread buffers we'll touch this call.
+    let used_threads = pairs.len().div_ceil(chunk_size);
+    for k in 0..(used_threads * n) {
+        scratch.par_fx[k] = 0.0;
+        scratch.par_fy[k] = 0.0;
+        scratch.par_fz[k] = 0.0;
+    }
+
+    let par_fx_slice = &mut scratch.par_fx[..used_threads * n];
+    let par_fy_slice = &mut scratch.par_fy[..used_threads * n];
+    let par_fz_slice = &mut scratch.par_fz[..used_threads * n];
+    let chunks: Vec<&[(usize, usize, f64)]> = pairs.chunks(chunk_size).collect();
+
+    par_fx_slice
+        .par_chunks_mut(n)
+        .zip(par_fy_slice.par_chunks_mut(n))
+        .zip(par_fz_slice.par_chunks_mut(n))
+        .zip(chunks.into_par_iter())
+        .for_each(|(((acc_x, acc_y), acc_z), chunk)| {
+            for &(i, j, r) in chunk {
+                if let Some((fx, fy, fz)) = compute_pair(i, j, r) {
+                    acc_x[i] += fx;
+                    acc_y[i] += fy;
+                    acc_z[i] += fz;
+                    acc_x[j] -= fx;
+                    acc_y[j] -= fy;
+                    acc_z[j] -= fz;
+                }
+            }
+        });
+
+    // Serial reduce. Hot loop over (used_threads × n) f64s — cheap
+    // compared to the pair loop.
+    for t in 0..used_threads {
+        let base = t * n;
+        for k in 0..n {
+            scratch.fxs[k] += scratch.par_fx[base + k];
+            scratch.fys[k] += scratch.par_fy[base + k];
+            scratch.fzs[k] += scratch.par_fz[base + k];
+        }
     }
 }
 
