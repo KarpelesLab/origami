@@ -1,3 +1,4 @@
+pub mod analysis;
 pub mod builder;
 pub mod measure;
 pub mod neighbours;
@@ -6,6 +7,9 @@ pub mod rmsd;
 pub mod structure;
 pub mod topology_graph;
 
+pub use analysis::{
+    contact_map_ca, end_to_end_ca, radius_of_gyration_ca, radius_of_gyration_points,
+};
 pub use builder::{
     append_residue, build_chain, build_extended_chain, BuildError, DEFAULT_OMEGA, DEFAULT_PHI,
     DEFAULT_PSI,

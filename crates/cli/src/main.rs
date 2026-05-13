@@ -201,6 +201,31 @@ enum Command {
         #[arg(long)]
         with_sasa: bool,
     },
+    /// Per-frame trajectory analysis: Cα RMSD vs reference, radius of
+    /// gyration, end-to-end distance; optional residue-residue contact
+    /// frequency map. Reads any multi-MODEL PDB trajectory.
+    Analyze {
+        /// Input trajectory PDB (single-MODEL works too — produces one
+        /// row of metrics).
+        input: PathBuf,
+        /// Reference PDB for the RMSD column. Must have the same
+        /// residue sequence as each trajectory frame; otherwise RMSD
+        /// is reported as NaN.
+        #[arg(long)]
+        reference: Option<PathBuf>,
+        /// Write per-frame metrics TSV here. If omitted, prints to
+        /// stdout.
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+        /// Write the residue-residue contact-frequency matrix to this
+        /// path (tall TSV: `res_i  res_j  frequency`). Skipped if
+        /// omitted.
+        #[arg(long)]
+        contact_map: Option<PathBuf>,
+        /// Heavy-atom distance threshold for the contact map (Å).
+        #[arg(long, default_value_t = 8.0)]
+        contact_cutoff: f64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -276,6 +301,19 @@ fn main() -> Result<()> {
             seed,
             !zero_initial_velocity,
             with_sasa,
+        ),
+        Command::Analyze {
+            input,
+            reference,
+            output,
+            contact_map,
+            contact_cutoff,
+        } => run_analyze(
+            &input,
+            reference.as_deref(),
+            output.as_deref(),
+            contact_map.as_deref(),
+            contact_cutoff,
         ),
     }
 }
@@ -740,6 +778,151 @@ fn run_build(seq: Option<&str>, from_fasta: Option<&str>, output: Option<&std::p
         handle.flush().ok();
     }
     Ok(())
+}
+
+fn run_analyze(
+    input: &Path,
+    reference: Option<&Path>,
+    output: Option<&Path>,
+    contact_map: Option<&Path>,
+    contact_cutoff_a: f64,
+) -> Result<()> {
+    let traj_bytes = fs::read(input)
+        .with_context(|| format!("reading {}", input.display()))?;
+    let frames = read_pdb_trajectory(traj_bytes.as_slice())
+        .with_context(|| format!("parsing trajectory {}", input.display()))?;
+    if frames.is_empty() {
+        return Err(anyhow!("trajectory {} has no frames", input.display()));
+    }
+    let reference = match reference {
+        Some(p) => {
+            let bytes = fs::read(p).with_context(|| format!("reading {}", p.display()))?;
+            Some(
+                read_pdb(bytes.as_slice())
+                    .with_context(|| format!("parsing reference {}", p.display()))?,
+            )
+        }
+        None => None,
+    };
+
+    let mut sink: Box<dyn std::io::Write> = match output {
+        Some(p) => Box::new(
+            fs::File::create(p).with_context(|| format!("creating {}", p.display()))?,
+        ),
+        None => Box::new(std::io::stdout()),
+    };
+    writeln!(
+        sink,
+        "# frame\trmsd_ca_A\trg_ca_A\tend_to_end_A\tn_residues\tn_atoms"
+    )?;
+    let mut min_rmsd: f64 = f64::INFINITY;
+    let mut min_rmsd_idx: usize = 0;
+    let mut last_rmsd: Option<f64> = None;
+    for (idx, frame) in frames.iter().enumerate() {
+        let rmsd = reference
+            .as_ref()
+            .and_then(|r| geom::rmsd_ca(r, frame))
+            .map(|v| {
+                if v < min_rmsd {
+                    min_rmsd = v;
+                    min_rmsd_idx = idx;
+                }
+                v
+            });
+        let rg = geom::radius_of_gyration_ca(frame);
+        let e2e = geom::end_to_end_ca(frame);
+        last_rmsd = rmsd;
+        let rmsd_s = rmsd.map(|v| format!("{v:.3}")).unwrap_or_else(|| "NaN".into());
+        let rg_s = rg.map(|v| format!("{v:.3}")).unwrap_or_else(|| "NaN".into());
+        let e2e_s = e2e.map(|v| format!("{v:.3}")).unwrap_or_else(|| "NaN".into());
+        writeln!(
+            sink,
+            "{}\t{}\t{}\t{}\t{}\t{}",
+            idx,
+            rmsd_s,
+            rg_s,
+            e2e_s,
+            frame.residues.len(),
+            frame.atom_count()
+        )?;
+    }
+    let _ = last_rmsd;
+
+    let total_frames = frames.len();
+    if let Some(_r) = reference.as_ref() {
+        if min_rmsd.is_finite() {
+            eprintln!(
+                "min RMSD over {} frame{}: {:.3} Å at frame {}",
+                total_frames,
+                if total_frames == 1 { "" } else { "s" },
+                min_rmsd,
+                min_rmsd_idx,
+            );
+        } else {
+            eprintln!(
+                "RMSD vs reference was NaN on every frame — sequences may not match"
+            );
+        }
+    }
+    if let Some(path) = contact_map {
+        // A cotranslate trajectory contains growth frames with varying
+        // residue counts. The contact map only makes sense on a fixed-
+        // size chain, so pick the most common residue count (= the
+        // fully-grown chain for cotranslate, or the only count for a
+        // plain dynamics trajectory) and filter to those frames.
+        let target_n = mode_residue_count(&frames);
+        let kept: Vec<geom::Structure> = frames
+            .iter()
+            .filter(|f| f.residues.len() == target_n)
+            .cloned()
+            .collect();
+        let dropped = total_frames - kept.len();
+        if dropped > 0 {
+            eprintln!(
+                "contact map: using {} frames of {} (dropped {} frames whose residue count ≠ {})",
+                kept.len(),
+                total_frames,
+                dropped,
+                target_n,
+            );
+        }
+        let map = geom::contact_map_ca(&kept, contact_cutoff_a)
+            .ok_or_else(|| anyhow!("contact map needs ≥1 frame with consistent residue counts"))?;
+        let mut f = fs::File::create(path)
+            .with_context(|| format!("creating {}", path.display()))?;
+        writeln!(
+            f,
+            "# res_i\tres_j\tfreq\t# {} fully-grown frames, cutoff {} Å",
+            kept.len(),
+            contact_cutoff_a
+        )?;
+        for i in 0..map.len() {
+            for j in 0..map[i].len() {
+                writeln!(f, "{}\t{}\t{:.4}", i + 1, j + 1, map[i][j])?;
+            }
+        }
+        eprintln!(
+            "wrote contact map ({} × {}) → {}",
+            map.len(),
+            map.len(),
+            path.display(),
+        );
+    }
+    Ok(())
+}
+
+fn mode_residue_count(frames: &[geom::Structure]) -> usize {
+    let mut counts: std::collections::BTreeMap<usize, usize> = Default::default();
+    for f in frames {
+        *counts.entry(f.residues.len()).or_default() += 1;
+    }
+    // BTreeMap iteration is ascending; tie-break on higher residue count
+    // (typical for cotranslate — the fully-grown tail dominates).
+    counts
+        .into_iter()
+        .max_by_key(|(n, c)| (*c, *n))
+        .map(|(n, _)| n)
+        .unwrap_or(0)
 }
 
 /// Read a FASTA file containing one or more protein sequences and return the
