@@ -122,6 +122,21 @@ Lower γ → tighter native fit (less molten-globule lock-in). The
 
 ![γ=0.25 SASA fold at 100 ps (2.04 Å)](docs/images/chignolin_sasa_g025_100ps.png)
 
+**Replica-exchange MD on chignolin: tightest fold so far at 1.43 Å.**
+With REMD doing 8 replicas in parallel (T ladder 280-395 K, geometric
+spacing, swap every 1 ps, dt = 2 fs + SHAKE), the production
+trajectory (lowest-T replica at 280 K) reaches sub-2 Å within
+57 ps and sub-1.6 Å within 212 ps; the global minimum is **1.43 Å
+at frame 1879 (1.88 ns)** — tighter than the 1.82 Å straight-Langevin
+baseline and substantially tighter than the SASA-driven runs above.
+99 % of frames cluster into a single basin at 1.5 Å RMSD-linkage
+cutoff. Swap acceptance 55-65 % across all 7 adjacent pairs:
+
+![Chignolin REMD fold trajectory, 2 ns × 8 replicas](docs/animations/chignolin_remd.gif)
+
+[Full quality MP4](docs/animations/chignolin_remd.mp4) ·
+[RMSD trace](docs/data/chignolin_remd_rmsd.tsv)
+
 The sweet spot looks like γ ∈ [0.25, 0.5]: enough hydrophobic drive
 to compact the chain ~2× faster than LJ+GB-only, without
 over-stabilising the first compact state it finds. The literature γ
