@@ -278,6 +278,12 @@ enum Command {
         /// Heavy-atom distance threshold for the contact map (Å).
         #[arg(long, default_value_t = 8.0)]
         contact_cutoff: f64,
+        /// Cluster trajectory frames by Cα RMSD with this single-
+        /// linkage merge cutoff (Å). When set, the per-frame TSV
+        /// gains a `cluster_id` column and stderr prints the cluster
+        /// size histogram.
+        #[arg(long)]
+        cluster_cutoff: Option<f64>,
     },
 }
 
@@ -388,12 +394,14 @@ fn main() -> Result<()> {
             output,
             contact_map,
             contact_cutoff,
+            cluster_cutoff,
         } => run_analyze(
             &input,
             reference.as_deref(),
             output.as_deref(),
             contact_map.as_deref(),
             contact_cutoff,
+            cluster_cutoff,
         ),
     }
 }
@@ -1000,6 +1008,7 @@ fn run_analyze(
     output: Option<&Path>,
     contact_map: Option<&Path>,
     contact_cutoff_a: f64,
+    cluster_cutoff_a: Option<f64>,
 ) -> Result<()> {
     let traj_bytes = fs::read(input)
         .with_context(|| format!("reading {}", input.display()))?;
@@ -1025,9 +1034,24 @@ fn run_analyze(
         ),
         None => Box::new(std::io::stdout()),
     };
+    // Pre-compute clustering if requested. Needs all frames at once
+    // (pairwise RMSD matrix), so we do it before streaming the TSV.
+    let cluster_labels: Vec<usize> = if let Some(cutoff) = cluster_cutoff_a {
+        let labels = geom::cluster_trajectory(&frames, cutoff);
+        let sizes = geom::cluster_sizes(&labels);
+        eprintln!("clustering @ {:.2} Å Cα-RMSD cutoff: {} clusters", cutoff, sizes.len());
+        for (cid, count) in sizes.iter().take(10) {
+            eprintln!("  cluster {cid:>3}: {count:>4} frames ({:.1}%)", 100.0 * *count as f64 / frames.len() as f64);
+        }
+        labels
+    } else {
+        Vec::new()
+    };
+    let cluster_header = if cluster_cutoff_a.is_some() { "\tcluster_id" } else { "" };
     writeln!(
         sink,
-        "# frame\trmsd_ca_A\trg_ca_A\tend_to_end_A\tn_residues\tn_atoms\tpct_helix\tpct_strand\tss_string"
+        "# frame\trmsd_ca_A\trg_ca_A\tend_to_end_A\tn_residues\tn_atoms\tpct_helix\tpct_strand\tss_string{}",
+        cluster_header,
     )?;
     let mut min_rmsd: f64 = f64::INFINITY;
     let mut min_rmsd_idx: usize = 0;
@@ -1072,9 +1096,14 @@ fn run_analyze(
         } else {
             0.0
         };
+        let cluster_col = if cluster_cutoff_a.is_some() {
+            format!("\t{}", cluster_labels[idx])
+        } else {
+            String::new()
+        };
         writeln!(
             sink,
-            "{}\t{}\t{}\t{}\t{}\t{}\t{:.1}\t{:.1}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{:.1}\t{:.1}\t{}{}",
             idx,
             rmsd_s,
             rg_s,
@@ -1084,6 +1113,7 @@ fn run_analyze(
             pct_helix,
             pct_strand,
             ss_string,
+            cluster_col,
         )?;
     }
     let _ = last_rmsd;
