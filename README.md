@@ -150,6 +150,18 @@ didn't get stuck extended, and didn't blow through the native basin.
 To reach the actual 1L2Y fold would need a much longer trajectory
 (milliseconds of simulated time, or replica exchange).
 
+**Disulfide bonds.** Crambin (PDB 1CRN, 46 residues, plant peptide)
+ships under `crates/io/tests/fixtures/1CRN_crambin.pdb` to exercise
+the S-S detection path. `geom::build_topology_graph` finds all three
+disulfide bridges geometrically — Cys3-Cys40, Cys4-Cys32, Cys16-Cys26 —
+from each SG-SG pair's distance (< 2.5 Å threshold), matching the PDB's
+declared SSBOND records exactly. A 1 ps native MD test asserts the
+bonded topology with disulfides keeps the chain within 4 Å Cα RMSD;
+without the S-S bonds the chain would unfold. The six yellow sulfurs
+(three pairs) are visible in the centre of the fold:
+
+![Crambin native (PDB 1CRN), 3 disulfide bridges](docs/images/crambin_native.png)
+
 ## Status
 
 Done so far: translation (M1), all-atom chain building (M2), energy evaluation
