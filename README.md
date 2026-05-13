@@ -181,29 +181,62 @@ Done so far: translation (M1), all-atom chain building (M2), energy evaluation
 with CHARMM36-borrowed constants and GB OBC II implicit solvent (M3), energy
 minimisation with L-BFGS (M4), BAOAB Langevin dynamics with trajectory
 rendering (M5), exact analytical SASA via spherical Gauss-Bonnet (PSA.1, ~1%
-match to Shrake-Rupley), numerical SASA forces in the gradient (PSA.2),
-co-translational chain growth with optional exit-tunnel constraint (M6), and
+match to Shrake-Rupley), analytical SASA forces in the gradient (PSA.2),
+co-translational chain growth with optional exit-tunnel constraint (M6),
 validation against three small folds (M7): chignolin (1UAO), Trp-cage (1L2Y),
 and villin headpiece HP-35 (2F4K). For each, the native fold scores at least
 30 000 kJ/mol below the same sequence built as an extended chain, and 2 ps of
 Langevin dynamics from the Trp-cage native conformation keeps Cα RMSD under
 1 Å.
 
-Performance benchmarks (release build, single-core Apple Silicon):
-- Trp-cage (300 atoms), no SASA: **885 fs/s** (≈ 76 ns/day)
-- Trp-cage, **with** analytical SASA: ~30 fs/s (≈ 2.6 ns/day)
-- Chignolin (134 atoms), no SASA: **3 509 fs/s** (≈ 303 ns/day)
-- Force-term breakdown on Trp-cage (1.16 ms/step without SASA):
-  nonbonded LJ+Coulomb 0.38 ms (33 %), GB 0.71 ms (61 %), all bonded
-  terms together 0.06 ms (5 %), analytical SASA 31 ms when enabled.
-- Numerical-vs-analytical SASA force: 10 048 ms → 31 ms per step
-  (325× speedup, max numerical-vs-analytical agreement 4.5×10⁻⁹).
-- SoA-flat exclusion bitmap on nonbonded pair loop: kernel-level 3.3×
-  speedup on Trp-cage (1.25 → 0.38 ms), 1.7× on the whole force
-  evaluation (2.0 → 1.16 ms).
+Bonded-topology features:
+- **Disulfide bonds** auto-detected via geometric SG-SG distance check
+  (intra- and inter-chain; matches PDB SSBOND records on crambin and insulin)
+- **Multi-chain `Structure`** with chain-aware peptide-bond auto-detection
+  (no phantom C(A21)-N(B1) bond across insulin's chain break)
+- **Monomer enum** holding either an `AminoAcid` (protein) or a
+  `Nucleotide` (RNA) — `chem::Nucleotide` is wired through but the
+  dynamics path stays protein-only for now (the PDB reader silently
+  skips ribonucleotide residues; future work promotes them to full
+  inclusion as part of the long-horizon ribosome goal)
 
-Up next: SoA on the GB Born-radii integral, parallel force evaluation
-across cores, then larger folds and longer trajectories.
+Integrator and physics:
+- **Reaction-field Coulomb** at the 10 Å cutoff (Tironi ε_RF → ∞);
+  both V and F vanish smoothly at the cutoff
+- **SHAKE** on X-H bonds → integrator stable at dt = 2 fs → 2× wall-clock
+  throughput per simulated picosecond
+- **SoA + rayon-parallel** nonbonded pair loop (~3.3× kernel-level
+  speedup on Trp-cage; threshold-gated parallelism so smaller proteins
+  use the no-overhead serial path)
+- **SoA Born-radii** for GB with parallel descreening sum
+- **REMD** (parallel tempering) — N replicas at increasing temperatures
+  with Metropolis swaps; production trajectory is the lowest-T replica
+
+Analysis:
+- **`origami analyze`** — per-frame Cα RMSD vs reference + radius of
+  gyration + end-to-end distance + Kabsch-Sander DSSP secondary
+  structure (with Ramachandran fallback for heavy-atom-only PDBs) +
+  optional residue-residue contact frequency map
+- **Trajectory animation** — `origami render --output-dir frames/`
+  emits per-frame PNGs with a stable camera locked across frames
+  (so molecules visually grow / fold in place); optional
+  `--frame-dt-fs` stamps `t = N.NN ps` in the top-left corner
+
+Performance benchmarks (release build, Apple Silicon, M3 Pro):
+
+| protein         | atoms | pairs (10 Å) | total_force / step | sim/wall (dt=2 + SHAKE) |
+|-----------------|------:|-------------:|-------------------:|------------------------:|
+| chignolin (1UAO)  |   134 |  7 470 |   0.27 ms |       ~500 ns / day |
+| Trp-cage  (1L2Y)  |   300 | 24 193 |   1.12 ms |       ~150 ns / day |
+| villin    (2F4K)  |   520 | 48 434 |   2.76 ms |        ~60 ns / day |
+
+With analytical SASA forces on: ~30× slower (still bounded by the
+SASA cost, which is ~30 ms/step on Trp-cage — the SoA / parallel /
+SHAKE work didn't move that dial). Numerical-vs-analytical SASA
+agreement: max 4.5 × 10⁻⁹ on the gradient.
+
+Up next: NeRF placement for ribonucleotides and a Monomer-aware
+topology graph so RNA chains can actually be built and dynamics'd.
 
 ## Build
 
@@ -231,15 +264,26 @@ origami minimize trp_cage.pdb --output trp_cage_min.pdb --algorithm lbfgs
 origami dynamics trp_cage_min.pdb --output-trajectory traj.pdb \
     --steps 3000 --save-every 100 --temperature 310 --friction 5.0
 
+# Same, with SHAKE-constrained X-H bonds and dt = 2 fs (≈ 2× faster)
+origami dynamics trp_cage_min.pdb --output-trajectory traj.pdb \
+    --steps 1500 --save-every 50 --dt 2.0 --shake-h
+
+# Replica-exchange MD — 8 replicas on a geometric T ladder, swap every 0.5 ps
+origami remd trp_cage_min.pdb --output-trajectory remd.pdb \
+    --temperatures 300,310,321,333,346,360,375,391 --time-ps 50 \
+    --swap-interval-ps 0.5 --dt 2.0 --shake-h
+
 # Co-translational chain growth — append one residue, then run dynamics
 # until the ribosome emits the next residue. Optional cylindrical exit
 # tunnel mimics the ribosomal tunnel.
 origami cotranslate --seq NLYIQWLKDGGPSSGRPPPS --output-trajectory cotrans.pdb \
     --interval 500 --tail 5000 --save-every 50 --with-tunnel
 
-# Render single-frame or trajectory (multi-MODEL → frame_NNNN.png per model)
+# Render single-frame or trajectory (multi-MODEL → frame_NNNN.png per model).
+# `--frame-dt-fs` adds a `t = N.NN ps` overlay in the top-left of each frame.
 origami render trp_cage.pdb --output trp_cage.png --width 800 --height 600
-origami render traj.pdb --output-dir frames/ --width 800 --height 600
+origami render traj.pdb --output-dir frames/ --width 800 --height 600 \
+    --frame-dt-fs 100
 
 # Trajectory analysis: per-frame Cα RMSD, Rg, end-to-end; residue-residue
 # contact-frequency map averaged over fully-grown frames.
