@@ -282,6 +282,50 @@ sampling stack we've built, chignolin folds (1.43 Å, near-native)
 and Trp-cage compacts into the native basin region (3.31 Å, 64 %
 of time in cluster 0); villin partially compacts but doesn't yet
 form its three helices within 1 ns × 8 replicas of sampling.
+
+**Extending villin REMD to 5 ns × 8 replicas: 4.25 Å min, much
+broader basin coverage.** Same ladder, same dt + SHAKE, 5× the
+simulation time per replica. Acceptance ratios improved from
+21-48 % to 37-50 % across all pairs (more samples per pair):
+
+  • <6 Å Cα RMSD reached at **284 ps**
+  • <5 Å reached at **284 ps**
+  • <4.5 Å reached at **288 ps**
+  • global minimum **4.25 Å at 289 ps**
+
+  • Helix content peaks at **24 %** (1-ns run peaked at 12 %)
+
+The chain reaches 4.25 Å once at 289 ps, briefly visiting the
+near-native basin, then bounces around in the 5-8 Å range
+exploring multiple compact configurations. Clustering at 3 Å
+cutoff resolves 20 clusters; the top four hold 89 % of frames
+with nearly-equal population (28 / 27 / 22 / 12 %). Cluster
+medoid distances to native:
+
+  cluster 0 (28 %): 7.72 Å — most-extended of the four
+  cluster 1 (27 %): 6.92 Å
+  cluster 2 (22 %): 6.01 Å
+  cluster 3 (12 %): **5.35 Å — closest to native**
+
+The smallest of the four main basins is the most native-like —
+the chain spent only 12 % of the simulation in the native-adjacent
+basin, with the majority distributed across less-native compact
+states. Reaching the 1-Å native basin would still need
+~milliseconds of sampling (villin's experimental fold time);
+this run does demonstrate that scaling REMD time on a 35-residue
+protein improves the result monotonically.
+
+![Villin REMD: 5 ns × 8 replicas, 4.25 Å min](docs/animations/villin_remd_long.gif)
+
+Cluster-3 medoid (the most native-like of the four populated
+basins, 12 % of frames):
+
+![Villin REMD 5-ns cluster-3 medoid (5.35 Å vs 2F4K native)](docs/images/villin_remd_long_basin3.png)
+
+[Trajectory MP4](docs/animations/villin_remd_long.mp4) ·
+[RMSD trace](docs/data/villin_remd_long_rmsd.tsv) ·
+[Cluster-3 medoid PDB](docs/data/villin_remd_long_cluster3_medoid.pdb).
+
 Reaching the native HP-35 bundle would need either a longer run
 (10-50 ns / replica) or a denser temperature ladder (16 replicas).
 
