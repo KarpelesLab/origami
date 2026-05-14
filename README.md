@@ -350,7 +350,8 @@ origami analyze cotrans.pdb \
     --reference crates/io/tests/fixtures/1UAO_chignolin.pdb \
     --output metrics.tsv \
     --contact-map contacts.tsv --contact-cutoff 8.0 \
-    --cluster-cutoff 1.5
+    --cluster-cutoff 1.5 \
+    --cluster-out-prefix /tmp/basin_   # also writes basin_0.pdb, basin_1.pdb, …
 ```
 
 ## Layout
