@@ -137,6 +137,39 @@ cutoff. Swap acceptance 55-65 % across all 7 adjacent pairs:
 [Full quality MP4](docs/animations/chignolin_remd.mp4) ·
 [RMSD trace](docs/data/chignolin_remd_rmsd.tsv)
 
+**REMD + SASA combined on chignolin: faster collapse but lock-in.**
+A natural follow-up — does the temperature-ladder sampling stack
+with the hydrophobic-collapse driving force? Same chignolin recipe,
+SASA γ=0.25, 100 ps × 8 replicas, dt=2 fs + SHAKE:
+
+  • <3.0 Å Cα RMSD reached at **42 ps** (REMD-alone took ~57 ps)
+  • <2.5 Å reached at **69 ps**       (REMD-alone took ~212 ps)
+  • global minimum **2.18 Å at 69 ps**
+
+Faster initial collapse than REMD-alone — SASA pulls the chain into
+a compact basin quickly. But the minimum is *worse* than
+REMD-alone (1.43 Å) because the SASA potential traps the chain in
+the first compact state it finds: clustering at 1.5 Å resolves
+4 nearly-equal-population basins (31 / 24 / 20 / 11 %), versus the
+99 % single-basin structure of REMD-alone.
+
+Swap acceptance 50-70 % (same ladder works at the higher
+effective-energy spread that SASA introduces).
+
+![REMD + SASA chignolin: faster collapse, multi-basin lock-in](docs/animations/chignolin_remd_sasa.gif)
+
+[MP4](docs/animations/chignolin_remd_sasa.mp4) ·
+[RMSD trace](docs/data/chignolin_remd_sasa_rmsd.tsv).
+
+Interpretation: SASA's hydrophobic well is steep enough that
+temperature-ladder sampling at 280-395 K can't lift the chain out
+of the wrong compact state once it's in. The trade-off matches the
+γ-scaling sweep observation from earlier (γ=1.0 over-stabilises);
+combining REMD with γ=0.25 SASA reaches the molten-globule regime
+~3× faster but doesn't reach the native basin the way REMD-only
+eventually does. The two methods don't stack additively — each is
+targeting a different fold-pathway feature.
+
 The sweet spot looks like γ ∈ [0.25, 0.5]: enough hydrophobic drive
 to compact the chain ~2× faster than LJ+GB-only, without
 over-stabilising the first compact state it finds. The literature γ
