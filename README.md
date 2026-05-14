@@ -207,6 +207,51 @@ distribution (64/23/10 % across three basins) is exactly what we'd
 expect from a sampling that's exploring conformational space rather
 than getting trapped.
 
+**REMD on villin HP-35: 6.14 Å min after 1 ns; partial helix
+formation.** Villin (PDB 2F4K, sequence `LSDEDFKAVFGMTRSAFANLPLWQQHLKEKGLF`,
+33 residues, 535 atoms) is the largest of our three benchmark folds
+and a three-α-helix bundle. 8 replicas at 280-346 K (geometric
+spacing factor 1.03 — tighter than chignolin / Trp-cage because
+villin's larger heat capacity narrows the optimal ladder), 1 ns
+per replica, dt = 2 fs + SHAKE. Production-replica trajectory:
+
+  • <10 Å Cα RMSD vs 2F4K native at **395 ps**
+  • <8 Å at **563 ps**
+  • global minimum **6.14 Å at 685 ps**
+
+  • Native helix content: **51.5 %**  → trajectory peaks at **12.1 %**
+
+The 6.14 Å minimum lands the chain in a compact native-like
+topology but the three-helix bundle hasn't fully formed — partial
+helix formation across the 35-residue chain in 1 ns is consistent
+with literature folding times of microseconds for villin in
+explicit-solvent MD. Cluster-0 dominates 59 % of frames at 3 Å
+cutoff (the dominant compact misfold); the rest distribute across
+smaller transient basins.
+
+Swap acceptance varies 21-48 % across the 7 adjacent pairs — the
+0↔1 pair at 21 % is on the loose end of "well-mixed" and suggests
+the lowest-T spacing wants to be tighter still for villin.
+
+![Villin REMD: 1 ns × 8 replicas, partial fold](docs/animations/villin_remd.gif)
+
+Cluster-0 medoid (the dominant compact misfold the chain visits
+~59 % of the time):
+
+![Villin REMD cluster-0 medoid](docs/images/villin_remd_basin.png)
+
+[Trajectory MP4](docs/animations/villin_remd.mp4) ·
+[RMSD trace](docs/data/villin_remd_rmsd.tsv) ·
+[Cluster-0 medoid PDB](docs/data/villin_remd_cluster0_medoid.pdb).
+
+The villin run is the honest negative: with the integrator and
+sampling stack we've built, chignolin folds (1.43 Å, near-native)
+and Trp-cage compacts into the native basin region (3.31 Å, 64 %
+of time in cluster 0); villin partially compacts but doesn't yet
+form its three helices within 1 ns × 8 replicas of sampling.
+Reaching the native HP-35 bundle would need either a longer run
+(10-50 ns / replica) or a denser temperature ladder (16 replicas).
+
 **Disulfide bonds.** Crambin (PDB 1CRN, 46 residues, plant peptide)
 ships under `crates/io/tests/fixtures/1CRN_crambin.pdb` to exercise
 the S-S detection path. `geom::build_topology_graph` finds all three
