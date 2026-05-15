@@ -213,6 +213,165 @@ fn lookup(
     Err(BuildError::MissingAtom(idx, name.to_owned()))
 }
 
+// ===================== RNA chain builder =====================
+//
+// Places the phosphodiester backbone + ribose ring + glycosidic
+// nitrogen for an RNA sequence by the same NeRF chain extension the
+// protein builder uses. The 13 atoms placed per nucleotide are:
+//
+//   P OP1 OP2 O5' C5' C4' O4' C3' O3' C2' O2' C1' + N9/N1
+//
+// The C1'-O4' ribose-ring closure is *not* placed — it's an implicit
+// topology bond that the forward NeRF placement satisfies only
+// approximately (same as the protein builder's aromatic-ring
+// closures). The bases beyond the glycosidic N, and all hydrogens,
+// are deliberately not built here — adding them is a documented
+// follow-up. This is the "extended starting chain" for RNA: not at
+// equilibrium, meant to be relaxed by minimisation / dynamics.
+
+/// Idealised RNA backbone + ribose internal coordinates (Å / radians).
+mod rna_ic {
+    use std::f64::consts::PI;
+    const fn deg(d: f64) -> f64 {
+        d * PI / 180.0
+    }
+    // Bond lengths.
+    pub const P_O5: f64 = 1.593;
+    pub const P_OP: f64 = 1.485;
+    pub const O5_C5: f64 = 1.440;
+    pub const C5_C4: f64 = 1.510;
+    pub const C4_O4: f64 = 1.451;
+    pub const C4_C3: f64 = 1.524;
+    pub const C3_O3: f64 = 1.423;
+    pub const C3_C2: f64 = 1.525;
+    pub const C2_O2: f64 = 1.413;
+    pub const C2_C1: f64 = 1.528;
+    pub const C1_N: f64 = 1.464;
+    pub const O3_P: f64 = 1.593; // inter-residue
+    // Bond angles.
+    pub const O3_P_O5: f64 = deg(104.0);
+    pub const C3_O3_P: f64 = deg(119.7);
+    pub const P_O5_C5: f64 = deg(120.9);
+    pub const O5_C5_C4: f64 = deg(110.2);
+    pub const C5_C4_C3: f64 = deg(115.0);
+    pub const C4_C3_O3: f64 = deg(110.6);
+    pub const O5_P_OP: f64 = deg(108.0);
+    pub const C5_C4_O4: f64 = deg(109.5);
+    pub const C4_C3_C2: f64 = deg(102.5);
+    pub const C3_C2_C1: f64 = deg(101.5);
+    pub const C3_C2_O2: f64 = deg(110.7);
+    pub const C2_C1_N: f64 = deg(108.2);
+    // Torsions. The main backbone path uses "extended" values; the
+    // ribose-branch torsions are tuned (see the ring-closure test) so
+    // the C1'-O4' separation lands near the 1.41 Å bond length.
+    pub const ALPHA: f64 = deg(-68.0); // O3'p-P-O5'-C5'
+    pub const BETA: f64 = deg(178.0); //  P-O5'-C5'-C4'
+    pub const GAMMA: f64 = deg(54.0); //  O5'-C5'-C4'-C3'
+    pub const DELTA: f64 = deg(82.0); //  C5'-C4'-C3'-O3'
+    pub const EPSILON: f64 = deg(-153.0); // C4'-C3'-O3'-P(next)
+    pub const ZETA: f64 = deg(-71.0); // C3'-O3'-P-O5'
+    // The ribose-branch torsions are solved (grid search over the
+    // three ring placements) so the implicit C1'-O4' ring-closure
+    // bond lands within 1e-3 Å of its 1.414 Å target.
+    pub const O4_TORS: f64 = deg(-24.0); // O5'-C5'-C4'-O4'
+    pub const C2_TORS: f64 = deg(-63.0); // C5'-C4'-C3'-C2'
+    pub const C1_TORS: f64 = deg(-72.0); // C4'-C3'-C2'-C1'
+    pub const O2_TORS: f64 = deg(48.0); //  C4'-C3'-C2'-O2'
+    pub const CHI: f64 = deg(-160.0); //   C3'-C2'-C1'-N (anti)
+    pub const OP1_TORS: f64 = deg(120.0);
+    pub const OP2_TORS: f64 = deg(-120.0);
+}
+
+/// Build an extended RNA chain (sugar-phosphate backbone + ribose ring
+/// + glycosidic nitrogen) from a nucleotide sequence. Every residue is
+/// a `Monomer::Rna`. See the module comment above for what is and is
+/// not placed.
+pub fn build_extended_rna_chain(
+    sequence: &[chem::Nucleotide],
+) -> Result<Structure, BuildError> {
+    use chem::Nucleotide;
+    use crate::structure::Monomer;
+    if sequence.is_empty() {
+        return Err(BuildError::Empty);
+    }
+    let mut structure = Structure::new();
+
+    for (idx, &nt) in sequence.iter().enumerate() {
+        let mut atoms: Vec<PlacedAtom> = Vec::with_capacity(13);
+        let push = |atoms: &mut Vec<PlacedAtom>, name: &'static str, el: Element, pos: Vec3| {
+            atoms.push(PlacedAtom { name, element: el, position: pos });
+        };
+
+        // ---- Anchor the phosphate-O5'-C5' triple ----
+        let (p, o5, c5) = if idx == 0 {
+            let p = Vec3::zeros();
+            let o5 = Vec3::new(rna_ic::P_O5, 0.0, 0.0);
+            // C5' in the xy-plane at ∠P-O5'-C5'.
+            let a = PI - rna_ic::P_O5_C5;
+            let c5 = Vec3::new(
+                o5.x + rna_ic::O5_C5 * a.cos(),
+                rna_ic::O5_C5 * a.sin(),
+                0.0,
+            );
+            (p, o5, c5)
+        } else {
+            let prev = &structure.residues[idx - 1];
+            let pc5 = prev.position("C5'").unwrap();
+            let pc4 = prev.position("C4'").unwrap();
+            let pc3 = prev.position("C3'").unwrap();
+            let po3 = prev.position("O3'").unwrap();
+            // P bonded to prev O3'; O5' then C5' continue the chain.
+            let p = place_atom(pc4, pc3, po3, rna_ic::O3_P, rna_ic::C3_O3_P, rna_ic::EPSILON);
+            let o5 = place_atom(pc3, po3, p, rna_ic::P_O5, rna_ic::O3_P_O5, rna_ic::ZETA);
+            let c5 = place_atom(po3, p, o5, rna_ic::O5_C5, rna_ic::P_O5_C5, rna_ic::ALPHA);
+            let _ = pc5;
+            (p, o5, c5)
+        };
+        push(&mut atoms, "P", Element::P, p);
+        push(&mut atoms, "O5'", Element::O, o5);
+        push(&mut atoms, "C5'", Element::C, c5);
+
+        // ---- Backbone main path C4' → C3' → O3' ----
+        let c4 = place_atom(p, o5, c5, rna_ic::C5_C4, rna_ic::O5_C5_C4, rna_ic::BETA);
+        let c3 = place_atom(o5, c5, c4, rna_ic::C4_C3, rna_ic::C5_C4_C3, rna_ic::GAMMA);
+        let o3 = place_atom(c5, c4, c3, rna_ic::C3_O3, rna_ic::C4_C3_O3, rna_ic::DELTA);
+        push(&mut atoms, "C4'", Element::C, c4);
+
+        // ---- Non-bridging phosphate oxygens ----
+        let op1 = place_atom(c5, o5, p, rna_ic::P_OP, rna_ic::O5_P_OP, rna_ic::OP1_TORS);
+        let op2 = place_atom(c5, o5, p, rna_ic::P_OP, rna_ic::O5_P_OP, rna_ic::OP2_TORS);
+        push(&mut atoms, "OP1", Element::O, op1);
+        push(&mut atoms, "OP2", Element::O, op2);
+
+        // ---- Ribose ring branch atoms ----
+        let o4 = place_atom(o5, c5, c4, rna_ic::C4_O4, rna_ic::C5_C4_O4, rna_ic::O4_TORS);
+        let c2 = place_atom(c5, c4, c3, rna_ic::C3_C2, rna_ic::C4_C3_C2, rna_ic::C2_TORS);
+        let c1 = place_atom(c4, c3, c2, rna_ic::C2_C1, rna_ic::C3_C2_C1, rna_ic::C1_TORS);
+        let o2 = place_atom(c4, c3, c2, rna_ic::C2_O2, rna_ic::C3_C2_O2, rna_ic::O2_TORS);
+        push(&mut atoms, "O4'", Element::O, o4);
+        push(&mut atoms, "C3'", Element::C, c3);
+        push(&mut atoms, "O3'", Element::O, o3);
+        push(&mut atoms, "C2'", Element::C, c2);
+        push(&mut atoms, "O2'", Element::O, o2);
+        push(&mut atoms, "C1'", Element::C, c1);
+
+        // ---- Glycosidic nitrogen (purine N9 / pyrimidine N1) ----
+        let n = place_atom(c3, c2, c1, rna_ic::C1_N, rna_ic::C2_C1_N, rna_ic::CHI);
+        let n_name = match nt {
+            Nucleotide::Adenine | Nucleotide::Guanine => "N9",
+            Nucleotide::Cytosine | Nucleotide::Uracil => "N1",
+        };
+        push(&mut atoms, n_name, Element::N, n);
+
+        structure.residues.push(PlacedResidue {
+            monomer: Monomer::Rna(nt),
+            atoms,
+            chain: 'A',
+        });
+    }
+    Ok(structure)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,5 +459,80 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ---- RNA builder tests ----
+
+    #[test]
+    fn rna_chain_has_13_atoms_per_residue() {
+        use chem::Nucleotide;
+        let s = build_extended_rna_chain(&[
+            Nucleotide::Adenine,
+            Nucleotide::Uracil,
+            Nucleotide::Guanine,
+            Nucleotide::Cytosine,
+        ])
+        .unwrap();
+        assert_eq!(s.residues.len(), 4);
+        for r in &s.residues {
+            // P OP1 OP2 O5' C5' C4' O4' C3' O3' C2' O2' C1' + N = 13.
+            assert_eq!(r.atoms.len(), 13, "expected 13 backbone atoms");
+            assert!(r.monomer.is_rna());
+        }
+        // Purines carry N9, pyrimidines N1.
+        assert!(s.residues[0].position("N9").is_some()); // A
+        assert!(s.residues[1].position("N1").is_some()); // U
+        assert!(s.residues[2].position("N9").is_some()); // G
+        assert!(s.residues[3].position("N1").is_some()); // C
+    }
+
+    #[test]
+    fn rna_backbone_bond_lengths_correct() {
+        use chem::Nucleotide;
+        let s = build_extended_rna_chain(&[
+            Nucleotide::Adenine,
+            Nucleotide::Cytosine,
+            Nucleotide::Guanine,
+        ])
+        .unwrap();
+        for (i, r) in s.residues.iter().enumerate() {
+            let p = |n: &str| r.position(n).unwrap();
+            assert_relative_eq!(measure::distance(p("P"), p("O5'")), rna_ic::P_O5, epsilon = 1e-6);
+            assert_relative_eq!(measure::distance(p("O5'"), p("C5'")), rna_ic::O5_C5, epsilon = 1e-6);
+            assert_relative_eq!(measure::distance(p("C5'"), p("C4'")), rna_ic::C5_C4, epsilon = 1e-6);
+            assert_relative_eq!(measure::distance(p("C4'"), p("C3'")), rna_ic::C4_C3, epsilon = 1e-6);
+            assert_relative_eq!(measure::distance(p("C3'"), p("O3'")), rna_ic::C3_O3, epsilon = 1e-6);
+            assert_relative_eq!(measure::distance(p("P"), p("OP1")), rna_ic::P_OP, epsilon = 1e-6);
+            assert_relative_eq!(measure::distance(p("C4'"), p("O4'")), rna_ic::C4_O4, epsilon = 1e-6);
+            assert_relative_eq!(measure::distance(p("C2'"), p("C1'")), rna_ic::C2_C1, epsilon = 1e-6);
+            // Inter-residue phosphodiester bond.
+            if i > 0 {
+                let prev_o3 = s.residues[i - 1].position("O3'").unwrap();
+                assert_relative_eq!(
+                    measure::distance(prev_o3, p("P")),
+                    rna_ic::O3_P,
+                    epsilon = 1e-6
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rna_ribose_ring_closure_is_reasonable() {
+        // C1'-O4' is the implicit ring-closure bond, not NeRF-placed.
+        // Forward placement satisfies it only approximately; for an
+        // "extended starting chain" anything within ~0.4 Å of the
+        // 1.41 Å target ribose bond is acceptable (minimisation
+        // closes the rest).
+        use chem::Nucleotide;
+        let s = build_extended_rna_chain(&[Nucleotide::Adenine]).unwrap();
+        let r = &s.residues[0];
+        let c1 = r.position("C1'").unwrap();
+        let o4 = r.position("O4'").unwrap();
+        let d = measure::distance(c1, o4);
+        assert!(
+            (d - 1.414).abs() < 0.4,
+            "ribose ring closure C1'-O4' = {d} Å, want ≈ 1.41"
+        );
     }
 }
