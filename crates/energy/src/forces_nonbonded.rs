@@ -133,21 +133,47 @@ pub fn add_nonbonded_forces_soa(
     let inv_rc3 = rf.inv_rc3;
     let coulomb_kj = kcal_to_kj(crate::nonbonded::COULOMB_CONST_KCAL_A_PER_E2);
 
-    // CellList neighbour search — same logic as AoS path, just over
-    // the SoA position arrays.
-    let mut positions: Vec<Vec3> = Vec::with_capacity(n);
-    for i in 0..n {
-        positions.push(Vec3::new(scratch.xs[i], scratch.ys[i], scratch.zs[i]));
-    }
-    let cl = CellList::build(&positions, cutoff_a);
+    // Verlet neighbour list: rebuild the candidate pair list only when
+    // an atom has drifted more than VERLET_SKIN/2 from its position at
+    // the last rebuild. The cached list covers `cutoff + skin`; the
+    // inner loop still applies the true `cutoff`, so the skin only
+    // widens the candidate set.
+    let skin = crate::scratch::VERLET_SKIN_A;
+    let half_skin_sq = (0.5 * skin) * (0.5 * skin);
+    let need_rebuild = !scratch.verlet_valid || {
+        let mut moved = false;
+        for i in 0..n {
+            let dx = scratch.xs[i] - scratch.verlet_ref_x[i];
+            let dy = scratch.ys[i] - scratch.verlet_ref_y[i];
+            let dz = scratch.zs[i] - scratch.verlet_ref_z[i];
+            if dx * dx + dy * dy + dz * dz > half_skin_sq {
+                moved = true;
+                break;
+            }
+        }
+        moved
+    };
 
-    // Collect pairs into a Vec so rayon can split them across threads.
-    // The cell-list iterator is sequential; we pay one Vec allocation
-    // per force call. For Trp-cage / chignolin sizes this is a few
-    // thousand entries (16 B each), negligible against the pair-loop
-    // cost.
-    let pairs: Vec<(usize, usize, f64)> =
-        cl.iter_pairs_within(&positions, cutoff_a).collect();
+    if need_rebuild {
+        let mut positions: Vec<Vec3> = Vec::with_capacity(n);
+        for i in 0..n {
+            positions.push(Vec3::new(scratch.xs[i], scratch.ys[i], scratch.zs[i]));
+        }
+        let list_cutoff = cutoff_a + skin;
+        let cl = CellList::build(&positions, list_cutoff);
+        scratch.verlet_pairs.clear();
+        for (i, j, _r) in cl.iter_pairs_within(&positions, list_cutoff) {
+            scratch.verlet_pairs.push((i as u32, j as u32));
+        }
+        scratch.verlet_ref_x.copy_from_slice(&scratch.xs);
+        scratch.verlet_ref_y.copy_from_slice(&scratch.ys);
+        scratch.verlet_ref_z.copy_from_slice(&scratch.zs);
+        scratch.verlet_valid = true;
+    }
+    // Move the pair list out of the scratch so the rest of the
+    // function can take a fresh `&mut scratch` for the force buffers.
+    // Restored at every exit point.
+    let pairs = std::mem::take(&mut scratch.verlet_pairs);
 
     // Destructure scratch into explicit immutable / mutable borrows so
     // the inner closure can be a plain `Fn` capturing only `&[f64]`s.
@@ -163,8 +189,11 @@ pub fn add_nonbonded_forces_soa(
 
     // One pair → updates to per-pair (fx, fy, fz) accumulators. Returns
     // (fx, fy, fz) ready to be added to atom i and subtracted from
-    // atom j (or `None` if the pair is excluded / out of cutoff).
-    let compute_pair = move |i: usize, j: usize, r: f64| -> Option<(f64, f64, f64)> {
+    // atom j (or `None` if the pair is excluded / out of cutoff). The
+    // distance is recomputed here rather than carried on the pair
+    // list — the Verlet list is geometric (i, j) only, since the
+    // separation changes every step.
+    let compute_pair = move |i: usize, j: usize| -> Option<(f64, f64, f64)> {
         let mask = excl[i * n + j];
         if (mask & crate::scratch::EXCLUDED_BIT) != 0 {
             return None;
@@ -176,6 +205,7 @@ pub fn add_nonbonded_forces_soa(
         if r2 > cutoff_sq || r2 < 1e-18 {
             return None;
         }
+        let r = r2.sqrt();
         let one_four = (mask & crate::scratch::ONE_FOUR_BIT) != 0;
         let (rmin_half_i, eps_i, rmin_half_j, eps_j) = if one_four {
             (rmin_half_14[i], epsilon_14[i], rmin_half_14[j], epsilon_14[j])
@@ -203,8 +233,9 @@ pub fn add_nonbonded_forces_soa(
 
     if pairs.len() < SOA_PARALLEL_PAIR_THRESHOLD {
         // Serial: write straight into scratch (no thread-local merge).
-        for &(i, j, r) in &pairs {
-            if let Some((fx, fy, fz)) = compute_pair(i, j, r) {
+        for &(i, j) in &pairs {
+            let (i, j) = (i as usize, j as usize);
+            if let Some((fx, fy, fz)) = compute_pair(i, j) {
                 scratch.fxs[i] += fx;
                 scratch.fys[i] += fy;
                 scratch.fzs[i] += fz;
@@ -213,6 +244,7 @@ pub fn add_nonbonded_forces_soa(
                 scratch.fzs[j] -= fz;
             }
         }
+        scratch.verlet_pairs = pairs;
         return;
     }
 
@@ -236,7 +268,7 @@ pub fn add_nonbonded_forces_soa(
     let par_fx_slice = &mut scratch.par_fx[..used_threads * n];
     let par_fy_slice = &mut scratch.par_fy[..used_threads * n];
     let par_fz_slice = &mut scratch.par_fz[..used_threads * n];
-    let chunks: Vec<&[(usize, usize, f64)]> = pairs.chunks(chunk_size).collect();
+    let chunks: Vec<&[(u32, u32)]> = pairs.chunks(chunk_size).collect();
 
     par_fx_slice
         .par_chunks_mut(n)
@@ -244,8 +276,9 @@ pub fn add_nonbonded_forces_soa(
         .zip(par_fz_slice.par_chunks_mut(n))
         .zip(chunks.into_par_iter())
         .for_each(|(((acc_x, acc_y), acc_z), chunk)| {
-            for &(i, j, r) in chunk {
-                if let Some((fx, fy, fz)) = compute_pair(i, j, r) {
+            for &(i, j) in chunk {
+                let (i, j) = (i as usize, j as usize);
+                if let Some((fx, fy, fz)) = compute_pair(i, j) {
                     acc_x[i] += fx;
                     acc_y[i] += fy;
                     acc_z[i] += fz;
@@ -266,6 +299,7 @@ pub fn add_nonbonded_forces_soa(
             scratch.fzs[k] += scratch.par_fz[base + k];
         }
     }
+    scratch.verlet_pairs = pairs;
 }
 
 #[cfg(test)]
@@ -291,6 +325,72 @@ mod tests {
                 }
                 count += 1;
             }
+        }
+    }
+
+    #[test]
+    fn verlet_cached_call_matches_fresh_build() {
+        // Two SoA calls on the *same* positions: the first builds the
+        // Verlet list, the second reuses it (zero displacement, no
+        // rebuild). Both must give identical forces.
+        let s = build_extended_chain(&[
+            AminoAcid::Lys, AminoAcid::Glu, AminoAcid::Ala, AminoAcid::Phe,
+        ]).unwrap();
+        let g = build_topology_graph(&s);
+        let ff = standard_ff();
+        let mut scratch = crate::scratch::ForceScratch::new(&s, &g, ff);
+
+        scratch.zero_forces();
+        add_nonbonded_forces_soa(&mut scratch, DEFAULT_CUTOFF_A);
+        let first: Vec<f64> = scratch.fxs.iter().chain(&scratch.fys).chain(&scratch.fzs).copied().collect();
+        assert!(scratch.verlet_valid, "first call should build the list");
+
+        scratch.zero_forces();
+        add_nonbonded_forces_soa(&mut scratch, DEFAULT_CUTOFF_A);
+        let second: Vec<f64> = scratch.fxs.iter().chain(&scratch.fys).chain(&scratch.fzs).copied().collect();
+
+        for (a, b) in first.iter().zip(&second) {
+            assert!((a - b).abs() < 1e-12, "cached call diverged: {a} vs {b}");
+        }
+    }
+
+    #[test]
+    fn verlet_rebuilds_after_large_displacement() {
+        // After moving an atom far (> skin), the next call must rebuild
+        // the list and still match a from-scratch reference.
+        let s = build_extended_chain(&[
+            AminoAcid::Lys, AminoAcid::Glu, AminoAcid::Ala,
+        ]).unwrap();
+        let g = build_topology_graph(&s);
+        let ff = standard_ff();
+        let mut scratch = crate::scratch::ForceScratch::new(&s, &g, ff);
+
+        scratch.zero_forces();
+        add_nonbonded_forces_soa(&mut scratch, DEFAULT_CUTOFF_A);
+
+        // Move every atom by 5 Å (well beyond the 2 Å skin) along x.
+        let mut s2 = s.clone();
+        for r in &mut s2.residues {
+            for a in &mut r.atoms {
+                a.position.x += 5.0;
+            }
+        }
+        scratch.sync_positions(&s2);
+        scratch.zero_forces();
+        add_nonbonded_forces_soa(&mut scratch, DEFAULT_CUTOFF_A);
+        let verlet_forces: Vec<f64> =
+            scratch.fxs.iter().chain(&scratch.fys).chain(&scratch.fzs).copied().collect();
+
+        // Reference: a fresh scratch built directly on the moved
+        // structure (no cached list).
+        let mut fresh = crate::scratch::ForceScratch::new(&s2, &g, ff);
+        fresh.zero_forces();
+        add_nonbonded_forces_soa(&mut fresh, DEFAULT_CUTOFF_A);
+        let fresh_forces: Vec<f64> =
+            fresh.fxs.iter().chain(&fresh.fys).chain(&fresh.fzs).copied().collect();
+
+        for (a, b) in verlet_forces.iter().zip(&fresh_forces) {
+            assert!((a - b).abs() < 1e-9, "rebuild diverged: {a} vs {b}");
         }
     }
 

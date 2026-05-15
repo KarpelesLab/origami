@@ -79,7 +79,32 @@ pub struct ForceScratch {
     pub gb_integral: Vec<f64>,
     /// Output buffer: effective Born radii in Å.
     pub gb_effective_radii: Vec<f64>,
+
+    // ---- Verlet neighbour-list cache ----
+    //
+    // The nonbonded SoA kernel caches its candidate pair list between
+    // steps. The list holds every pair within `cutoff + VERLET_SKIN`;
+    // the kernel still applies the true `cutoff` in its inner loop, so
+    // the skin only widens the candidate set, never changes the
+    // physics. The list is rebuilt only when some atom has drifted
+    // more than `VERLET_SKIN / 2` from its position at the last
+    // rebuild — at which point a pair could have crossed the cutoff
+    // without being in the cached set. In MD at 310 K / dt 2 fs that's
+    // every ~30-100 steps, so ~97 % of cell-list reconstructions are
+    // skipped.
+    pub verlet_pairs: Vec<(u32, u32)>,
+    /// Atom positions captured at the last list rebuild (flat SoA).
+    pub verlet_ref_x: Vec<f64>,
+    pub verlet_ref_y: Vec<f64>,
+    pub verlet_ref_z: Vec<f64>,
+    /// False until the first build; forces a rebuild on the first call.
+    pub verlet_valid: bool,
 }
+
+/// Verlet skin width in Å. The cached pair list covers
+/// `cutoff + VERLET_SKIN`; rebuild triggers when an atom moves more
+/// than half this.
+pub const VERLET_SKIN_A: f64 = 2.0;
 
 impl ForceScratch {
     /// Build a scratch for the given structure + topology + force field.
@@ -111,6 +136,11 @@ impl ForceScratch {
             gb_scale: vec![0.0; n],
             gb_integral: vec![0.0; n],
             gb_effective_radii: vec![0.0; n],
+            verlet_pairs: Vec::new(),
+            verlet_ref_x: vec![0.0; n],
+            verlet_ref_y: vec![0.0; n],
+            verlet_ref_z: vec![0.0; n],
+            verlet_valid: false,
         };
         s.rebuild_params(structure, ff);
         s.rebuild_exclusions(graph);
