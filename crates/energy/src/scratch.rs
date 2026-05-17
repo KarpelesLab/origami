@@ -99,6 +99,18 @@ pub struct ForceScratch {
     pub verlet_ref_z: Vec<f64>,
     /// False until the first build; forces a rebuild on the first call.
     pub verlet_valid: bool,
+
+    // ---- Verlet cache for the GB descreening pair sum ----
+    //
+    // Same idea as `verlet_pairs` but for the 20-Å Born-radius cutoff.
+    // Because the GB cutoff is twice the LJ / Coulomb one, this pair
+    // list is roughly 4× larger and the per-call cell-list build cost
+    // is the bigger absolute win.
+    pub gb_verlet_pairs: Vec<(u32, u32)>,
+    pub gb_verlet_ref_x: Vec<f64>,
+    pub gb_verlet_ref_y: Vec<f64>,
+    pub gb_verlet_ref_z: Vec<f64>,
+    pub gb_verlet_valid: bool,
 }
 
 /// Verlet skin width in Å. The cached pair list covers
@@ -141,6 +153,11 @@ impl ForceScratch {
             verlet_ref_y: vec![0.0; n],
             verlet_ref_z: vec![0.0; n],
             verlet_valid: false,
+            gb_verlet_pairs: Vec::new(),
+            gb_verlet_ref_x: vec![0.0; n],
+            gb_verlet_ref_y: vec![0.0; n],
+            gb_verlet_ref_z: vec![0.0; n],
+            gb_verlet_valid: false,
         };
         s.rebuild_params(structure, ff);
         s.rebuild_exclusions(graph);

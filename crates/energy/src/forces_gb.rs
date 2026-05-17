@@ -31,6 +31,9 @@ const EPSILON_SOLUTE: f64 = 1.0;
 /// cut off at this distance). Using the same cutoff for both keeps
 /// the two electrostatic terms self-consistent.
 const GB_DEFAULT_CUTOFF_A: f64 = DEFAULT_CUTOFF_A;
+/// Public re-export of [`GB_DEFAULT_CUTOFF_A`] for the integrator path
+/// (`energy::forces::total_force_with_scratch`).
+pub const GB_DEFAULT_CUTOFF_A_PUB: f64 = GB_DEFAULT_CUTOFF_A;
 
 pub fn add_gb_forces(structure: &Structure, ff: &ForceField, forces: &mut [Vec3]) {
     add_gb_forces_with_cutoff(structure, ff, forces, GB_DEFAULT_CUTOFF_A);
@@ -310,6 +313,32 @@ mod tests {
                 }
                 count += 1;
             }
+        }
+    }
+
+    #[test]
+    fn gb_verlet_cached_call_matches_fresh_build() {
+        // Two add_gb_forces_soa calls on the same positions — first
+        // builds the GB-Verlet pair list, second reuses it (zero
+        // displacement). Both must give bit-identical forces.
+        let s = build_extended_chain(&[
+            AminoAcid::Lys, AminoAcid::Glu, AminoAcid::Ala, AminoAcid::Phe,
+        ]).unwrap();
+        let g = geom::build_topology_graph(&s);
+        let ff = standard_ff();
+        let mut scratch = crate::scratch::ForceScratch::new(&s, &g, ff);
+
+        scratch.zero_forces();
+        add_gb_forces_soa(&mut scratch, &s, ff, GB_DEFAULT_CUTOFF_A);
+        let first: Vec<f64> = scratch.fxs.iter().chain(&scratch.fys).chain(&scratch.fzs).copied().collect();
+        assert!(scratch.gb_verlet_valid, "first call should build the list");
+
+        scratch.zero_forces();
+        add_gb_forces_soa(&mut scratch, &s, ff, GB_DEFAULT_CUTOFF_A);
+        let second: Vec<f64> = scratch.fxs.iter().chain(&scratch.fys).chain(&scratch.fzs).copied().collect();
+
+        for (a, b) in first.iter().zip(&second) {
+            assert!((a - b).abs() < 1e-12, "cached GB call diverged: {a} vs {b}");
         }
     }
 

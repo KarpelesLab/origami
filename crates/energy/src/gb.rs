@@ -208,37 +208,89 @@ pub fn compute_born_radii_into_scratch(
     let n = scratch.n;
     debug_assert_eq!(structure.atom_count(), n, "scratch sized for a different structure");
 
-    // The Born-radius cutoff is 20 Å — wider than the LJ / Coulomb
-    // 10 Å — so we build a separate cell list at the GB cell size.
-    let positions: Vec<Vec3> = structure
-        .residues
-        .iter()
-        .flat_map(|r| r.atoms.iter().map(|a| a.position))
-        .collect();
-    let cl = CellList::build(&positions, BORN_RADIUS_CUTOFF_A);
+    // Sync positions into the scratch SoA arrays — the caller may or
+    // may not have done this already (the AoS path didn't), and the
+    // Verlet rebuild check reads from scratch.{x,y,z}s.
+    scratch.sync_positions(structure);
+
+    // Verlet cache (same pattern as the nonbonded SoA path): rebuild
+    // only when an atom has drifted more than skin/2 from the
+    // position at the last list build. The Born cutoff is 20 Å so
+    // the cached list covers `BORN_RADIUS_CUTOFF_A + skin`.
+    let skin = crate::scratch::VERLET_SKIN_A;
+    let half_skin_sq = (0.5 * skin) * (0.5 * skin);
+    let need_rebuild = !scratch.gb_verlet_valid || {
+        let mut moved = false;
+        for i in 0..n {
+            let dx = scratch.xs[i] - scratch.gb_verlet_ref_x[i];
+            let dy = scratch.ys[i] - scratch.gb_verlet_ref_y[i];
+            let dz = scratch.zs[i] - scratch.gb_verlet_ref_z[i];
+            if dx * dx + dy * dy + dz * dz > half_skin_sq {
+                moved = true;
+                break;
+            }
+        }
+        moved
+    };
+
+    if need_rebuild {
+        let mut positions: Vec<Vec3> = Vec::with_capacity(n);
+        for i in 0..n {
+            positions.push(Vec3::new(scratch.xs[i], scratch.ys[i], scratch.zs[i]));
+        }
+        let list_cutoff = BORN_RADIUS_CUTOFF_A + skin;
+        let cl = CellList::build(&positions, list_cutoff);
+        scratch.gb_verlet_pairs.clear();
+        for (i, j, _r) in cl.iter_pairs_within(&positions, list_cutoff) {
+            scratch.gb_verlet_pairs.push((i as u32, j as u32));
+        }
+        scratch.gb_verlet_ref_x.copy_from_slice(&scratch.xs);
+        scratch.gb_verlet_ref_y.copy_from_slice(&scratch.ys);
+        scratch.gb_verlet_ref_z.copy_from_slice(&scratch.zs);
+        scratch.gb_verlet_valid = true;
+    }
 
     // Zero the accumulator buffer.
     scratch.gb_integral[..n].fill(0.0);
 
-    // Collect pairs once so rayon can chunk them. The Born cutoff at
-    // 20 Å produces ~4× more pairs than the LJ / Coulomb path; even
-    // a 300-atom protein has 100 k+ pairs here, well into the
-    // parallel-pays-off regime.
-    let pairs: Vec<(usize, usize, f64)> = cl
-        .iter_pairs_within(&positions, BORN_RADIUS_CUTOFF_A)
-        .collect();
+    // Move the cached list out so the rest of the function can take
+    // mutable borrows of scratch for the accumulator buffers; restore
+    // at both exit points.
+    let pairs = std::mem::take(&mut scratch.gb_verlet_pairs);
 
     let rho_tilde = scratch.gb_rho_tilde.as_slice();
     let scale = scratch.gb_scale.as_slice();
+    let xs = scratch.xs.as_slice();
+    let ys = scratch.ys.as_slice();
+    let zs = scratch.zs.as_slice();
+    let cutoff_sq = BORN_RADIUS_CUTOFF_A * BORN_RADIUS_CUTOFF_A;
+
+    // One pair → its descreening pair-energy contribution (h_ij, h_ji).
+    // Returns None when the pair is outside the true cutoff (the
+    // cached list contains some pairs in the skin region).
+    let compute_pair = move |i: usize, j: usize| -> Option<(f64, f64)> {
+        let dx = xs[j] - xs[i];
+        let dy = ys[j] - ys[i];
+        let dz = zs[j] - zs[i];
+        let r2 = dx * dx + dy * dy + dz * dz;
+        if r2 > cutoff_sq || r2 < 1e-18 {
+            return None;
+        }
+        let r = r2.sqrt();
+        let h_ij = pairwise_descreening(r, rho_tilde[i], scale[j] * rho_tilde[j]);
+        let h_ji = pairwise_descreening(r, rho_tilde[j], scale[i] * rho_tilde[i]);
+        Some((h_ij, h_ji))
+    };
 
     const PARALLEL_THRESHOLD: usize = 30_000;
     if pairs.len() < PARALLEL_THRESHOLD {
         // Serial path.
-        for &(i, j, r) in &pairs {
-            let h_ij = pairwise_descreening(r, rho_tilde[i], scale[j] * rho_tilde[j]);
-            let h_ji = pairwise_descreening(r, rho_tilde[j], scale[i] * rho_tilde[i]);
-            scratch.gb_integral[i] += h_ij;
-            scratch.gb_integral[j] += h_ji;
+        for &(i, j) in &pairs {
+            let (i, j) = (i as usize, j as usize);
+            if let Some((h_ij, h_ji)) = compute_pair(i, j) {
+                scratch.gb_integral[i] += h_ij;
+                scratch.gb_integral[j] += h_ji;
+            }
         }
     } else {
         // Parallel: per-thread accumulator slices in scratch.par_fx
@@ -250,16 +302,17 @@ pub fn compute_born_radii_into_scratch(
         let used_threads = pairs.len().div_ceil(chunk_size);
         let acc_slice = &mut scratch.par_fx[..used_threads * n];
         acc_slice.fill(0.0);
-        let chunks: Vec<&[(usize, usize, f64)]> = pairs.chunks(chunk_size).collect();
+        let chunks: Vec<&[(u32, u32)]> = pairs.chunks(chunk_size).collect();
         acc_slice
             .par_chunks_mut(n)
             .zip(chunks.into_par_iter())
             .for_each(|(acc, chunk)| {
-                for &(i, j, r) in chunk {
-                    let h_ij = pairwise_descreening(r, rho_tilde[i], scale[j] * rho_tilde[j]);
-                    let h_ji = pairwise_descreening(r, rho_tilde[j], scale[i] * rho_tilde[i]);
-                    acc[i] += h_ij;
-                    acc[j] += h_ji;
+                for &(i, j) in chunk {
+                    let (i, j) = (i as usize, j as usize);
+                    if let Some((h_ij, h_ji)) = compute_pair(i, j) {
+                        acc[i] += h_ij;
+                        acc[j] += h_ji;
+                    }
                 }
             });
         for t in 0..used_threads {
@@ -269,6 +322,7 @@ pub fn compute_born_radii_into_scratch(
             }
         }
     }
+    scratch.gb_verlet_pairs = pairs;
 
     let mut clamped = 0usize;
     for i in 0..n {

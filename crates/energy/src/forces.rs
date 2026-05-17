@@ -109,9 +109,17 @@ pub fn total_force_with_scratch(
     scratch.sync_positions(structure);
     scratch.zero_forces();
     crate::forces_nonbonded::add_nonbonded_forces_soa(scratch, cutoff_a);
+    // SoA GB pair force — also goes through the scratch (its Born-
+    // radius compute and pair loop both use the cached Verlet pair
+    // list and the SoA position arrays).
+    crate::forces_gb::add_gb_forces_soa(
+        scratch,
+        structure,
+        ff,
+        crate::forces_gb::GB_DEFAULT_CUTOFF_A_PUB,
+    );
     scratch.accumulate_into(forces);
 
-    add_gb_forces(structure, ff, forces);
     if include_sasa {
         add_sasa_forces(structure, ff, forces);
     }
