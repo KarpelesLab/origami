@@ -111,6 +111,25 @@ pub struct ForceScratch {
     pub gb_verlet_ref_y: Vec<f64>,
     pub gb_verlet_ref_z: Vec<f64>,
     pub gb_verlet_valid: bool,
+
+    // ---- SASA per-atom neighbour cache ----
+    //
+    // The analytical SASA force code needs per-atom "what other atoms
+    // overlap atom i's expanded vdW sphere" lists. The overlap cutoff
+    // is roughly the sum of expanded vdW radii (≤ ~6.5 Å for S-S),
+    // tighter than the LJ / Coulomb 10 Å. We cache the per-atom
+    // neighbour-index lists with the same Verlet skin treatment as
+    // the other pair caches.
+    pub sasa_neighbours: Vec<Vec<u32>>,
+    pub sasa_verlet_ref_x: Vec<f64>,
+    pub sasa_verlet_ref_y: Vec<f64>,
+    pub sasa_verlet_ref_z: Vec<f64>,
+    pub sasa_verlet_valid: bool,
+    /// Per-thread per-atom force accumulators for the parallel
+    /// per-atom SASA loop. Layout: `n_par_threads × n × 3` flat
+    /// `f64`s (x, y, z interleaved per atom). Reuses the buffer
+    /// across calls; allocated once at scratch construction.
+    pub sasa_par_forces: Vec<f64>,
 }
 
 /// Verlet skin width in Å. The cached pair list covers
@@ -158,6 +177,12 @@ impl ForceScratch {
             gb_verlet_ref_y: vec![0.0; n],
             gb_verlet_ref_z: vec![0.0; n],
             gb_verlet_valid: false,
+            sasa_neighbours: vec![Vec::new(); n],
+            sasa_verlet_ref_x: vec![0.0; n],
+            sasa_verlet_ref_y: vec![0.0; n],
+            sasa_verlet_ref_z: vec![0.0; n],
+            sasa_verlet_valid: false,
+            sasa_par_forces: vec![0.0; n_threads * n * 3],
         };
         s.rebuild_params(structure, ff);
         s.rebuild_exclusions(graph);

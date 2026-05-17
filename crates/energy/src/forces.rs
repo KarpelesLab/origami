@@ -121,7 +121,9 @@ pub fn total_force_with_scratch(
     scratch.accumulate_into(forces);
 
     if include_sasa {
-        add_sasa_forces(structure, ff, forces);
+        crate::powersasa::analytical::add_sasa_forces_analytical_with_scratch(
+            structure, ff, scratch, forces,
+        );
     }
 }
 

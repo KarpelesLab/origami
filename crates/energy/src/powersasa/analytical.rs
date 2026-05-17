@@ -431,6 +431,155 @@ fn directional_area_derivative(
 /// This replaces the numerical central-difference scheme in
 /// `forces_sasa::add_sasa_forces`. The numerical version stays around
 /// as the reference baseline.
+/// Scratch-aware variant of [`add_sasa_forces_analytical`] used by the
+/// production integrator path (`forces::total_force_with_scratch`).
+/// Two improvements over the no-scratch version:
+///
+///   • The per-atom neighbour lists are cached on the scratch with a
+///     Verlet skin — rebuilt only when an atom drifts more than
+///     `skin/2`. Saves the O(N²) all-pair scan every step.
+///
+///   • The per-atom force loop (build_atom_cache + atom_area_gradient
+///     + force accumulation) runs in parallel via rayon, with each
+///     worker writing to its own slice of the
+///     `scratch.sasa_par_forces` buffer; a serial reduce sums the
+///     thread slices back into the caller's force buffer.
+///
+/// Equivalent results to `add_sasa_forces_analytical` (within
+/// floating-point reduction ordering), substantially faster when the
+/// integrator calls it tens of thousands of times in a row.
+pub fn add_sasa_forces_analytical_with_scratch(
+    structure: &geom::Structure,
+    _ff: &chem::ForceField,
+    scratch: &mut crate::scratch::ForceScratch,
+    forces: &mut [Vec3],
+) {
+    use chem::Element;
+    use rayon::prelude::*;
+    let n = structure.atom_count();
+    assert_eq!(forces.len(), n);
+    assert_eq!(scratch.n, n);
+
+    // Flatten positions + radii + per-atom γ from the structure. We
+    // could move these into the scratch too (they only change when
+    // atoms are added/removed), but the cost is sub-µs compared to
+    // the per-atom topology compute below.
+    let mut positions: Vec<Vec3> = Vec::with_capacity(n);
+    let mut radii: Vec<f64> = Vec::with_capacity(n);
+    let mut elements: Vec<Element> = Vec::with_capacity(n);
+    for residue in &structure.residues {
+        for atom in &residue.atoms {
+            positions.push(atom.position);
+            radii.push(super::vdw_radius(atom.element) + super::PROBE_RADIUS_A);
+            elements.push(atom.element);
+        }
+    }
+    let gamma_scale = std::env::var("ORIGAMI_SASA_GAMMA_SCALE")
+        .ok()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(1.0);
+    let gamma: Vec<f64> = elements
+        .iter()
+        .map(|&e| crate::units::kcal_to_kj(super::surface_tension_kcal(e)) * gamma_scale)
+        .collect();
+    let max_radius = radii.iter().cloned().fold(0.0_f64, f64::max);
+
+    // ---- Verlet check on the cached per-atom neighbour lists ----
+    let skin = crate::scratch::VERLET_SKIN_A;
+    let half_skin_sq = (0.5 * skin) * (0.5 * skin);
+    scratch.sync_positions(structure);
+    let need_rebuild = !scratch.sasa_verlet_valid || {
+        let mut moved = false;
+        for i in 0..n {
+            let dx = scratch.xs[i] - scratch.sasa_verlet_ref_x[i];
+            let dy = scratch.ys[i] - scratch.sasa_verlet_ref_y[i];
+            let dz = scratch.zs[i] - scratch.sasa_verlet_ref_z[i];
+            if dx * dx + dy * dy + dz * dz > half_skin_sq {
+                moved = true;
+                break;
+            }
+        }
+        moved
+    };
+    if need_rebuild {
+        // Rebuild via cell-list at `2·max_radius + skin`. Per-pair
+        // check is still `d ≤ r_i + r_j`; the skin gives slack so
+        // the list stays valid as atoms drift.
+        let cell_size = (2.0 * max_radius + skin).max(1.0);
+        let cl = geom::CellList::build(&positions, cell_size);
+        for v in &mut scratch.sasa_neighbours {
+            v.clear();
+        }
+        for (i, j, d) in cl.iter_pairs_within(&positions, cell_size) {
+            if d <= radii[i] + radii[j] + skin {
+                scratch.sasa_neighbours[i].push(j as u32);
+                scratch.sasa_neighbours[j].push(i as u32);
+            }
+        }
+        scratch.sasa_verlet_ref_x.copy_from_slice(&scratch.xs);
+        scratch.sasa_verlet_ref_y.copy_from_slice(&scratch.ys);
+        scratch.sasa_verlet_ref_z.copy_from_slice(&scratch.zs);
+        scratch.sasa_verlet_valid = true;
+    }
+
+    // ---- Parallel per-atom force compute ----
+    //
+    // Each worker writes into its own n × 3 slice of
+    // `sasa_par_forces`; the per-atom (build_atom_cache +
+    // atom_area_gradient + accumulate) is independent across `i`, so
+    // there's no contention.
+    let n_threads = scratch.n_par_threads;
+    let slice_len = n * 3;
+    let work: Vec<usize> = (0..n).filter(|&i| gamma[i] != 0.0).collect();
+    let chunk_size = work.len().div_ceil(n_threads).max(1);
+    let used_threads = work.len().div_ceil(chunk_size);
+    let buf = &mut scratch.sasa_par_forces[..used_threads * slice_len];
+    buf.fill(0.0);
+    let chunks: Vec<&[usize]> = work.chunks(chunk_size).collect();
+    // Take the neighbour lists out so the parallel section can borrow
+    // them immutably alongside scratch's other fields.
+    let sasa_neighbours = std::mem::take(&mut scratch.sasa_neighbours);
+
+    buf.par_chunks_mut(slice_len)
+        .zip(chunks.into_par_iter())
+        .for_each(|(thread_buf, chunk)| {
+            // Per-thread reusable da_dr buffer.
+            let mut da_dr: Vec<Vec3> = vec![Vec3::zeros(); n];
+            for &i in chunk {
+                let neighbours: Vec<usize> =
+                    sasa_neighbours[i].iter().map(|&j| j as usize).collect();
+                let Some(cache) = build_atom_cache(i, &positions, &radii, &neighbours) else {
+                    continue;
+                };
+                if cache.arcs.is_empty() {
+                    continue;
+                }
+                for f in da_dr.iter_mut() {
+                    *f = Vec3::zeros();
+                }
+                atom_area_gradient(&cache, &positions, &radii, &mut da_dr);
+                let g = gamma[i];
+                for x in 0..n {
+                    thread_buf[3 * x] -= da_dr[x].x * g;
+                    thread_buf[3 * x + 1] -= da_dr[x].y * g;
+                    thread_buf[3 * x + 2] -= da_dr[x].z * g;
+                }
+            }
+        });
+
+    scratch.sasa_neighbours = sasa_neighbours;
+
+    // Serial reduce per-thread accumulators into the caller's forces.
+    for t in 0..used_threads {
+        let base = t * slice_len;
+        for x in 0..n {
+            forces[x].x += scratch.sasa_par_forces[base + 3 * x];
+            forces[x].y += scratch.sasa_par_forces[base + 3 * x + 1];
+            forces[x].z += scratch.sasa_par_forces[base + 3 * x + 2];
+        }
+    }
+}
+
 pub fn add_sasa_forces_analytical(
     structure: &geom::Structure,
     _ff: &chem::ForceField,
@@ -524,6 +673,64 @@ fn arc_other_cap_and_sign(arc_cap_local: usize, v: CachedVertex) -> (usize, Root
 mod tests {
     use super::*;
     use crate::powersasa::area::accessible_area_with_components;
+
+    #[test]
+    fn scratch_path_matches_inline_baseline() {
+        // The Verlet+rayon scratch path must produce the same SASA
+        // forces as the simple inline baseline, to floating-point
+        // reduction-order precision.
+        use chem::{standard_ff, AminoAcid};
+        use geom::{build_extended_chain, build_topology_graph};
+        let s = build_extended_chain(&[
+            AminoAcid::Ala, AminoAcid::Gly, AminoAcid::Ala,
+            AminoAcid::Lys, AminoAcid::Glu,
+        ]).unwrap();
+        let n = s.atom_count();
+        let ff = standard_ff();
+        let g = build_topology_graph(&s);
+
+        let mut baseline = vec![Vec3::zeros(); n];
+        add_sasa_forces_analytical(&s, ff, &mut baseline);
+
+        let mut scratch = crate::scratch::ForceScratch::new(&s, &g, ff);
+        let mut fast = vec![Vec3::zeros(); n];
+        add_sasa_forces_analytical_with_scratch(&s, ff, &mut scratch, &mut fast);
+
+        for (a, b) in baseline.iter().zip(&fast) {
+            let d = (*a - *b).norm();
+            assert!(d < 1e-6, "scratch path diverges: {a:?} vs {b:?} (Δ={d:.2e})");
+        }
+    }
+
+    #[test]
+    fn scratch_path_cached_call_matches_fresh() {
+        // Two calls on identical positions — first builds Verlet
+        // list, second reuses it. Both must give bit-identical
+        // forces (no reduction-order ambiguity since we use the same
+        // thread count).
+        use chem::{standard_ff, AminoAcid};
+        use geom::{build_extended_chain, build_topology_graph};
+        let s = build_extended_chain(&[
+            AminoAcid::Ala, AminoAcid::Gly, AminoAcid::Ala,
+            AminoAcid::Lys, AminoAcid::Glu,
+        ]).unwrap();
+        let n = s.atom_count();
+        let ff = standard_ff();
+        let g = build_topology_graph(&s);
+        let mut scratch = crate::scratch::ForceScratch::new(&s, &g, ff);
+
+        let mut first = vec![Vec3::zeros(); n];
+        add_sasa_forces_analytical_with_scratch(&s, ff, &mut scratch, &mut first);
+        assert!(scratch.sasa_verlet_valid);
+
+        let mut second = vec![Vec3::zeros(); n];
+        add_sasa_forces_analytical_with_scratch(&s, ff, &mut scratch, &mut second);
+
+        for (a, b) in first.iter().zip(&second) {
+            let d = (*a - *b).norm();
+            assert!(d < 1e-12, "cached vs fresh: Δ={d:.2e}");
+        }
+    }
 
     /// Build the cache, recompute the area from cache + reference
     /// positions, and confirm it matches `accessible_area_with_components`
