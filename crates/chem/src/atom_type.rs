@@ -1,18 +1,21 @@
-//! CHARMM36-granularity atom types for proteins.
+//! CHARMM-granularity atom types for proteins and RNA.
 //!
-//! These follow the standard CHARMM36 protein parameter file naming
-//! (par_all36m_prot.prm / top_all36_prot.rtf). Going granular keeps us
-//! faithful to the published parameters: each (atom-type-pair) bond
-//! constant, etc., comes straight from CHARMM36 without averaging across
-//! types. We only include the types we actually use (the standard 20
-//! amino acids in their physiological-pH protonation states; no terminal
-//! patches, no disulfides, no protonated Asp/Glu, no charged His).
+//! Protein types follow the standard CHARMM36 protein parameter file naming
+//! (par_all36m_prot.prm / top_all36_prot.rtf). RNA types follow the CHARMM27
+//! all-hydrogen nucleic acid file (par_all27_na.prm / top_all27_na.rtf,
+//! Foloppe & MacKerell 2000).  Going granular keeps us faithful to the
+//! published parameters: each (atom-type-pair) bond constant, etc., comes
+//! straight from CHARMM without averaging across types. We only include the
+//! types our 20 amino acids (physiological-pH protonation states; no
+//! terminal patches, no protonated Asp/Glu, no charged His) and 4 RNA
+//! ribonucleotides actually use.
 //!
 //! Histidine: we model only the HSD (HD1) tautomer — proton on the δ
 //! nitrogen, neutral overall.
 
 use crate::amino_acid::AminoAcid;
 use crate::element::Element;
+use crate::nucleotide::Nucleotide;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum AtomType {
@@ -103,18 +106,130 @@ pub enum AtomType {
     HR3,
     /// Cysteine thiol H.
     HS,
+
+    // ---- Nucleic-acid hydrogens ----
+    /// Exocyclic amine H (cytosine N4, adenine N6, guanine N2).
+    Hn1,
+    /// Aromatic ring-N H — H on cytosine/uracil N3 / guanine N1.
+    Hn2,
+    /// Aromatic ring-C H — H on C2/C8 of purines, H5/H6 of pyrimidines.
+    Hn3,
+    /// Phosphate hydroxyl H (terminal — not used in canonical RNA backbone
+    /// here but kept for parser coverage).
+    Hn4,
+    /// Ribose 2'-hydroxyl H (HO2').
+    Hn5,
+    /// Sugar CH H — H1', H2', H3', H4', H5', H5''.
+    Hn7,
+    /// Sugar CH₂ H on C5' (HN8 in CHARMM27).
+    Hn8,
+    /// CH₃ proton (methylated base methyl H — kept for parser coverage).
+    Hn9,
+
+    // ============================================================
+    // CHARMM27 nucleic-acid atom types (par_all27_na.prm).
+    // Naming follows the .prm exactly so we can index the table
+    // without translation.  Comments give the chemical context
+    // taken straight from the CHARMM27 MASS section.
+    // ============================================================
+
+    // ---- Nucleic-acid carbons ----
+    /// Adenine/guanine C6 — sp² aromatic, exocyclic substituent attaches.
+    Cn1,
+    /// Thymine C2 carbonyl.
+    Cn1t,
+    /// Cytosine C2 carbonyl / guanine C2.
+    Cn2,
+    /// Cytosine C5 / uracil C5 (sp², bears H5).
+    Cn3,
+    /// Adenine C2 / adenine C8 / guanine C8 — sp² aromatic ring C bearing H.
+    Cn4,
+    /// Adenine C4/C5 bridgehead — purine fused-ring shared edge.
+    Cn5,
+    /// Guanine C4/C5 bridgehead carbons.
+    Cn5g,
+    /// Ribose C3'/C4' (sp³ CH).
+    Cn7,
+    /// Ribose C1'/C2' (sp³ CH bonded to a heteroatom).
+    Cn7b,
+    /// Deoxyribose C2' / ribose C5' (sp³ CH₂).
+    Cn8,
+    /// Ribose C5' specifically — sp³ CH₂ bonded to O5'.
+    Cn8b,
+    /// Methylene methyl carbon (e.g. methylated bases — kept for completeness).
+    Cn9,
+
+    // ---- Nucleic-acid nitrogens ----
+    /// Nucleic-acid amine (NH₂ exocyclic on cytosine N4, adenine N6,
+    /// guanine N2).
+    Nn1,
+    /// Aromatic N bonded to sugar (N9 of purines, N1 of pyrimidines).
+    Nn2,
+    /// Aromatic N (cytosine/uracil N3) — bonded to H in U/T, lone-pair in C.
+    Nn2b,
+    /// Guanine N1 — bonded to H.
+    Nn2g,
+    /// Uracil/thymine N3 — bonded to H.
+    Nn2u,
+    /// Aromatic N with lone pair (no H) — pyrimidine ring acceptor.
+    Nn3,
+    /// Adenine N1/N3/N7 — protonated lone-pair-accepting ring N.
+    Nn3a,
+    /// Guanine N3.
+    Nn3g,
+    /// Purine N7 — H-bond acceptor.
+    Nn4,
+
+    // ---- Nucleic-acid oxygens ----
+    /// Carbonyl O on uracil/thymine.
+    On1,
+    /// Cytosine carbonyl O.
+    On1c,
+    /// Backbone O5'/O3' — bonded to phosphate.
+    On2,
+    /// Anionic phosphate O (OP1, OP2).
+    On3,
+    /// Phosphate-O5' methyl-style (not used by canonical RNA backbone but
+    /// kept for completeness).
+    On4,
+    /// Ribose 2'-hydroxyl O.
+    On5,
+    /// Furanose ring O (O4').
+    On6,
+    /// Furanose ring O bonded to a heteroatom-bearing C1' — RNA O4'.
+    On6b,
+
+    // ---- Phosphorus ----
+    /// Phosphate P.
+    Pn,
 }
 
 impl AtomType {
     pub const fn element(self) -> Element {
         use AtomType::*;
         match self {
+            // Protein carbons
             C | CA | CAI | CC | CT1 | CT2 | CT2A | CT3 | CP1 | CP2 | CP3
             | CPH1 | CPH2 | CPT | CY => Element::C,
+            // Protein nitrogens
             N | NH1 | NH2 | NH3 | NC2 | NR1 | NR2 | NY => Element::N,
+            // Protein oxygens
             O | OC | OH1 => Element::O,
+            // Protein sulfur
             S => Element::S,
+            // Protein hydrogens
             H | HA | HA1 | HA2 | HA3 | HB1 | HB2 | HC | HP | HR1 | HR3 | HS => Element::H,
+
+            // RNA carbons
+            Cn1 | Cn1t | Cn2 | Cn3 | Cn4 | Cn5 | Cn5g | Cn7 | Cn7b | Cn8 | Cn8b | Cn9 => Element::C,
+            // RNA nitrogens
+            Nn1 | Nn2 | Nn2b | Nn2g | Nn2u | Nn3 | Nn3a | Nn3g | Nn4 => Element::N,
+            // RNA oxygens
+            On1 | On1c | On2 | On3 | On4 | On5 | On6 | On6b => Element::O,
+            // RNA phosphorus
+            Pn => Element::P,
+            // RNA hydrogens
+            Hn1 | Hn2 | Hn3 | Hn4 | Hn5 | Hn7 | Hn8 | Hn9 => Element::H,
         }
     }
 
@@ -124,6 +239,7 @@ impl AtomType {
     pub fn from_charmm_name(name: &str) -> Option<Self> {
         use AtomType::*;
         Some(match name {
+            // Protein types
             "C" => C, "CA" => CA, "CAI" => CAI, "CC" => CC,
             "CT1" => CT1, "CT2" => CT2, "CT2A" => CT2A, "CT3" => CT3,
             "CP1" => CP1, "CP2" => CP2, "CP3" => CP3,
@@ -135,6 +251,21 @@ impl AtomType {
             "H" => H, "HA" => HA, "HA1" => HA1, "HA2" => HA2, "HA3" => HA3,
             "HB1" => HB1, "HB2" => HB2, "HC" => HC, "HP" => HP,
             "HR1" => HR1, "HR3" => HR3, "HS" => HS,
+            // RNA carbons
+            "CN1" => Cn1, "CN1T" => Cn1t, "CN2" => Cn2, "CN3" => Cn3, "CN4" => Cn4,
+            "CN5" => Cn5, "CN5G" => Cn5g, "CN7" => Cn7, "CN7B" => Cn7b,
+            "CN8" => Cn8, "CN8B" => Cn8b, "CN9" => Cn9,
+            // RNA nitrogens
+            "NN1" => Nn1, "NN2" => Nn2, "NN2B" => Nn2b, "NN2G" => Nn2g, "NN2U" => Nn2u,
+            "NN3" => Nn3, "NN3A" => Nn3a, "NN3G" => Nn3g, "NN4" => Nn4,
+            // RNA oxygens
+            "ON1" => On1, "ON1C" => On1c, "ON2" => On2, "ON3" => On3, "ON4" => On4,
+            "ON5" => On5, "ON6" => On6, "ON6B" => On6b,
+            // RNA phosphorus
+            "P" => Pn,
+            // RNA hydrogens
+            "HN1" => Hn1, "HN2" => Hn2, "HN3" => Hn3, "HN4" => Hn4,
+            "HN5" => Hn5, "HN7" => Hn7, "HN8" => Hn8, "HN9" => Hn9,
             _ => return None,
         })
     }
@@ -144,6 +275,7 @@ impl AtomType {
     pub const fn charmm_name(self) -> &'static str {
         use AtomType::*;
         match self {
+            // Protein
             C => "C", CA => "CA", CAI => "CAI", CC => "CC",
             CT1 => "CT1", CT2 => "CT2", CT2A => "CT2A", CT3 => "CT3",
             CP1 => "CP1", CP2 => "CP2", CP3 => "CP3",
@@ -155,8 +287,114 @@ impl AtomType {
             H => "H", HA => "HA", HA1 => "HA1", HA2 => "HA2", HA3 => "HA3",
             HB1 => "HB1", HB2 => "HB2", HC => "HC", HP => "HP",
             HR1 => "HR1", HR3 => "HR3", HS => "HS",
+            // RNA
+            Cn1 => "CN1", Cn1t => "CN1T", Cn2 => "CN2", Cn3 => "CN3",
+            Cn4 => "CN4", Cn5 => "CN5", Cn5g => "CN5G",
+            Cn7 => "CN7", Cn7b => "CN7B", Cn8 => "CN8", Cn8b => "CN8B", Cn9 => "CN9",
+            Nn1 => "NN1", Nn2 => "NN2", Nn2b => "NN2B", Nn2g => "NN2G", Nn2u => "NN2U",
+            Nn3 => "NN3", Nn3a => "NN3A", Nn3g => "NN3G", Nn4 => "NN4",
+            On1 => "ON1", On1c => "ON1C", On2 => "ON2", On3 => "ON3", On4 => "ON4",
+            On5 => "ON5", On6 => "ON6", On6b => "ON6B",
+            Pn => "P",
+            Hn1 => "HN1", Hn2 => "HN2", Hn3 => "HN3", Hn4 => "HN4",
+            Hn5 => "HN5", Hn7 => "HN7", Hn8 => "HN8", Hn9 => "HN9",
         }
     }
+}
+
+/// Classify an RNA atom by its (nucleotide, atom-name) into the CHARMM27
+/// nucleic-acid atom type.  Atom names are in PDB v3.3 form (matching the
+/// chain builder); the CHARMM-vs-PDB name differences (`O1P`/`OP1`,
+/// `H2'`/`HO2'`, `H2''`/`H2'`) are translated inside this function.
+pub fn classify_rna(nt: Nucleotide, atom_name: &str) -> Option<AtomType> {
+    use AtomType::*;
+    use Nucleotide::*;
+
+    // Backbone first — sugar + phosphate + ribose hydrogens are
+    // identical across all four canonical nucleotides.
+    match atom_name {
+        "P" => return Some(Pn),
+        "OP1" | "OP2" => return Some(On3),
+        "O5'" => return Some(On2),
+        "C5'" => return Some(Cn8b),
+        "H5'" | "H5''" => return Some(Hn8),
+        "C4'" => return Some(Cn7),
+        "H4'" => return Some(Hn7),
+        "O4'" => return Some(On6b),
+        "C3'" => return Some(Cn7),
+        "H3'" => return Some(Hn7),
+        "O3'" => return Some(On2),
+        "C2'" => return Some(Cn7b),
+        "H2'" => return Some(Hn7),   // PDB v3.3 H2' = CHARMM H2''
+        "O2'" => return Some(On5),
+        "HO2'" => return Some(Hn5),  // PDB v3.3 HO2' = CHARMM H2'
+        "C1'" => return Some(Cn7b),
+        "H1'" => return Some(Hn7),
+        _ => {}
+    }
+
+    // Base atoms — per-nucleotide.
+    let t = match (nt, atom_name) {
+        // ---- Adenine ----
+        (Adenine, "N9") => Nn2,
+        (Adenine, "C8") => Cn4,
+        (Adenine, "H8") => Hn3,
+        (Adenine, "N7") => Nn4,
+        (Adenine, "C5") => Cn5,
+        (Adenine, "C6") => Cn2,
+        (Adenine, "N6") => Nn1,
+        (Adenine, "H61" | "H62") => Hn1,
+        (Adenine, "N1") => Nn3a,
+        (Adenine, "C2") => Cn4,
+        (Adenine, "H2") => Hn3,
+        (Adenine, "N3") => Nn3a,
+        (Adenine, "C4") => Cn5,
+
+        // ---- Guanine ----
+        (Guanine, "N9") => Nn2b,
+        (Guanine, "C8") => Cn4,
+        (Guanine, "H8") => Hn3,
+        (Guanine, "N7") => Nn4,
+        (Guanine, "C5") => Cn5g,
+        (Guanine, "C6") => Cn1,
+        (Guanine, "O6") => On1,
+        (Guanine, "N1") => Nn2g,
+        (Guanine, "H1") => Hn2,
+        (Guanine, "C2") => Cn2,
+        (Guanine, "N2") => Nn1,
+        (Guanine, "H21" | "H22") => Hn1,
+        (Guanine, "N3") => Nn3g,
+        (Guanine, "C4") => Cn5,
+
+        // ---- Cytosine ----
+        (Cytosine, "N1") => Nn2,
+        (Cytosine, "C2") => Cn1,
+        (Cytosine, "O2") => On1c,
+        (Cytosine, "N3") => Nn3,
+        (Cytosine, "C4") => Cn2,
+        (Cytosine, "N4") => Nn1,
+        (Cytosine, "H41" | "H42") => Hn1,
+        (Cytosine, "C5") => Cn3,
+        (Cytosine, "H5") => Hn3,
+        (Cytosine, "C6") => Cn3,
+        (Cytosine, "H6") => Hn3,
+
+        // ---- Uracil ----
+        (Uracil, "N1") => Nn2b,
+        (Uracil, "C2") => Cn1t,
+        (Uracil, "O2") => On1,
+        (Uracil, "N3") => Nn2u,
+        (Uracil, "H3") => Hn2,
+        (Uracil, "C4") => Cn1,
+        (Uracil, "O4") => On1,
+        (Uracil, "C5") => Cn3,
+        (Uracil, "H5") => Hn3,
+        (Uracil, "C6") => Cn3,
+        (Uracil, "H6") => Hn3,
+
+        _ => return None,
+    };
+    Some(t)
 }
 
 /// Classify an atom by its (residue, atom-name). Returns `None` for atoms
@@ -462,9 +700,79 @@ mod tests {
     }
 
     #[test]
+    fn rna_backbone_classification() {
+        for nt in [Nucleotide::Adenine, Nucleotide::Uracil,
+                   Nucleotide::Guanine, Nucleotide::Cytosine] {
+            assert_eq!(classify_rna(nt, "P"), Some(AtomType::Pn));
+            assert_eq!(classify_rna(nt, "OP1"), Some(AtomType::On3));
+            assert_eq!(classify_rna(nt, "OP2"), Some(AtomType::On3));
+            assert_eq!(classify_rna(nt, "O5'"), Some(AtomType::On2));
+            assert_eq!(classify_rna(nt, "C5'"), Some(AtomType::Cn8b));
+            assert_eq!(classify_rna(nt, "H5'"), Some(AtomType::Hn8));
+            assert_eq!(classify_rna(nt, "H5''"), Some(AtomType::Hn8));
+            assert_eq!(classify_rna(nt, "C4'"), Some(AtomType::Cn7));
+            assert_eq!(classify_rna(nt, "O4'"), Some(AtomType::On6b));
+            assert_eq!(classify_rna(nt, "C1'"), Some(AtomType::Cn7b));
+            // PDB v3.3 vs CHARMM naming for the 2'-position.
+            assert_eq!(classify_rna(nt, "H2'"), Some(AtomType::Hn7));   // on C2'
+            assert_eq!(classify_rna(nt, "HO2'"), Some(AtomType::Hn5));  // on O2'
+            assert_eq!(classify_rna(nt, "O2'"), Some(AtomType::On5));
+        }
+    }
+
+    #[test]
+    fn rna_glycosidic_n_distinguishes_purines_from_pyrimidines() {
+        // N9 (glycosidic on purines) gets NN2 (A) / NN2B (G).
+        assert_eq!(classify_rna(Nucleotide::Adenine, "N9"), Some(AtomType::Nn2));
+        assert_eq!(classify_rna(Nucleotide::Guanine, "N9"), Some(AtomType::Nn2b));
+        // N1 (glycosidic on pyrimidines) gets NN2 (C) / NN2B (U).
+        assert_eq!(classify_rna(Nucleotide::Cytosine, "N1"), Some(AtomType::Nn2));
+        assert_eq!(classify_rna(Nucleotide::Uracil, "N1"), Some(AtomType::Nn2b));
+    }
+
+    #[test]
+    fn rna_carbonyl_oxygens_distinct_types() {
+        // Cytosine O2 is "ON1C" (cytosine-specific) — different from
+        // the uracil/guanine carbonyl O which is "ON1".
+        assert_eq!(classify_rna(Nucleotide::Cytosine, "O2"), Some(AtomType::On1c));
+        assert_eq!(classify_rna(Nucleotide::Uracil, "O2"), Some(AtomType::On1));
+        assert_eq!(classify_rna(Nucleotide::Uracil, "O4"), Some(AtomType::On1));
+        assert_eq!(classify_rna(Nucleotide::Guanine, "O6"), Some(AtomType::On1));
+    }
+
+    #[test]
+    fn rna_full_roster_classified() {
+        // Every atom in `Nucleotide::all_atoms()` should classify.
+        for nt in [Nucleotide::Adenine, Nucleotide::Uracil,
+                   Nucleotide::Guanine, Nucleotide::Cytosine] {
+            for (name, _) in nt.all_atoms() {
+                assert!(
+                    classify_rna(nt, name).is_some(),
+                    "{:?} atom {} did not classify",
+                    nt, name,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rna_element_consistency() {
+        for nt in [Nucleotide::Adenine, Nucleotide::Uracil,
+                   Nucleotide::Guanine, Nucleotide::Cytosine] {
+            for (name, expected_el) in nt.all_atoms() {
+                let t = classify_rna(nt, name).unwrap();
+                assert_eq!(t.element(), expected_el,
+                    "{:?} {}: classified {:?} (element {:?}) vs roster element {:?}",
+                    nt, name, t, t.element(), expected_el);
+            }
+        }
+    }
+
+    #[test]
     fn charmm_names_are_unique() {
         // Quick sanity: every AtomType maps to a distinct CHARMM name.
         let all = [
+            // Protein
             AtomType::C, AtomType::CA, AtomType::CAI, AtomType::CC,
             AtomType::CT1, AtomType::CT2, AtomType::CT2A, AtomType::CT3,
             AtomType::CP1, AtomType::CP2, AtomType::CP3,
@@ -476,6 +784,17 @@ mod tests {
             AtomType::H, AtomType::HA, AtomType::HA1, AtomType::HA2, AtomType::HA3,
             AtomType::HB1, AtomType::HB2, AtomType::HC, AtomType::HP,
             AtomType::HR1, AtomType::HR3, AtomType::HS,
+            // RNA
+            AtomType::Cn1, AtomType::Cn1t, AtomType::Cn2, AtomType::Cn3,
+            AtomType::Cn4, AtomType::Cn5, AtomType::Cn5g,
+            AtomType::Cn7, AtomType::Cn7b, AtomType::Cn8, AtomType::Cn8b, AtomType::Cn9,
+            AtomType::Nn1, AtomType::Nn2, AtomType::Nn2b, AtomType::Nn2g, AtomType::Nn2u,
+            AtomType::Nn3, AtomType::Nn3a, AtomType::Nn3g, AtomType::Nn4,
+            AtomType::On1, AtomType::On1c, AtomType::On2, AtomType::On3, AtomType::On4,
+            AtomType::On5, AtomType::On6, AtomType::On6b,
+            AtomType::Pn,
+            AtomType::Hn1, AtomType::Hn2, AtomType::Hn3, AtomType::Hn4,
+            AtomType::Hn5, AtomType::Hn7, AtomType::Hn8, AtomType::Hn9,
         ];
         let mut names: Vec<&str> = all.iter().map(|t| t.charmm_name()).collect();
         names.sort();

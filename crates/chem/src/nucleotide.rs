@@ -40,7 +40,7 @@ use crate::codon::Base;
 use crate::element::Element;
 
 /// One of the four canonical RNA ribonucleobases.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum Nucleotide {
     Adenine,

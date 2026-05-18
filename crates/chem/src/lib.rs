@@ -9,7 +9,7 @@ pub mod topology;
 pub mod topology_data;
 
 pub use amino_acid::{AminoAcid, ParseAminoAcidError};
-pub use atom_type::{classify, AtomType};
+pub use atom_type::{classify, classify_rna, AtomType};
 pub use codon::{Base, Codon, ParseCodonError, Translation};
 pub use element::Element;
 pub use forcefield::{standard as standard_ff, ForceField};
