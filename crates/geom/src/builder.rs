@@ -280,12 +280,365 @@ mod rna_ic {
     pub const CHI: f64 = deg(-160.0); //   C3'-C2'-C1'-N (anti)
     pub const OP1_TORS: f64 = deg(120.0);
     pub const OP2_TORS: f64 = deg(-120.0);
+
+    // ---- Base ring geometry (canonical idealised bases) ----
+    // Bond lengths and angles taken from standard nucleobase
+    // crystallographic averages (Saenger 1984, ch. 4 and the AMBER
+    // OL3 / CHARMM27 reference geometries which agree to <0.01 Å on
+    // bond lengths and <0.5° on angles).
+
+    // Purine (A / G) common ring lengths.  All `_BASE` to disambiguate
+    // from the sugar/phosphate `C5_C4` etc. above.  The closure-bond
+    // constants (N9-C8, N3-C4) are referenced only from the ring-
+    // closure tests below — they aren't NeRF-placed, only used as
+    // the canonical target the closure should land near.
+    #[allow(dead_code)] pub const N9_C8_BASE: f64 = 1.371;
+    pub const C8_N7_BASE: f64 = 1.305;
+    pub const N7_C5_BASE: f64 = 1.388;
+    pub const C5_C4_BASE: f64 = 1.409; // shared 5-ring / 6-ring edge
+    pub const N9_C4_PUR: f64 = 1.380; // 5-ring closure
+    pub const C5_C6_BASE: f64 = 1.404;
+    pub const C6_N1_PUR: f64 = 1.346;
+    pub const N1_C2_PUR: f64 = 1.353;
+    pub const C2_N3_PUR: f64 = 1.337;
+    #[allow(dead_code)] pub const N3_C4_PUR: f64 = 1.346; // 6-ring closure (target)
+    // Purine 5-ring interior angles (sum = 540°). The N9 vertex angle
+    // and the second N3-C4 ring-closure length are kept for the
+    // closure-bond test (they aren't directly placed).
+    #[allow(dead_code)] pub const ANG_C8_N9_C4: f64 = deg(105.8);
+    pub const ANG_N9_C8_N7: f64 = deg(113.6);
+    pub const ANG_C8_N7_C5: f64 = deg(103.7);
+    pub const ANG_N7_C5_C4: f64 = deg(110.7);
+    pub const ANG_C5_C4_N9: f64 = deg(106.2);
+    // Purine 6-ring interior angles (sum = 720°).
+    pub const ANG_C4_C5_C6: f64 = deg(117.2);
+    pub const ANG_C5_C6_N1_PUR: f64 = deg(117.7);
+    pub const ANG_C6_N1_C2_PUR: f64 = deg(117.8);
+    pub const ANG_N1_C2_N3_PUR: f64 = deg(128.0);
+    // Purine χ (anti) — sets the base orientation around C1'-N9.
+    // Anchored as the dihedral C2'-C1'-N9-C4 used to NeRF-place C4.
+    pub const PURINE_CHI_C4: f64 = deg(-120.0);
+    // C1'-N9-C4 sp² angle = 360° - 105.8° (interior) - 126.4° = 127.8°
+    // for symmetric placement (we use the 126.4° value which gives
+    // C1'-N9-C8 = 127.8° on the other branch).
+    pub const ANG_C1P_N9_C4: f64 = deg(126.4);
+
+    // Adenine-specific.
+    pub const C6_N6: f64 = 1.337;
+    pub const ANG_C5_C6_N6: f64 = deg(123.5);
+    // Guanine-specific.
+    pub const C6_O6: f64 = 1.237; // carbonyl
+    pub const C2_N2: f64 = 1.341; // exocyclic amine
+    pub const ANG_C5_C6_O6: f64 = deg(128.5);
+    pub const ANG_N1_C2_N2: f64 = deg(116.0);
+
+    // Pyrimidine (C / U) common ring lengths.
+    pub const N1_C2_PYR: f64 = 1.349;
+    pub const C2_N3_PYR: f64 = 1.353;
+    pub const N3_C4_PYR: f64 = 1.330;
+    pub const C4_C5_PYR: f64 = 1.426;
+    pub const C5_C6_PYR: f64 = 1.337;
+    #[allow(dead_code)] pub const C6_N1_PYR: f64 = 1.367; // 6-ring closure (implicit)
+    // Pyrimidine 6-ring interior angles (sum = 720°).
+    pub const ANG_N1_C2_N3_PYR: f64 = deg(120.4);
+    pub const ANG_C2_N3_C4_PYR: f64 = deg(119.6);
+    pub const ANG_N3_C4_C5_PYR: f64 = deg(121.8);
+    pub const ANG_C4_C5_C6_PYR: f64 = deg(117.4);
+    pub const ANG_C5_C6_N1_PYR: f64 = deg(120.5);
+    #[allow(dead_code)] pub const ANG_C2_N1_C6_PYR: f64 = deg(120.3); // closure
+    // Pyrimidine χ (anti) — dihedral C2'-C1'-N1-C2 anchoring C2.
+    pub const PYRIMIDINE_CHI_C2: f64 = deg(-120.0);
+    pub const ANG_C1P_N1_C2: f64 = deg(120.0);
+
+    // Cytosine-specific.
+    pub const C2_O2_C: f64 = 1.240;
+    pub const C4_N4_C: f64 = 1.337;
+    pub const ANG_N3_C2_O2_C: f64 = deg(121.0);
+    pub const ANG_N3_C4_N4_C: f64 = deg(118.0);
+    // Uracil-specific.
+    pub const C2_O2_U: f64 = 1.220;
+    pub const C4_O4_U: f64 = 1.215;
+    pub const ANG_N3_C2_O2_U: f64 = deg(122.0);
+    pub const ANG_N3_C4_O4_U: f64 = deg(119.0);
+
+    // Hydrogen bond lengths.
+    pub const C_H_AROM: f64 = 1.080;
+    pub const N_H_AROM: f64 = 1.010;
+    pub const C_H_ALIPH: f64 = 1.090;
+    pub const O_H: f64 = 0.957;
+    pub const ANG_C_O_H: f64 = deg(108.0);
+    pub const ANG_C_N_H: f64 = deg(120.0); // sp² amine / amide
+}
+
+/// Place the fourth tetrahedral substituent at an sp³ centre that
+/// already has three placed neighbours.  Returns the H position at
+/// `bond_length` from `c`, lying on the ray opposite the sum of the
+/// three placed-neighbour direction vectors — i.e. the unique
+/// position that keeps all four pairwise angles near 109.47°.
+fn place_sp3_one_h(c: Vec3, neighbours: [Vec3; 3], bond_length: f64) -> Vec3 {
+    let d0 = (neighbours[0] - c).normalize();
+    let d1 = (neighbours[1] - c).normalize();
+    let d2 = (neighbours[2] - c).normalize();
+    let sum = d0 + d1 + d2;
+    let h_dir = -sum.normalize();
+    c + h_dir * bond_length
+}
+
+/// Place two sp³ hydrogens at a centre with only two placed neighbours
+/// (the C5' / -CH₂- case).  Both H's at 109.47° from each placed
+/// neighbour and from each other, symmetric about the plane spanned
+/// by the two known bond directions.
+fn place_sp3_two_h(c: Vec3, n1: Vec3, n2: Vec3, bond_length: f64) -> (Vec3, Vec3) {
+    let d1 = (n1 - c).normalize();
+    let d2 = (n2 - c).normalize();
+    let bisector = (d1 + d2).normalize();
+    let normal = d1.cross(&d2).normalize();
+    // cos(54.74°) = 1/√3 ≈ 0.5774, sin(54.74°) = √(2/3) ≈ 0.8165.
+    const C: f64 = 0.577_350_269_189_625_8; // 1/√3
+    const S: f64 = 0.816_496_580_927_726;   // √(2/3)
+    let h1_dir = -bisector * C + normal * S;
+    let h2_dir = -bisector * C - normal * S;
+    (c + h1_dir * bond_length, c + h2_dir * bond_length)
+}
+
+/// Add the seven sugar-phosphate backbone hydrogens to `atoms`.
+///
+/// `c5` / `c4` / `c3` / `c2` / `c1` are the placed sugar carbons,
+/// `o5` / `o4` / `o3` / `o2` the placed sugar oxygens, and `n_glyc`
+/// the glycosidic nitrogen (N9 or N1).
+#[allow(clippy::too_many_arguments)]
+fn place_rna_backbone_hydrogens(
+    atoms: &mut Vec<PlacedAtom>,
+    o5: Vec3,
+    c5: Vec3,
+    c4: Vec3,
+    o4: Vec3,
+    c3: Vec3,
+    o3: Vec3,
+    c2: Vec3,
+    o2: Vec3,
+    c1: Vec3,
+    n_glyc: Vec3,
+) {
+    let push = |atoms: &mut Vec<PlacedAtom>, name: &'static str, pos: Vec3| {
+        atoms.push(PlacedAtom { name, element: Element::H, position: pos });
+    };
+    // C5' has two H's; both other H-bearing carbons are sp³ with 3
+    // placed heavy neighbours each.
+    let (h5p, h5pp) = place_sp3_two_h(c5, o5, c4, rna_ic::C_H_ALIPH);
+    let h4p = place_sp3_one_h(c4, [c5, o4, c3], rna_ic::C_H_ALIPH);
+    let h3p = place_sp3_one_h(c3, [c4, o3, c2], rna_ic::C_H_ALIPH);
+    let h2p = place_sp3_one_h(c2, [c3, o2, c1], rna_ic::C_H_ALIPH);
+    let h1p = place_sp3_one_h(c1, [c2, o4, n_glyc], rna_ic::C_H_ALIPH);
+    // The 2'-hydroxyl H sits anti to C1' (gauche to C3'), a stable
+    // RNA conformer.
+    let ho2p = place_atom(c1, c2, o2, rna_ic::O_H, rna_ic::ANG_C_O_H, PI);
+
+    push(atoms, "H5'", h5p);
+    push(atoms, "H5''", h5pp);
+    push(atoms, "H4'", h4p);
+    push(atoms, "H3'", h3p);
+    push(atoms, "HO2'", ho2p);
+    push(atoms, "H2'", h2p);
+    push(atoms, "H1'", h1p);
+}
+
+/// Place the purine ring + exocyclic substituents + ring/exocyclic
+/// hydrogens for adenine or guanine.  `c2p` / `c1p` / `n9` are the
+/// already-placed sugar atoms anchoring the base, `nt` selects the
+/// adenine-vs-guanine exocyclic chemistry (N6 vs O6 + N2).
+fn place_purine_base(
+    atoms: &mut Vec<PlacedAtom>,
+    nt: chem::Nucleotide,
+    c2p: Vec3,
+    c1p: Vec3,
+    n9: Vec3,
+) {
+    use chem::Nucleotide;
+    // Walk the fused 5-/6-ring with all dihedrals in the ring plane.
+    // C4 anchors the base orientation; C8 closes the 5-ring; C6/N1/
+    // C2/N3 trace the 6-ring back to its closure at C4.
+    let c4 = place_atom(c2p, c1p, n9, rna_ic::N9_C4_PUR, rna_ic::ANG_C1P_N9_C4, rna_ic::PURINE_CHI_C4);
+    // C5 placed via N9-C4-C5 angle = 106.2° (5-ring interior at C4).
+    let c5 = place_atom(c1p, n9, c4, rna_ic::C5_C4_BASE, rna_ic::ANG_C5_C4_N9, PI);
+    let n7 = place_atom(n9, c4, c5, rna_ic::N7_C5_BASE, rna_ic::ANG_N7_C5_C4, 0.0);
+    let c8 = place_atom(c4, c5, n7, rna_ic::C8_N7_BASE, rna_ic::ANG_C8_N7_C5, 0.0);
+    let c6 = place_atom(n7, c4, c5, rna_ic::C5_C6_BASE, rna_ic::ANG_C4_C5_C6, PI);
+    let n1 = place_atom(c4, c5, c6, rna_ic::C6_N1_PUR, rna_ic::ANG_C5_C6_N1_PUR, 0.0);
+    let c2 = place_atom(c5, c6, n1, rna_ic::N1_C2_PUR, rna_ic::ANG_C6_N1_C2_PUR, 0.0);
+    let n3 = place_atom(c6, n1, c2, rna_ic::C2_N3_PUR, rna_ic::ANG_N1_C2_N3_PUR, 0.0);
+    // Exocyclic substituent at C6 (N6 for A, O6 for G) — coplanar
+    // with the 6-ring, anti to N1 across the C5-C6 bond.
+    let (exo_c6_name, exo_c6_el, exo_c6_pos) = match nt {
+        Nucleotide::Adenine => (
+            "N6",
+            Element::N,
+            place_atom(n1, c5, c6, rna_ic::C6_N6, rna_ic::ANG_C5_C6_N6, PI),
+        ),
+        Nucleotide::Guanine => (
+            "O6",
+            Element::O,
+            place_atom(n1, c5, c6, rna_ic::C6_O6, rna_ic::ANG_C5_C6_O6, PI),
+        ),
+        _ => unreachable!("place_purine_base called with non-purine"),
+    };
+    // Exocyclic N2 only on guanine, off C2.
+    let g_n2 = if matches!(nt, Nucleotide::Guanine) {
+        Some(place_atom(n3, n1, c2, rna_ic::C2_N2, rna_ic::ANG_N1_C2_N2, PI))
+    } else {
+        None
+    };
+
+    let push_h = |atoms: &mut Vec<PlacedAtom>, name: &'static str, pos: Vec3| {
+        atoms.push(PlacedAtom { name, element: Element::H, position: pos });
+    };
+
+    // H8 — sp² at C8, in plane, anti to N9 across N7-C8.
+    let h8 = place_atom(n9, n7, c8, rna_ic::C_H_AROM, deg_from_120_sp2(rna_ic::ANG_N9_C8_N7), PI);
+    // Adenine H2 on C2 (sp², between N1 and N3).
+    let a_h2 = if matches!(nt, Nucleotide::Adenine) {
+        Some(place_atom(c6, n1, c2, rna_ic::C_H_AROM, deg_from_120_sp2(rna_ic::ANG_N1_C2_N3_PUR), PI))
+    } else { None };
+    // Guanine N1-H (amide, sp²).
+    let g_h1 = if matches!(nt, Nucleotide::Guanine) {
+        Some(place_atom(c5, c6, n1, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI))
+    } else { None };
+
+    // Push heavy atoms in `Nucleotide::base_heavy_atoms()` canonical order.
+    let push_heavy = |atoms: &mut Vec<PlacedAtom>, name: &'static str, el: Element, pos: Vec3| {
+        atoms.push(PlacedAtom { name, element: el, position: pos });
+    };
+    match nt {
+        Nucleotide::Adenine => {
+            push_heavy(atoms, "C8", Element::C, c8);
+            push_heavy(atoms, "N7", Element::N, n7);
+            push_heavy(atoms, "C5", Element::C, c5);
+            push_heavy(atoms, "C6", Element::C, c6);
+            push_heavy(atoms, "N6", Element::N, exo_c6_pos);
+            push_heavy(atoms, "N1", Element::N, n1);
+            push_heavy(atoms, "C2", Element::C, c2);
+            push_heavy(atoms, "N3", Element::N, n3);
+            push_heavy(atoms, "C4", Element::C, c4);
+            push_h(atoms, "H8", h8);
+            // Exocyclic N6 amine — both H's coplanar with the ring,
+            // separated by ~120°.
+            let h61 = place_atom(c5, c6, exo_c6_pos, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, 0.0);
+            let h62 = place_atom(c5, c6, exo_c6_pos, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI);
+            push_h(atoms, "H61", h61);
+            push_h(atoms, "H62", h62);
+            push_h(atoms, "H2", a_h2.unwrap());
+            let _ = exo_c6_name;
+            let _ = exo_c6_el;
+        }
+        Nucleotide::Guanine => {
+            push_heavy(atoms, "C8", Element::C, c8);
+            push_heavy(atoms, "N7", Element::N, n7);
+            push_heavy(atoms, "C5", Element::C, c5);
+            push_heavy(atoms, "C6", Element::C, c6);
+            push_heavy(atoms, "O6", Element::O, exo_c6_pos);
+            push_heavy(atoms, "N1", Element::N, n1);
+            push_heavy(atoms, "C2", Element::C, c2);
+            push_heavy(atoms, "N2", Element::N, g_n2.unwrap());
+            push_heavy(atoms, "N3", Element::N, n3);
+            push_heavy(atoms, "C4", Element::C, c4);
+            push_h(atoms, "H8", h8);
+            push_h(atoms, "H1", g_h1.unwrap());
+            let h21 = place_atom(n1, c2, g_n2.unwrap(), rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, 0.0);
+            let h22 = place_atom(n1, c2, g_n2.unwrap(), rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI);
+            push_h(atoms, "H21", h21);
+            push_h(atoms, "H22", h22);
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// Place the pyrimidine 6-ring + exocyclic substituents + hydrogens
+/// for cytosine or uracil.
+fn place_pyrimidine_base(
+    atoms: &mut Vec<PlacedAtom>,
+    nt: chem::Nucleotide,
+    c2p: Vec3,
+    c1p: Vec3,
+    n1: Vec3,
+) {
+    use chem::Nucleotide;
+    // 6-ring walk anchored on N1 (the glycosidic atom for pyrimidines).
+    let c2 = place_atom(
+        c2p, c1p, n1,
+        rna_ic::N1_C2_PYR, rna_ic::ANG_C1P_N1_C2, rna_ic::PYRIMIDINE_CHI_C2,
+    );
+    let n3 = place_atom(c1p, n1, c2, rna_ic::C2_N3_PYR, rna_ic::ANG_N1_C2_N3_PYR, PI);
+    let c4 = place_atom(n1, c2, n3, rna_ic::N3_C4_PYR, rna_ic::ANG_C2_N3_C4_PYR, 0.0);
+    let c5 = place_atom(c2, n3, c4, rna_ic::C4_C5_PYR, rna_ic::ANG_N3_C4_C5_PYR, 0.0);
+    let c6 = place_atom(n3, c4, c5, rna_ic::C5_C6_PYR, rna_ic::ANG_C4_C5_C6_PYR, 0.0);
+    // Exocyclic substituents.
+    let push_h = |atoms: &mut Vec<PlacedAtom>, name: &'static str, pos: Vec3| {
+        atoms.push(PlacedAtom { name, element: Element::H, position: pos });
+    };
+    let push_heavy = |atoms: &mut Vec<PlacedAtom>, name: &'static str, el: Element, pos: Vec3| {
+        atoms.push(PlacedAtom { name, element: el, position: pos });
+    };
+    let o2 = match nt {
+        Nucleotide::Cytosine => place_atom(n1, n3, c2, rna_ic::C2_O2_C, rna_ic::ANG_N3_C2_O2_C, PI),
+        Nucleotide::Uracil => place_atom(n1, n3, c2, rna_ic::C2_O2_U, rna_ic::ANG_N3_C2_O2_U, PI),
+        _ => unreachable!(),
+    };
+    // H5 bonded to C5 (sp²), in plane, anti to N3 across C4-C5.
+    let h5 = place_atom(n3, c4, c5, rna_ic::C_H_AROM, deg_from_120_sp2(rna_ic::ANG_C4_C5_C6_PYR), PI);
+    // H6 bonded to C6 (sp²), in plane, anti to C4 across C5-C6.
+    let h6 = place_atom(c4, c5, c6, rna_ic::C_H_AROM, deg_from_120_sp2(rna_ic::ANG_C5_C6_N1_PYR), PI);
+
+    match nt {
+        Nucleotide::Cytosine => {
+            let n4 = place_atom(n3, c5, c4, rna_ic::C4_N4_C, rna_ic::ANG_N3_C4_N4_C, PI);
+            push_heavy(atoms, "N1", Element::N, n1);
+            push_heavy(atoms, "C2", Element::C, c2);
+            push_heavy(atoms, "O2", Element::O, o2);
+            push_heavy(atoms, "N3", Element::N, n3);
+            push_heavy(atoms, "C4", Element::C, c4);
+            push_heavy(atoms, "N4", Element::N, n4);
+            push_heavy(atoms, "C5", Element::C, c5);
+            push_heavy(atoms, "C6", Element::C, c6);
+            let h41 = place_atom(c5, c4, n4, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, 0.0);
+            let h42 = place_atom(c5, c4, n4, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI);
+            push_h(atoms, "H41", h41);
+            push_h(atoms, "H42", h42);
+            push_h(atoms, "H5", h5);
+            push_h(atoms, "H6", h6);
+        }
+        Nucleotide::Uracil => {
+            // O4 carbonyl on C4 — anti to C2 across N3-C4 in plane.
+            let o4 = place_atom(c2, n3, c4, rna_ic::C4_O4_U, rna_ic::ANG_N3_C4_O4_U, PI);
+            // N3-H amide (uracil only) — anchored at N3, in ring plane,
+            // outside ring (anti to C5 across the C4-N3 axis).
+            let h3 = place_atom(c5, c4, n3, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI);
+            push_heavy(atoms, "N1", Element::N, n1);
+            push_heavy(atoms, "C2", Element::C, c2);
+            push_heavy(atoms, "O2", Element::O, o2);
+            push_heavy(atoms, "N3", Element::N, n3);
+            push_heavy(atoms, "C4", Element::C, c4);
+            push_heavy(atoms, "O4", Element::O, o4);
+            push_heavy(atoms, "C5", Element::C, c5);
+            push_heavy(atoms, "C6", Element::C, c6);
+            push_h(atoms, "H3", h3);
+            push_h(atoms, "H5", h5);
+            push_h(atoms, "H6", h6);
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// For an sp² atom with one fixed in-ring angle θ_ring, the two
+/// out-of-ring substituents sit at (360° − θ_ring) / 2.  Used to
+/// derive sp² C-H and C-X exocyclic angles from the interior ring
+/// angle.
+fn deg_from_120_sp2(ring_angle_rad: f64) -> f64 {
+    (2.0 * PI - ring_angle_rad) / 2.0
 }
 
 /// Build an extended RNA chain (sugar-phosphate backbone + ribose ring
-/// + glycosidic nitrogen) from a nucleotide sequence. Every residue is
-/// a `Monomer::Rna`. See the module comment above for what is and is
-/// not placed.
+/// + glycosidic nitrogen + base ring + all hydrogens) from a
+/// nucleotide sequence. Every residue is a `Monomer::Rna`.
 pub fn build_extended_rna_chain(
     sequence: &[chem::Nucleotide],
 ) -> Result<Structure, BuildError> {
@@ -357,11 +710,26 @@ pub fn build_extended_rna_chain(
 
         // ---- Glycosidic nitrogen (purine N9 / pyrimidine N1) ----
         let n = place_atom(c3, c2, c1, rna_ic::C1_N, rna_ic::C2_C1_N, rna_ic::CHI);
-        let n_name = match nt {
-            Nucleotide::Adenine | Nucleotide::Guanine => "N9",
-            Nucleotide::Cytosine | Nucleotide::Uracil => "N1",
-        };
-        push(&mut atoms, n_name, Element::N, n);
+
+        // ---- Backbone hydrogens ----
+        place_rna_backbone_hydrogens(&mut atoms, o5, c5, c4, o4, c3, o3, c2, o2, c1, n);
+
+        // ---- Base ring atoms (heavy + H), in PDB canonical order ----
+        // The per-base helper pushes its own atoms, starting with the
+        // glycosidic N9/N1 — matching `Nucleotide::base_heavy_atoms()`.
+        match nt {
+            Nucleotide::Adenine | Nucleotide::Guanine => {
+                // N9 is the first base-heavy atom in canonical order;
+                // push it before calling the purine ring walker.
+                push(&mut atoms, "N9", Element::N, n);
+                place_purine_base(&mut atoms, nt, c2, c1, n);
+            }
+            Nucleotide::Cytosine | Nucleotide::Uracil => {
+                // For pyrimidines the helper pushes N1 itself as part
+                // of the canonical-order push, so we don't push it here.
+                place_pyrimidine_base(&mut atoms, nt, c2, c1, n);
+            }
+        }
 
         structure.residues.push(PlacedResidue {
             monomer: Monomer::Rna(nt),
@@ -464,7 +832,7 @@ mod tests {
     // ---- RNA builder tests ----
 
     #[test]
-    fn rna_chain_has_13_atoms_per_residue() {
+    fn rna_chain_places_full_atom_roster_per_residue() {
         use chem::Nucleotide;
         let s = build_extended_rna_chain(&[
             Nucleotide::Adenine,
@@ -474,16 +842,154 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(s.residues.len(), 4);
+        // Per-nucleotide totals (heavy backbone 12 + H backbone 7 +
+        // heavy base + H base): A 33, U 30, G 34, C 31.
         for r in &s.residues {
-            // P OP1 OP2 O5' C5' C4' O4' C3' O3' C2' O2' C1' + N = 13.
-            assert_eq!(r.atoms.len(), 13, "expected 13 backbone atoms");
-            assert!(r.monomer.is_rna());
+            let nt = r.monomer.as_nucleotide().unwrap();
+            assert_eq!(
+                r.atoms.len(),
+                nt.all_atoms().len(),
+                "{nt:?}: built atom count != canonical roster"
+            );
+            // Every named atom from the canonical roster is present.
+            for (name, _) in nt.all_atoms() {
+                assert!(
+                    r.position(name).is_some(),
+                    "{nt:?} missing atom {name}"
+                );
+            }
         }
-        // Purines carry N9, pyrimidines N1.
-        assert!(s.residues[0].position("N9").is_some()); // A
-        assert!(s.residues[1].position("N1").is_some()); // U
-        assert!(s.residues[2].position("N9").is_some()); // G
-        assert!(s.residues[3].position("N1").is_some()); // C
+    }
+
+    #[test]
+    fn rna_purine_ring_atoms_coplanar() {
+        // The fused 5-/6-ring purine should be flat — every atom within
+        // a tight tolerance of the best-fit ring plane.
+        use chem::Nucleotide;
+        let s = build_extended_rna_chain(&[Nucleotide::Adenine]).unwrap();
+        let r = &s.residues[0];
+        let ring_names = ["N9", "C8", "N7", "C5", "C4", "C6", "N1", "C2", "N3"];
+        let pts: Vec<Vec3> = ring_names.iter().map(|n| r.position(n).unwrap()).collect();
+        let centroid: Vec3 = pts.iter().sum::<Vec3>() / pts.len() as f64;
+        // Plane normal from the first three atoms.
+        let n_hat = (pts[1] - pts[0]).cross(&(pts[2] - pts[0])).normalize();
+        for (name, p) in ring_names.iter().zip(pts.iter()) {
+            let offset = (p - centroid).dot(&n_hat).abs();
+            assert!(offset < 0.05, "{name} {offset} Å off ring plane");
+        }
+    }
+
+    #[test]
+    fn rna_pyrimidine_ring_atoms_coplanar() {
+        use chem::Nucleotide;
+        let s = build_extended_rna_chain(&[Nucleotide::Uracil]).unwrap();
+        let r = &s.residues[0];
+        let ring_names = ["N1", "C2", "N3", "C4", "C5", "C6"];
+        let pts: Vec<Vec3> = ring_names.iter().map(|n| r.position(n).unwrap()).collect();
+        let centroid: Vec3 = pts.iter().sum::<Vec3>() / pts.len() as f64;
+        let n_hat = (pts[1] - pts[0]).cross(&(pts[2] - pts[0])).normalize();
+        for (name, p) in ring_names.iter().zip(pts.iter()) {
+            let offset = (p - centroid).dot(&n_hat).abs();
+            assert!(offset < 0.05, "{name} {offset} Å off ring plane");
+        }
+    }
+
+    #[test]
+    fn rna_no_clashes_in_built_chain() {
+        // No two atoms (other than bonded pairs / 1-3 / 1-4) should be
+        // closer than 0.7 Å in a freshly built single nucleotide.
+        // Threshold matches the protein extended-chain test.
+        use chem::Nucleotide;
+        for nt in [
+            Nucleotide::Adenine,
+            Nucleotide::Uracil,
+            Nucleotide::Guanine,
+            Nucleotide::Cytosine,
+        ] {
+            let s = build_extended_rna_chain(&[nt]).unwrap();
+            let atoms: Vec<&PlacedAtom> = s.iter_atoms().map(|(_, a)| a).collect();
+            for i in 0..atoms.len() {
+                for j in (i + 1)..atoms.len() {
+                    let d = (atoms[i].position - atoms[j].position).norm();
+                    assert!(
+                        d > 0.7,
+                        "{:?}: clash {} ↔ {}: {} Å",
+                        nt,
+                        atoms[i].name,
+                        atoms[j].name,
+                        d
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rna_pyrimidine_ring_closure_bond_is_reasonable() {
+        // The 6-ring closure N1-C6 emerges from the ring walk, not
+        // NeRF'd directly. Should land within 0.2 Å of canonical.
+        use chem::Nucleotide;
+        for nt in [Nucleotide::Cytosine, Nucleotide::Uracil] {
+            let s = build_extended_rna_chain(&[nt]).unwrap();
+            let r = &s.residues[0];
+            let n1 = r.position("N1").unwrap();
+            let c6 = r.position("C6").unwrap();
+            let d = measure::distance(n1, c6);
+            assert!(
+                (d - rna_ic::C6_N1_PYR).abs() < 0.2,
+                "{nt:?} 6-ring closure: N1-C6 = {d} Å, want ≈ {}",
+                rna_ic::C6_N1_PYR
+            );
+        }
+    }
+
+    #[test]
+    fn rna_base_heavy_bond_lengths_canonical() {
+        // Spot-check one named base bond per nucleotide — confirms
+        // the NeRF chain reproduces the standard nucleobase geometry.
+        use chem::Nucleotide;
+        let cases: &[(Nucleotide, &str, &str, f64)] = &[
+            (Nucleotide::Adenine, "C6", "N6", rna_ic::C6_N6),
+            (Nucleotide::Guanine, "C6", "O6", rna_ic::C6_O6),
+            (Nucleotide::Cytosine, "C2", "O2", rna_ic::C2_O2_C),
+            (Nucleotide::Uracil, "C4", "O4", rna_ic::C4_O4_U),
+        ];
+        for &(nt, a, b, want) in cases {
+            let s = build_extended_rna_chain(&[nt]).unwrap();
+            let r = &s.residues[0];
+            let pa = r.position(a).unwrap();
+            let pb = r.position(b).unwrap();
+            let d = measure::distance(pa, pb);
+            assert!(
+                (d - want).abs() < 1e-4,
+                "{nt:?} {a}-{b} = {d} Å, want {want}"
+            );
+        }
+    }
+
+    #[test]
+    fn rna_purine_ring_closure_bonds_are_reasonable() {
+        // The 5-ring closure C8-N9 and 6-ring closure N3-C4 are
+        // implicit (not NeRF'd) — they emerge from the geometry of
+        // ring walking.  Tolerance: within 0.2 Å of the canonical
+        // bond length.
+        use chem::Nucleotide;
+        let s = build_extended_rna_chain(&[Nucleotide::Adenine]).unwrap();
+        let r = &s.residues[0];
+        let n9 = r.position("N9").unwrap();
+        let c8 = r.position("C8").unwrap();
+        let n3 = r.position("N3").unwrap();
+        let c4 = r.position("C4").unwrap();
+        assert!(
+            (measure::distance(n9, c8) - rna_ic::N9_C8_BASE).abs() < 0.2,
+            "5-ring closure off: N9-C8 = {} Å",
+            measure::distance(n9, c8)
+        );
+        assert!(
+            (measure::distance(n3, c4) - rna_ic::N3_C4_PUR).abs() < 0.2,
+            "6-ring closure off: N3-C4 = {} Å",
+            measure::distance(n3, c4)
+        );
     }
 
     #[test]

@@ -819,4 +819,34 @@ mod tests {
             got == subs
         })
     }
+
+    #[test]
+    fn rna_topology_graph_on_built_chain_has_expected_impropers() {
+        // End-to-end: build a 4-residue RNA chain, run the topology
+        // graph, and confirm the per-base impropers (now that base
+        // atoms are NeRF'd by the builder) show up against the real
+        // placed atoms.
+        use crate::build_extended_rna_chain;
+        let s = build_extended_rna_chain(&[
+            chem::Nucleotide::Adenine,
+            chem::Nucleotide::Uracil,
+            chem::Nucleotide::Guanine,
+            chem::Nucleotide::Cytosine,
+        ])
+        .unwrap();
+        let g = build_topology_graph(&s);
+        // Adenine on residue 0 — C6 improper.
+        let c6 = rna_atom_index(&s, 0, "C6").unwrap();
+        let c5 = rna_atom_index(&s, 0, "C5").unwrap();
+        let n1 = rna_atom_index(&s, 0, "N1").unwrap();
+        let n6 = rna_atom_index(&s, 0, "N6").unwrap();
+        assert!(has_improper(&g, c6, [c5, n1, n6]));
+
+        // Uracil on residue 1 — C4 carbonyl improper.
+        let c4_u = rna_atom_index(&s, 1, "C4").unwrap();
+        let n3_u = rna_atom_index(&s, 1, "N3").unwrap();
+        let c5_u = rna_atom_index(&s, 1, "C5").unwrap();
+        let o4_u = rna_atom_index(&s, 1, "O4").unwrap();
+        assert!(has_improper(&g, c4_u, [n3_u, c5_u, o4_u]));
+    }
 }
