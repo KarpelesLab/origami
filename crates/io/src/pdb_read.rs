@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read};
 
-use chem::{AminoAcid, Element};
+use chem::{AminoAcid, Element, Monomer, Nucleotide};
 use thiserror::Error;
 
 use geom::structure::{PlacedAtom, PlacedResidue, Structure};
@@ -25,10 +25,10 @@ pub enum PdbReadError {
     Io(#[from] std::io::Error),
     #[error("line {0}: malformed ATOM record: {1}")]
     Malformed(usize, String),
-    #[error("line {0}: residue name {1:?} is not one of the 20 standard amino acids")]
+    #[error("line {0}: residue name {1:?} is not one of the 20 standard amino acids or 4 ribonucleotides")]
     UnknownResidue(usize, String),
     #[error("line {0}: atom {1:?} is not part of residue {2:?}")]
-    UnknownAtom(usize, String, AminoAcid),
+    UnknownAtom(usize, String, Monomer),
     #[error("PDB contains no ATOM records")]
     Empty,
 }
@@ -75,28 +75,22 @@ pub fn read_pdb_trajectory<R: Read>(reader: R) -> Result<Vec<Structure>, PdbRead
         if rec.alt_loc != ' ' && rec.alt_loc != 'A' {
             continue;
         }
-        // Try the protein lookup first; fall back to ribonucleotides
-        // (A / U / G / C, RA / RC etc.) — we silently skip RNA residues
-        // because the protein-only energy / dynamics code paths can't
-        // handle them yet. The chem layer has `Nucleotide` so a future
-        // commit can promote the skip into a real Monomer::Rna inclusion.
-        let aa = match AminoAcid::from_three_letter(&rec.res_name) {
-            Some(a) => a,
-            None => {
-                if chem::Nucleotide::from_three_letter(&rec.res_name).is_some() {
-                    continue;
-                }
-                return Err(PdbReadError::UnknownResidue(lineno, rec.res_name.clone()));
-            }
+        // Protein lookup first; RNA fallback. Either becomes a Monomer.
+        let monomer = if let Some(aa) = AminoAcid::from_three_letter(&rec.res_name) {
+            Monomer::Protein(aa)
+        } else if let Some(nt) = Nucleotide::from_three_letter(&rec.res_name) {
+            Monomer::Rna(nt)
+        } else {
+            return Err(PdbReadError::UnknownResidue(lineno, rec.res_name.clone()));
         };
         let norm_owned = normalise_atom_name(&rec.atom_name);
-        let canonical_name = match canonical_atom_name(aa, &norm_owned) {
+        let canonical_name = match canonical_monomer_atom_name(monomer, &norm_owned) {
             Some(n) => n,
             None => {
                 if is_terminal_patch_atom(&norm_owned) {
                     continue;
                 }
-                return Err(PdbReadError::UnknownAtom(lineno, rec.atom_name, aa));
+                return Err(PdbReadError::UnknownAtom(lineno, rec.atom_name, monomer));
             }
         };
         let element = if let Some(e) = parse_element(&rec.element) {
@@ -111,7 +105,7 @@ pub fn read_pdb_trajectory<R: Read>(reader: R) -> Result<Vec<Structure>, PdbRead
         };
         current.push(ParsedAtom {
             res_key: (rec.chain, rec.res_seq),
-            aa,
+            monomer,
             atom: PlacedAtom {
                 name: canonical_name,
                 element,
@@ -130,7 +124,7 @@ pub fn read_pdb_trajectory<R: Read>(reader: R) -> Result<Vec<Structure>, PdbRead
 
 struct ParsedAtom {
     res_key: (char, i32),
-    aa: AminoAcid,
+    monomer: Monomer,
     atom: PlacedAtom,
 }
 
@@ -141,7 +135,7 @@ fn assemble_structure(parsed: Vec<ParsedAtom>) -> Structure {
     for p in parsed {
         if Some(p.res_key) != current_key {
             residues.push(PlacedResidue {
-                monomer: geom::structure::Monomer::Protein(p.aa),
+                monomer: p.monomer,
                 atoms: Vec::new(),
                 chain: p.res_key.0,
             });
@@ -158,11 +152,11 @@ fn assemble_structure(parsed: Vec<ParsedAtom>) -> Structure {
 pub fn read_pdb<R: Read>(reader: R) -> Result<Structure, PdbReadError> {
     let buf = BufReader::new(reader);
 
-    // (chain, residue_seq) → (AminoAcid, Vec<(serial, name, element, position)>)
+    // (chain, residue_seq) → (Monomer, Vec<(serial, name, element, position)>)
     // We buffer all parsed atoms then assemble residues in input order.
     #[derive(Debug)]
     struct ResidueBuf {
-        aa: AminoAcid,
+        monomer: Monomer,
         atoms: Vec<PlacedAtom>,
         atom_names_seen: BTreeMap<&'static str, ()>,
         chain: char,
@@ -207,24 +201,18 @@ pub fn read_pdb<R: Read>(reader: R) -> Result<Structure, PdbReadError> {
             continue;
         }
 
-        // Try the protein lookup first; fall back to ribonucleotides
-        // (A / U / G / C, RA / RC etc.) — we silently skip RNA residues
-        // because the protein-only energy / dynamics code paths can't
-        // handle them yet. The chem layer has `Nucleotide` so a future
-        // commit can promote the skip into a real Monomer::Rna inclusion.
-        let aa = match AminoAcid::from_three_letter(&rec.res_name) {
-            Some(a) => a,
-            None => {
-                if chem::Nucleotide::from_three_letter(&rec.res_name).is_some() {
-                    continue;
-                }
-                return Err(PdbReadError::UnknownResidue(lineno, rec.res_name.clone()));
-            }
+        // Protein first; RNA fallback. Either becomes a Monomer.
+        let monomer = if let Some(aa) = AminoAcid::from_three_letter(&rec.res_name) {
+            Monomer::Protein(aa)
+        } else if let Some(nt) = Nucleotide::from_three_letter(&rec.res_name) {
+            Monomer::Rna(nt)
+        } else {
+            return Err(PdbReadError::UnknownResidue(lineno, rec.res_name.clone()));
         };
 
         // Normalise the atom name to wwPDB v3.3.
         let norm_owned = normalise_atom_name(&rec.atom_name);
-        let canonical_name = match canonical_atom_name(aa, &norm_owned) {
+        let canonical_name = match canonical_monomer_atom_name(monomer, &norm_owned) {
             Some(n) => n,
             None => {
                 // Terminal patches (NH3+ extra H's, C-terminal OXT) are not
@@ -234,7 +222,7 @@ pub fn read_pdb<R: Read>(reader: R) -> Result<Structure, PdbReadError> {
                 if is_terminal_patch_atom(&norm_owned) {
                     continue;
                 }
-                return Err(PdbReadError::UnknownAtom(lineno, rec.atom_name, aa));
+                return Err(PdbReadError::UnknownAtom(lineno, rec.atom_name, monomer));
             }
         };
 
@@ -249,7 +237,7 @@ pub fn read_pdb<R: Read>(reader: R) -> Result<Structure, PdbReadError> {
         let key = (rec.chain, rec.res_seq);
         if Some(key) != current {
             residues.push(ResidueBuf {
-                aa,
+                monomer,
                 atoms: Vec::new(),
                 atom_names_seen: BTreeMap::new(),
                 chain: rec.chain,
@@ -274,7 +262,7 @@ pub fn read_pdb<R: Read>(reader: R) -> Result<Structure, PdbReadError> {
     let placed: Vec<PlacedResidue> = residues
         .into_iter()
         .map(|r| PlacedResidue {
-            monomer: geom::structure::Monomer::Protein(r.aa),
+            monomer: r.monomer,
             atoms: r.atoms,
             chain: r.chain,
         })
@@ -363,6 +351,47 @@ fn normalise_atom_name(name: &str) -> String {
     }
 }
 
+/// Look up the canonical wwPDB v3.3 atom name for a residue of either
+/// kind.  Returns `&'static str` (the same reference as the chem
+/// topology data uses), or `None` if the atom isn't part of that
+/// residue's modelled atom set.
+fn canonical_monomer_atom_name(monomer: Monomer, name: &str) -> Option<&'static str> {
+    match monomer {
+        Monomer::Protein(aa) => canonical_atom_name(aa, name),
+        Monomer::Rna(nt) => canonical_rna_atom_name(nt, name),
+    }
+}
+
+/// RNA atom-name canonicaliser.  Accepts both PDB v3.3 form (the
+/// names our builder writes — `OP1`, `OP2`, `H2'`, `HO2'`, …) and a
+/// handful of CHARMM-style synonyms that external PDBs sometimes use
+/// (`O1P`/`O2P`, `H2'` on O2', `H2''` on C2'), translating them to
+/// the canonical PDB v3.3 strings.
+fn canonical_rna_atom_name(nt: Nucleotide, name: &str) -> Option<&'static str> {
+    // CHARMM → PDB v3.3 translations.  After translation, we look up
+    // by exact-match against `Nucleotide::all_atoms()` so the returned
+    // `&'static str` is the same pointer the chain builder uses.
+    let translated = match name {
+        "O1P" => "OP1",
+        "O2P" => "OP2",
+        // CHARMM H2' is the proton on the 2'-hydroxyl O2'; that's
+        // PDB's HO2'.  CHARMM H2'' is the C2' aliphatic proton;
+        // that's PDB's H2'.  We can't distinguish them from name
+        // alone if the input file uses CHARMM nomenclature for
+        // the C2' proton, so the standard convention is to look
+        // at the surrounding atoms — too elaborate for here.  The
+        // round-trip case (our writer → our reader) uses PDB
+        // v3.3 throughout and never hits this branch.
+        _ => name,
+    };
+    for (canon, _) in nt.all_atoms() {
+        if canon == translated {
+            return Some(canon);
+        }
+    }
+    None
+}
+
 /// Look up the canonical wwPDB v3.3 atom name (returning a `&'static str` so
 /// it matches our chem topology data). Returns `None` if the atom isn't in
 /// the residue's known atom list.
@@ -402,6 +431,7 @@ fn parse_element(s: &str) -> Option<Element> {
         "N" => Some(Element::N),
         "O" => Some(Element::O),
         "S" => Some(Element::S),
+        "P" => Some(Element::P),
         _ => None,
     }
 }
@@ -414,6 +444,7 @@ fn element_from_atom_name(name: &str) -> Option<Element> {
         'N' => Some(Element::N),
         'O' => Some(Element::O),
         'S' => Some(Element::S),
+        'P' => Some(Element::P),
         _ => None,
     }
 }

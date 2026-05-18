@@ -22,6 +22,7 @@ use std::sync::OnceLock;
 
 use crate::amino_acid::AminoAcid;
 use crate::atom_type::AtomType;
+use crate::monomer::Monomer;
 use crate::nucleotide::Nucleotide;
 
 #[derive(Debug, Clone, Copy)]
@@ -168,6 +169,15 @@ impl ForceField {
         self.rna_partial_charges
             .get(&(nt, atom_name.to_owned()))
             .copied()
+    }
+
+    /// Dispatching partial-charge lookup — `Monomer::Protein(aa)` →
+    /// [`partial_charge`], `Monomer::Rna(nt)` → [`partial_charge_rna`].
+    pub fn partial_charge_for(&self, monomer: Monomer, atom_name: &str) -> Option<f64> {
+        match monomer {
+            Monomer::Protein(aa) => self.partial_charge(aa, atom_name),
+            Monomer::Rna(nt) => self.partial_charge_rna(nt, atom_name),
+        }
     }
 }
 

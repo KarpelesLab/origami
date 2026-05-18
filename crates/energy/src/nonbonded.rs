@@ -25,7 +25,7 @@
 //! the cutoff (no impulse / energy drift). The short-r limit recovers
 //! bare Coulomb up to a constant offset.
 
-use chem::{classify, AtomType, ForceField};
+use chem::{classify_atom, AtomType, ForceField};
 use geom::{CellList, Structure, TopologyGraph, Vec3};
 
 use crate::units::kcal_to_kj;
@@ -110,10 +110,11 @@ pub fn nonbonded_energy(
     for residue in &structure.residues {
         for atom in &residue.atoms {
             atom_types.push(
-                classify(residue.aa(), atom.name)
-                    .unwrap_or_else(|| panic!("unclassified atom {:?} {}", residue.aa(), atom.name)),
+                classify_atom(residue.monomer, atom.name).unwrap_or_else(|| {
+                    panic!("unclassified atom {:?} {}", residue.monomer, atom.name)
+                }),
             );
-            charges.push(ff.partial_charge(residue.aa(), atom.name).unwrap_or(0.0));
+            charges.push(ff.partial_charge_for(residue.monomer, atom.name).unwrap_or(0.0));
         }
     }
 

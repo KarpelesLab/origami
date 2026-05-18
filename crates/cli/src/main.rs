@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
-use chem::{standard_ff, AminoAcid};
+use chem::{standard_ff, AminoAcid, Nucleotide};
 use clap::{Parser, Subcommand, ValueEnum};
 use dynamics::{
     minimize, run_cotranslate, run_langevin, Algorithm, CylindricalTunnel, LangevinOptions,
@@ -13,7 +13,7 @@ use geom::Vec3;
 use energy::{
     bonded::bonded_energy, gb_energy, nonbonded_energy, sasa_energy, DEFAULT_CUTOFF_A,
 };
-use geom::{build_extended_chain, build_topology_graph};
+use geom::{build_extended_chain, build_extended_rna_chain, build_topology_graph};
 use io::{
     read_pdb, read_pdb_trajectory, render, structure_bounds, write_pdb, write_pdb_trajectory,
     RenderOptions,
@@ -49,15 +49,25 @@ enum Command {
         #[arg(long)]
         three_letter: bool,
     },
-    /// Build an all-atom 3D structure for an amino-acid sequence and write a PDB file.
+    /// Build an all-atom 3D structure from a polymer sequence and write a PDB file.
+    /// Default polymer is protein (amino-acid one-letter codes); pass `--rna` to
+    /// build an RNA chain from one-letter ribonucleotide codes (`A`/`U`/`G`/`C`).
     Build {
-        /// Amino-acid sequence (one-letter codes, e.g. "MAW").
+        /// Sequence in one-letter codes.  Protein: A-Z amino acids
+        /// (e.g. `MAW`).  RNA (with `--rna`): `AUGC` letters only.
         #[arg(long, conflicts_with = "from_fasta")]
         seq: Option<String>,
 
-        /// Read the amino-acid sequence from a protein FASTA file (one-letter codes).
+        /// Read the sequence from a FASTA file (one-letter codes,
+        /// protein only).
         #[arg(long, conflicts_with = "seq")]
         from_fasta: Option<String>,
+
+        /// Build an RNA ribonucleotide chain instead of an amino-acid
+        /// chain.  Sugar+phosphate backbone, ribose ring, all base
+        /// atoms and all hydrogens placed via NeRF.
+        #[arg(long)]
+        rna: bool,
 
         /// Output PDB path. Defaults to stdout.
         #[arg(long, short)]
@@ -305,8 +315,8 @@ fn main() -> Result<()> {
         Command::Translate { input, orfs, min_aa, three_letter } => {
             run_translate(&input, orfs, min_aa, three_letter)
         }
-        Command::Build { seq, from_fasta, output } => {
-            run_build(seq.as_deref(), from_fasta.as_deref(), output.as_deref())
+        Command::Build { seq, from_fasta, rna, output } => {
+            run_build(seq.as_deref(), from_fasta.as_deref(), rna, output.as_deref())
         }
         Command::Energy { input, skip_sasa } => run_energy(&input, skip_sasa),
         Command::Minimize { input, output, algorithm, max_steps, tol, max_step, with_sasa } => {
@@ -983,19 +993,36 @@ fn read_input(input: &str) -> Result<String> {
     }
 }
 
-fn run_build(seq: Option<&str>, from_fasta: Option<&str>, output: Option<&std::path::Path>) -> Result<()> {
-    let (sequence, title) = if let Some(s) = seq {
-        (parse_aa_seq(s)?, format!("seq={}", s))
-    } else if let Some(path) = from_fasta {
-        let raw = fs::read_to_string(path).with_context(|| format!("reading {path}"))?;
-        let (header, body) = parse_protein_fasta(&raw)?;
-        (parse_aa_seq(&body)?, header)
+fn run_build(
+    seq: Option<&str>,
+    from_fasta: Option<&str>,
+    rna: bool,
+    output: Option<&std::path::Path>,
+) -> Result<()> {
+    let title;
+    let structure = if rna {
+        // RNA path: only --seq is supported (no FASTA reader for RNA yet).
+        if from_fasta.is_some() {
+            return Err(anyhow!("--from-fasta is not supported with --rna; pass --seq AUGC..."));
+        }
+        let s = seq.ok_or_else(|| anyhow!("--rna requires --seq with A/U/G/C letters"))?;
+        let nucleotides = parse_rna_seq(s)?;
+        title = format!("rna_seq={s}");
+        build_extended_rna_chain(&nucleotides)
+            .map_err(|e| anyhow!("RNA chain build failed: {e}"))?
     } else {
-        return Err(anyhow!("either --seq or --from-fasta is required"));
+        let (sequence, hdr) = if let Some(s) = seq {
+            (parse_aa_seq(s)?, format!("seq={s}"))
+        } else if let Some(path) = from_fasta {
+            let raw = fs::read_to_string(path).with_context(|| format!("reading {path}"))?;
+            let (header, body) = parse_protein_fasta(&raw)?;
+            (parse_aa_seq(&body)?, header)
+        } else {
+            return Err(anyhow!("either --seq or --from-fasta is required"));
+        };
+        title = hdr;
+        build_extended_chain(&sequence).map_err(|e| anyhow!("chain build failed: {e}"))?
     };
-
-    let structure = build_extended_chain(&sequence)
-        .map_err(|e| anyhow!("chain build failed: {e}"))?;
 
     if let Some(path) = output {
         let mut file = fs::File::create(path)
@@ -1292,6 +1319,25 @@ fn parse_aa_seq(s: &str) -> Result<Vec<AminoAcid>> {
     }
     if out.is_empty() {
         return Err(anyhow!("amino-acid sequence is empty"));
+    }
+    Ok(out)
+}
+
+fn parse_rna_seq(s: &str) -> Result<Vec<Nucleotide>> {
+    let mut out = Vec::with_capacity(s.len());
+    for (i, ch) in s.chars().enumerate() {
+        if ch.is_ascii_whitespace() {
+            continue;
+        }
+        let nt = Nucleotide::from_one_letter(ch).ok_or_else(|| {
+            anyhow!(
+                "position {i}: {ch:?} is not a valid one-letter ribonucleotide code (A/U/G/C; T accepted as U)"
+            )
+        })?;
+        out.push(nt);
+    }
+    if out.is_empty() {
+        return Err(anyhow!("RNA sequence is empty"));
     }
     Ok(out)
 }

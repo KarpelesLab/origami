@@ -2,54 +2,16 @@ use chem::{AminoAcid, Element, Nucleotide};
 
 use crate::Vec3;
 
+/// Re-exported from `chem::Monomer` — the canonical location for the
+/// polymer-monomer enum. Existing callers reach it via
+/// `geom::structure::Monomer` and continue to work unchanged.
+pub use chem::Monomer;
+
 #[derive(Debug, Clone)]
 pub struct PlacedAtom {
     pub name: &'static str,
     pub element: Element,
     pub position: Vec3,
-}
-
-/// What kind of polymer monomer a residue is. Currently protein amino
-/// acids and RNA ribonucleotides; the enum is the integration point
-/// for the long-horizon ribosome work — once full RNA dynamics is in
-/// place, a Structure can hold mixed chains (rRNA + ribosomal
-/// proteins) without changing the surrounding code.
-#[derive(Debug, Clone, Copy)]
-pub enum Monomer {
-    Protein(AminoAcid),
-    Rna(Nucleotide),
-}
-
-impl Monomer {
-    pub fn as_amino_acid(self) -> Option<AminoAcid> {
-        match self {
-            Self::Protein(a) => Some(a),
-            _ => None,
-        }
-    }
-    pub fn as_nucleotide(self) -> Option<Nucleotide> {
-        match self {
-            Self::Rna(n) => Some(n),
-            _ => None,
-        }
-    }
-    pub fn is_protein(self) -> bool {
-        matches!(self, Self::Protein(_))
-    }
-    pub fn is_rna(self) -> bool {
-        matches!(self, Self::Rna(_))
-    }
-}
-
-impl From<AminoAcid> for Monomer {
-    fn from(a: AminoAcid) -> Self {
-        Self::Protein(a)
-    }
-}
-impl From<Nucleotide> for Monomer {
-    fn from(n: Nucleotide) -> Self {
-        Self::Rna(n)
-    }
 }
 
 #[derive(Debug, Clone)]

@@ -11,7 +11,7 @@
 //! states and large-scale conformational changes with a modified
 //! generalized born model" Proteins 55(2):383–394.
 
-use chem::{AminoAcid, AtomType, Element, ForceField};
+use chem::{AtomType, Element, ForceField, Monomer};
 use geom::{CellList, Structure, Vec3};
 
 use crate::units::kcal_to_kj;
@@ -107,7 +107,7 @@ pub fn compute_born_inputs(structure: &Structure, ff: &ForceField) -> BornInputs
     for residue in &structure.residues {
         for atom in &residue.atoms {
             positions.push(atom.position);
-            charges.push(charge_for(ff, residue.aa(), atom.name));
+            charges.push(charge_for(ff, residue.monomer, atom.name));
             let r = intrinsic_radius(atom.element);
             rho.push(r);
             rho_tilde.push(r - OBC_OFFSET);
@@ -181,8 +181,8 @@ pub fn gb_energy(structure: &Structure, ff: &ForceField) -> GbBreakdown {
     }
 }
 
-fn charge_for(ff: &ForceField, aa: AminoAcid, atom_name: &str) -> f64 {
-    ff.partial_charge(aa, atom_name).unwrap_or(0.0)
+fn charge_for(ff: &ForceField, monomer: Monomer, atom_name: &str) -> f64 {
+    ff.partial_charge_for(monomer, atom_name).unwrap_or(0.0)
 }
 
 /// SoA Born-radius computation. Equivalent to `compute_born_inputs`

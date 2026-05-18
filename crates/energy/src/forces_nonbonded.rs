@@ -4,7 +4,7 @@
 //! exactly: 1-2 and 1-3 pairs are skipped, 1-4 pairs use the special CHARMM
 //! 1-4 LJ parameters when present, full Coulomb strength is applied.
 
-use chem::{classify, AtomType, ForceField};
+use chem::{classify_atom, AtomType, ForceField};
 use geom::{CellList, Structure, TopologyGraph, Vec3};
 use rayon::prelude::*;
 
@@ -38,10 +38,11 @@ pub fn add_nonbonded_forces(
         for atom in &residue.atoms {
             positions.push(atom.position);
             atom_types.push(
-                classify(residue.aa(), atom.name)
-                    .unwrap_or_else(|| panic!("unclassified atom {:?} {}", residue.aa(), atom.name)),
+                classify_atom(residue.monomer, atom.name).unwrap_or_else(|| {
+                    panic!("unclassified atom {:?} {}", residue.monomer, atom.name)
+                }),
             );
-            charges.push(ff.partial_charge(residue.aa(), atom.name).unwrap_or(0.0));
+            charges.push(ff.partial_charge_for(residue.monomer, atom.name).unwrap_or(0.0));
         }
     }
 

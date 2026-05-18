@@ -3,7 +3,7 @@
 //!
 //! All return values in kJ/mol.
 
-use chem::{classify, AtomType, ForceField};
+use chem::{classify_atom, AtomType, ForceField};
 use geom::{measure, Structure, TopologyGraph};
 
 use crate::units::{deg_to_rad, kcal_to_kj};
@@ -48,8 +48,9 @@ fn build_atom_types(structure: &Structure) -> Vec<AtomType> {
     for residue in &structure.residues {
         for atom in &residue.atoms {
             out.push(
-                classify(residue.aa(), atom.name)
-                    .unwrap_or_else(|| panic!("unclassified atom {:?} {}", residue.aa(), atom.name)),
+                classify_atom(residue.monomer, atom.name).unwrap_or_else(|| {
+                    panic!("unclassified atom {:?} {}", residue.monomer, atom.name)
+                }),
             );
         }
     }

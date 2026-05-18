@@ -15,6 +15,7 @@
 
 use crate::amino_acid::AminoAcid;
 use crate::element::Element;
+use crate::monomer::Monomer;
 use crate::nucleotide::Nucleotide;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -395,6 +396,17 @@ pub fn classify_rna(nt: Nucleotide, atom_name: &str) -> Option<AtomType> {
         _ => return None,
     };
     Some(t)
+}
+
+/// Dispatching classifier — for `Monomer::Protein(aa)` calls
+/// [`classify`], for `Monomer::Rna(nt)` calls [`classify_rna`].
+/// Callers in the energy/force aggregator use this so they can walk
+/// any `Structure` regardless of whether each residue is protein or RNA.
+pub fn classify_atom(monomer: Monomer, atom_name: &str) -> Option<AtomType> {
+    match monomer {
+        Monomer::Protein(aa) => classify(aa, atom_name),
+        Monomer::Rna(nt) => classify_rna(nt, atom_name),
+    }
 }
 
 /// Classify an atom by its (residue, atom-name). Returns `None` for atoms

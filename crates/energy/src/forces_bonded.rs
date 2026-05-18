@@ -9,7 +9,7 @@
 //! where q ∈ {r, θ, φ, ω}, then distribute it across atoms via the chain
 //! rule for q.
 
-use chem::{classify, AtomType, ForceField};
+use chem::{classify_atom, AtomType, ForceField};
 use geom::{Structure, TopologyGraph, Vec3};
 
 use crate::units::{deg_to_rad, kcal_to_kj};
@@ -24,8 +24,9 @@ pub fn build_atom_types(structure: &Structure) -> Vec<AtomType> {
     for residue in &structure.residues {
         for atom in &residue.atoms {
             out.push(
-                classify(residue.aa(), atom.name)
-                    .unwrap_or_else(|| panic!("unclassified atom {:?} {}", residue.aa(), atom.name)),
+                classify_atom(residue.monomer, atom.name).unwrap_or_else(|| {
+                    panic!("unclassified atom {:?} {}", residue.monomer, atom.name)
+                }),
             );
         }
     }

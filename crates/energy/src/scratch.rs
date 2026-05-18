@@ -25,7 +25,7 @@
 //!   - bit 0: excluded (1-2 or 1-3 pair, skip non-bonded)
 //!   - bit 1: 1-4 pair (apply scaled LJ params + scaled Coulomb)
 
-use chem::{classify, AminoAcid, AtomType, ForceField};
+use chem::{classify_atom, AtomType, ForceField, Monomer};
 use geom::{Structure, TopologyGraph};
 
 pub const EXCLUDED_BIT: u8 = 1 << 0;
@@ -200,11 +200,11 @@ impl ForceScratch {
         let mut idx = 0;
         for residue in &structure.residues {
             for atom in &residue.atoms {
-                let ty = classify(residue.aa(), atom.name).unwrap_or_else(|| {
-                    panic!("unclassified atom {:?} {}", residue.aa(), atom.name)
+                let ty = classify_atom(residue.monomer, atom.name).unwrap_or_else(|| {
+                    panic!("unclassified atom {:?} {}", residue.monomer, atom.name)
                 });
                 self.atom_types.push(ty);
-                let q = charge_for(ff, residue.aa(), atom.name);
+                let q = charge_for(ff, residue.monomer, atom.name);
                 self.charges[idx] = q;
                 // GB OBC II per-atom constants (element-only, never
                 // change at runtime).
@@ -294,6 +294,6 @@ impl ForceScratch {
 }
 
 /// Helper mirroring the partial-charge lookup used elsewhere.
-fn charge_for(ff: &ForceField, aa: AminoAcid, atom_name: &str) -> f64 {
-    ff.partial_charge(aa, atom_name).unwrap_or(0.0)
+fn charge_for(ff: &ForceField, monomer: Monomer, atom_name: &str) -> f64 {
+    ff.partial_charge_for(monomer, atom_name).unwrap_or(0.0)
 }
