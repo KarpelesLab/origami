@@ -20,9 +20,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use chem::AminoAcid;
+use chem::{AminoAcid, Nucleotide};
 
-use crate::structure::Structure;
+use crate::structure::{Monomer, Structure};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Bond {
@@ -154,67 +154,102 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
     };
 
     for (ri, res) in structure.residues.iter().enumerate() {
-        // Skip non-protein residues — the protein-only auto-bond
-        // pass below assumes amino-acid topology. RNA residues are
-        // handled by a separate (future) path.
-        let aa = match res.monomer.as_amino_acid() {
-            Some(a) => a,
-            None => continue,
-        };
+        match res.monomer {
+            Monomer::Protein(aa) => {
+                // ---- Backbone bonds ----
+                let n = lookup(ri, "N");
+                let ca = lookup(ri, "CA");
+                let c = lookup(ri, "C");
+                let o = lookup(ri, "O");
+                if let (Some(n), Some(ca)) = (n, ca) {
+                    add_bond(&mut bonds, n, ca);
+                }
+                if let (Some(ca), Some(c)) = (ca, c) {
+                    add_bond(&mut bonds, ca, c);
+                }
+                if let (Some(c), Some(o)) = (c, o) {
+                    add_bond(&mut bonds, c, o);
+                }
+                if let (Some(n), Some(h)) = (n, lookup(ri, "H")) {
+                    add_bond(&mut bonds, n, h);
+                }
+                if aa == AminoAcid::Gly {
+                    for ha in ["HA2", "HA3"] {
+                        if let (Some(ca), Some(hi)) = (ca, lookup(ri, ha)) {
+                            add_bond(&mut bonds, ca, hi);
+                        }
+                    }
+                } else if let (Some(ca), Some(ha)) = (ca, lookup(ri, "HA")) {
+                    add_bond(&mut bonds, ca, ha);
+                }
 
-        // ---- Backbone bonds ----
-        let n = lookup(ri, "N");
-        let ca = lookup(ri, "CA");
-        let c = lookup(ri, "C");
-        let o = lookup(ri, "O");
-        if let (Some(n), Some(ca)) = (n, ca) {
-            add_bond(&mut bonds, n, ca);
-        }
-        if let (Some(ca), Some(c)) = (ca, c) {
-            add_bond(&mut bonds, ca, c);
-        }
-        if let (Some(c), Some(o)) = (c, o) {
-            add_bond(&mut bonds, c, o);
-        }
-        if let (Some(n), Some(h)) = (n, lookup(ri, "H")) {
-            add_bond(&mut bonds, n, h);
-        }
-        if aa == AminoAcid::Gly {
-            for ha in ["HA2", "HA3"] {
-                if let (Some(ca), Some(hi)) = (ca, lookup(ri, ha)) {
-                    add_bond(&mut bonds, ca, hi);
+                // ---- Inter-residue peptide bond C(i-1) -- N(i) ----
+                // Only auto-bond within the same chain. Multi-chain proteins
+                // (insulin, antibodies) have a TER record between chains in
+                // the PDB; without this check the last residue of chain A
+                // would get a phantom peptide bond to the first residue of
+                // chain B, which would distort everything downstream. The
+                // previous residue must also be protein — a peptide bond
+                // never connects to an RNA residue, and the chain check
+                // alone wouldn't catch a hybrid chain.
+                if ri > 0
+                    && structure.residues[ri - 1].chain == res.chain
+                    && structure.residues[ri - 1].monomer.is_protein()
+                {
+                    let prev_c = lookup(ri - 1, "C");
+                    if let (Some(prev_c), Some(n)) = (prev_c, n) {
+                        add_bond(&mut bonds, prev_c, n);
+                    }
+                }
+
+                // ---- Side-chain bonds (each side-chain atom declares its parent) ----
+                for sc in aa.topology().sidechain {
+                    let child = lookup(ri, sc.name);
+                    let parent = lookup(ri, sc.bond_to);
+                    if let (Some(child), Some(parent)) = (child, parent) {
+                        add_bond(&mut bonds, parent, child);
+                    }
+                }
+
+                // ---- Ring-closure bonds (not in side-chain `bond_to` table) ----
+                for (name_a, name_b) in ring_closure_bonds(aa) {
+                    if let (Some(a), Some(b)) = (lookup(ri, name_a), lookup(ri, name_b)) {
+                        add_bond(&mut bonds, a, b);
+                    }
                 }
             }
-        } else if let (Some(ca), Some(ha)) = (ca, lookup(ri, "HA")) {
-            add_bond(&mut bonds, ca, ha);
-        }
+            Monomer::Rna(nt) => {
+                // ---- Backbone + base intra-residue bonds ----
+                // `Nucleotide::topology()` returns the (child, parent)
+                // bond list for sugar+phosphate and for the attached
+                // base; the ribose ring-closure C1'-O4' is included
+                // in the backbone list.
+                let topo = nt.topology();
+                for &(child, parent) in topo.backbone {
+                    if let (Some(c), Some(p)) = (lookup(ri, child), lookup(ri, parent)) {
+                        add_bond(&mut bonds, c, p);
+                    }
+                }
+                for &(child, parent) in topo.base {
+                    if let (Some(c), Some(p)) = (lookup(ri, child), lookup(ri, parent)) {
+                        add_bond(&mut bonds, c, p);
+                    }
+                }
 
-        // ---- Inter-residue peptide bond C(i-1) -- N(i) ----
-        // Only auto-bond within the same chain. Multi-chain proteins
-        // (insulin, antibodies) have a TER record between chains in
-        // the PDB; without this check the last residue of chain A
-        // would get a phantom peptide bond to the first residue of
-        // chain B, which would distort everything downstream.
-        if ri > 0 && structure.residues[ri - 1].chain == res.chain {
-            let prev_c = lookup(ri - 1, "C");
-            if let (Some(prev_c), Some(n)) = (prev_c, n) {
-                add_bond(&mut bonds, prev_c, n);
-            }
-        }
-
-        // ---- Side-chain bonds (each side-chain atom declares its parent) ----
-        for sc in aa.topology().sidechain {
-            let child = lookup(ri, sc.name);
-            let parent = lookup(ri, sc.bond_to);
-            if let (Some(child), Some(parent)) = (child, parent) {
-                add_bond(&mut bonds, parent, child);
-            }
-        }
-
-        // ---- Ring-closure bonds (not in side-chain `bond_to` table) ----
-        for (name_a, name_b) in ring_closure_bonds(aa) {
-            if let (Some(a), Some(b)) = (lookup(ri, name_a), lookup(ri, name_b)) {
-                add_bond(&mut bonds, a, b);
+                // ---- Inter-residue phosphodiester O3'(i-1) -- P(i) ----
+                // RNA polymerises 5'→3': the 5'-phosphate of residue i
+                // bonds to the 3'-hydroxyl-O of residue i-1. Same
+                // chain-boundary + same-monomer-kind safeguard as the
+                // peptide bond above.
+                if ri > 0
+                    && structure.residues[ri - 1].chain == res.chain
+                    && structure.residues[ri - 1].monomer.is_rna()
+                {
+                    if let (Some(prev_o3), Some(p)) = (lookup(ri - 1, "O3'"), lookup(ri, "P"))
+                    {
+                        add_bond(&mut bonds, prev_o3, p);
+                    }
+                }
             }
         }
     }
@@ -302,6 +337,53 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
     // (planar) for sp² centers. Order is (substituent_a, central, sub_b, sub_c).
     let mut impropers: Vec<Improper> = Vec::new();
     for (ri, res) in structure.residues.iter().enumerate() {
+        // RNA: planarity of exocyclic substituents on sp² ring carbons.
+        // In-ring atoms are kept planar by the dihedral periodic terms
+        // (same convention as Phe/Tyr/Trp/His), so only the carbonyls
+        // and exocyclic amines get an improper. Central atom = the sp²
+        // ring carbon with the off-plane substituent.
+        if let Some(nt) = res.monomer.as_nucleotide() {
+            let push_rna_improper = |impropers: &mut Vec<Improper>,
+                                     center: &str,
+                                     sub_a: &str,
+                                     sub_b: &str,
+                                     sub_c: &str| {
+                if let (Some(ca), Some(a), Some(b), Some(c)) = (
+                    lookup(ri, center),
+                    lookup(ri, sub_a),
+                    lookup(ri, sub_b),
+                    lookup(ri, sub_c),
+                ) {
+                    impropers.push(Improper { a: ca, b: a, c: b, d: c });
+                }
+            };
+            match nt {
+                Nucleotide::Adenine => {
+                    // C6: ring C5, ring N1, exocyclic N6 (amino).
+                    push_rna_improper(&mut impropers, "C6", "C5", "N1", "N6");
+                }
+                Nucleotide::Guanine => {
+                    // C6: ring C5, ring N1, exocyclic O6 (carbonyl).
+                    push_rna_improper(&mut impropers, "C6", "C5", "N1", "O6");
+                    // C2: ring N1, ring N3, exocyclic N2 (amino).
+                    push_rna_improper(&mut impropers, "C2", "N1", "N3", "N2");
+                }
+                Nucleotide::Cytosine => {
+                    // C2: ring N1, ring N3, exocyclic O2 (carbonyl).
+                    push_rna_improper(&mut impropers, "C2", "N1", "N3", "O2");
+                    // C4: ring N3, ring C5, exocyclic N4 (amino).
+                    push_rna_improper(&mut impropers, "C4", "N3", "C5", "N4");
+                }
+                Nucleotide::Uracil => {
+                    // C2: ring N1, ring N3, exocyclic O2 (carbonyl).
+                    push_rna_improper(&mut impropers, "C2", "N1", "N3", "O2");
+                    // C4: ring N3, ring C5, exocyclic O4 (carbonyl).
+                    push_rna_improper(&mut impropers, "C4", "N3", "C5", "O4");
+                }
+            }
+            continue;
+        }
+
         let aa = match res.monomer.as_amino_acid() {
             Some(a) => a,
             None => continue,
@@ -567,5 +649,174 @@ mod tests {
             }
         }
         out
+    }
+
+    // ---- RNA topology graph tests ----
+
+    fn rna_atom_index(
+        s: &crate::structure::Structure,
+        residue: usize,
+        name: &str,
+    ) -> Option<usize> {
+        let mut idx = 0;
+        for (ri, r) in s.residues.iter().enumerate() {
+            for a in &r.atoms {
+                if ri == residue && a.name == name {
+                    return Some(idx);
+                }
+                idx += 1;
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn rna_adenine_glycosidic_and_ribose_ring_bonds() {
+        use crate::build_extended_rna_chain;
+        let s = build_extended_rna_chain(&[chem::Nucleotide::Adenine]).unwrap();
+        let g = build_topology_graph(&s);
+        let n9 = rna_atom_index(&s, 0, "N9").unwrap();
+        let c1 = rna_atom_index(&s, 0, "C1'").unwrap();
+        let o4 = rna_atom_index(&s, 0, "O4'").unwrap();
+        // Glycosidic N9-C1' bond ties the base to the sugar.
+        assert!(g.is_bonded(n9, c1), "RNA adenine N9-C1' bond missing");
+        // Ribose ring closure C1'-O4'.
+        assert!(g.is_bonded(c1, o4), "RNA ribose ring closure missing");
+    }
+
+    #[test]
+    fn rna_phosphodiester_bond_between_residues() {
+        use crate::build_extended_rna_chain;
+        let s = build_extended_rna_chain(&[
+            chem::Nucleotide::Adenine,
+            chem::Nucleotide::Uracil,
+        ])
+        .unwrap();
+        let g = build_topology_graph(&s);
+        let o3_prev = rna_atom_index(&s, 0, "O3'").unwrap();
+        let p_curr = rna_atom_index(&s, 1, "P").unwrap();
+        assert!(
+            g.is_bonded(o3_prev, p_curr),
+            "RNA phosphodiester O3'(0)-P(1) bond missing"
+        );
+    }
+
+    #[test]
+    fn rna_dinucleotide_has_no_phantom_protein_bonds() {
+        use crate::build_extended_rna_chain;
+        let s = build_extended_rna_chain(&[
+            chem::Nucleotide::Cytosine,
+            chem::Nucleotide::Guanine,
+        ])
+        .unwrap();
+        let g = build_topology_graph(&s);
+        // No protein-style peptide bond should be detected — the
+        // residues don't have C or N backbone atoms, but the
+        // chain-boundary check is the real guard for hybrid chains.
+        // Sanity: the only inter-residue bond should be the phosphodiester.
+        let prev_c1 = rna_atom_index(&s, 0, "C1'").unwrap();
+        let curr_c1 = rna_atom_index(&s, 1, "C1'").unwrap();
+        assert!(!g.is_bonded(prev_c1, curr_c1));
+    }
+
+    #[test]
+    fn rna_base_impropers_via_synthetic_structure() {
+        // The current RNA chain builder places only the sugar/phosphate
+        // scaffold + the glycosidic N (N9/N1) — the full base ring
+        // atoms aren't NeRF'd yet, so we drive this test directly off
+        // a hand-built Structure that includes every named base atom.
+        // This locks in that the topology graph enumerates the correct
+        // sp² impropers for all four nucleobases.
+        use crate::structure::{Monomer, PlacedAtom, PlacedResidue, Structure};
+        use chem::Nucleotide;
+
+        let make_residue = |nt: Nucleotide| -> PlacedResidue {
+            let mut atoms: Vec<PlacedAtom> = Vec::new();
+            for (name, el) in nt.all_atoms() {
+                atoms.push(PlacedAtom {
+                    name,
+                    element: el,
+                    position: crate::Vec3::zeros(),
+                });
+            }
+            PlacedResidue { monomer: Monomer::Rna(nt), atoms, chain: 'A' }
+        };
+
+        // Adenine: improper at C6 with substituents {C5, N1, N6}.
+        {
+            let mut s = Structure::new();
+            s.residues.push(make_residue(Nucleotide::Adenine));
+            let g = build_topology_graph(&s);
+            let c6 = rna_atom_index(&s, 0, "C6").unwrap();
+            let c5 = rna_atom_index(&s, 0, "C5").unwrap();
+            let n1 = rna_atom_index(&s, 0, "N1").unwrap();
+            let n6 = rna_atom_index(&s, 0, "N6").unwrap();
+            assert!(
+                has_improper(&g, c6, [c5, n1, n6]),
+                "Adenine C6 improper missing"
+            );
+        }
+
+        // Guanine: impropers at C6 ({C5, N1, O6}) and C2 ({N1, N3, N2}).
+        {
+            let mut s = Structure::new();
+            s.residues.push(make_residue(Nucleotide::Guanine));
+            let g = build_topology_graph(&s);
+            let c6 = rna_atom_index(&s, 0, "C6").unwrap();
+            let c5 = rna_atom_index(&s, 0, "C5").unwrap();
+            let n1 = rna_atom_index(&s, 0, "N1").unwrap();
+            let o6 = rna_atom_index(&s, 0, "O6").unwrap();
+            let c2 = rna_atom_index(&s, 0, "C2").unwrap();
+            let n3 = rna_atom_index(&s, 0, "N3").unwrap();
+            let n2 = rna_atom_index(&s, 0, "N2").unwrap();
+            assert!(has_improper(&g, c6, [c5, n1, o6]), "Guanine C6 improper missing");
+            assert!(has_improper(&g, c2, [n1, n3, n2]), "Guanine C2 improper missing");
+        }
+
+        // Cytosine: impropers at C2 ({N1, N3, O2}) and C4 ({N3, C5, N4}).
+        {
+            let mut s = Structure::new();
+            s.residues.push(make_residue(Nucleotide::Cytosine));
+            let g = build_topology_graph(&s);
+            let c2 = rna_atom_index(&s, 0, "C2").unwrap();
+            let n1 = rna_atom_index(&s, 0, "N1").unwrap();
+            let n3 = rna_atom_index(&s, 0, "N3").unwrap();
+            let o2 = rna_atom_index(&s, 0, "O2").unwrap();
+            let c4 = rna_atom_index(&s, 0, "C4").unwrap();
+            let c5 = rna_atom_index(&s, 0, "C5").unwrap();
+            let n4 = rna_atom_index(&s, 0, "N4").unwrap();
+            assert!(has_improper(&g, c2, [n1, n3, o2]), "Cytosine C2 improper missing");
+            assert!(has_improper(&g, c4, [n3, c5, n4]), "Cytosine C4 improper missing");
+        }
+
+        // Uracil: impropers at C2 ({N1, N3, O2}) and C4 ({N3, C5, O4}).
+        {
+            let mut s = Structure::new();
+            s.residues.push(make_residue(Nucleotide::Uracil));
+            let g = build_topology_graph(&s);
+            let c2 = rna_atom_index(&s, 0, "C2").unwrap();
+            let n1 = rna_atom_index(&s, 0, "N1").unwrap();
+            let n3 = rna_atom_index(&s, 0, "N3").unwrap();
+            let o2 = rna_atom_index(&s, 0, "O2").unwrap();
+            let c4 = rna_atom_index(&s, 0, "C4").unwrap();
+            let c5 = rna_atom_index(&s, 0, "C5").unwrap();
+            let o4 = rna_atom_index(&s, 0, "O4").unwrap();
+            assert!(has_improper(&g, c2, [n1, n3, o2]), "Uracil C2 improper missing");
+            assert!(has_improper(&g, c4, [n3, c5, o4]), "Uracil C4 improper missing");
+        }
+    }
+
+    /// Check whether `g.impropers` contains an entry centred on `center`
+    /// with the three substituents matching `subs` (in any order).
+    fn has_improper(g: &TopologyGraph, center: usize, mut subs: [usize; 3]) -> bool {
+        subs.sort();
+        g.impropers.iter().any(|imp| {
+            if imp.a != center {
+                return false;
+            }
+            let mut got = [imp.b, imp.c, imp.d];
+            got.sort();
+            got == subs
+        })
     }
 }
