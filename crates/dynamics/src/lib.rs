@@ -17,8 +17,8 @@ pub mod shake;
 pub mod steepest_descent;
 
 pub use cotranslate::{
-    run_cotranslate, CotranslateFrame, CylindricalTunnel, ExternalPotential, Ribosome,
-    UniformRibosome,
+    run_cotranslate, CodonPacedRibosome, CotranslateFrame, CylindricalTunnel, ExternalPotential,
+    MrnaParseError, Ribosome, UniformRibosome,
 };
 pub use langevin::{
     initialise_velocities_for_new_atoms, instant_temperature_k, run_langevin, LangevinFrame,

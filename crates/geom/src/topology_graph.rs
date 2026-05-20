@@ -357,28 +357,46 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
                     impropers.push(Improper { a: ca, b: a, c: b, d: c });
                 }
             };
+            // The CHARMM27 .rtf adds two flavours of base improper:
+            //   (i)  at the sp² ring carbon, between the ring substituent
+            //        and the exocyclic group (carbonyl O or amine N) —
+            //        keeps the exocyclic substituent coplanar with the
+            //        ring (e.g. `C6 N1 C5 N6` on adenine);
+            //   (ii) at the exocyclic sp² amine N, between the parent
+            //        ring carbon and the two amine hydrogens — keeps the
+            //        amine NH₂ coplanar with the ring (e.g. `N6 C6 H61 H62`
+            //        on adenine).
+            // Uracil has no exocyclic amines, only carbonyl oxygens; its
+            // IMPR list omits the type-(ii) impropers.
             match nt {
                 Nucleotide::Adenine => {
-                    // C6: ring C5, ring N1, exocyclic N6 (amino).
+                    // (i)  C6: ring C5, ring N1, exocyclic N6 (amino).
                     push_rna_improper(&mut impropers, "C6", "C5", "N1", "N6");
+                    // (ii) N6 amine: parent C6, H61, H62.
+                    push_rna_improper(&mut impropers, "N6", "C6", "H61", "H62");
                 }
                 Nucleotide::Guanine => {
-                    // C6: ring C5, ring N1, exocyclic O6 (carbonyl).
+                    // (i)  C6: ring C5, ring N1, exocyclic O6 (carbonyl).
                     push_rna_improper(&mut impropers, "C6", "C5", "N1", "O6");
-                    // C2: ring N1, ring N3, exocyclic N2 (amino).
+                    // (i)  C2: ring N1, ring N3, exocyclic N2 (amino).
                     push_rna_improper(&mut impropers, "C2", "N1", "N3", "N2");
+                    // (ii) N2 amine: parent C2, H21, H22.
+                    push_rna_improper(&mut impropers, "N2", "C2", "H21", "H22");
                 }
                 Nucleotide::Cytosine => {
-                    // C2: ring N1, ring N3, exocyclic O2 (carbonyl).
+                    // (i)  C2: ring N1, ring N3, exocyclic O2 (carbonyl).
                     push_rna_improper(&mut impropers, "C2", "N1", "N3", "O2");
-                    // C4: ring N3, ring C5, exocyclic N4 (amino).
+                    // (i)  C4: ring N3, ring C5, exocyclic N4 (amino).
                     push_rna_improper(&mut impropers, "C4", "N3", "C5", "N4");
+                    // (ii) N4 amine: parent C4, H41, H42.
+                    push_rna_improper(&mut impropers, "N4", "C4", "H41", "H42");
                 }
                 Nucleotide::Uracil => {
                     // C2: ring N1, ring N3, exocyclic O2 (carbonyl).
                     push_rna_improper(&mut impropers, "C2", "N1", "N3", "O2");
                     // C4: ring N3, ring C5, exocyclic O4 (carbonyl).
                     push_rna_improper(&mut impropers, "C4", "N3", "C5", "O4");
+                    // (Uracil has no exocyclic amine; no type-(ii) improper.)
                 }
             }
             continue;
@@ -742,7 +760,7 @@ mod tests {
             PlacedResidue { monomer: Monomer::Rna(nt), atoms, chain: 'A' }
         };
 
-        // Adenine: improper at C6 with substituents {C5, N1, N6}.
+        // Adenine: C6 ring improper + N6 amine improper.
         {
             let mut s = Structure::new();
             s.residues.push(make_residue(Nucleotide::Adenine));
@@ -751,13 +769,16 @@ mod tests {
             let c5 = rna_atom_index(&s, 0, "C5").unwrap();
             let n1 = rna_atom_index(&s, 0, "N1").unwrap();
             let n6 = rna_atom_index(&s, 0, "N6").unwrap();
+            let h61 = rna_atom_index(&s, 0, "H61").unwrap();
+            let h62 = rna_atom_index(&s, 0, "H62").unwrap();
+            assert!(has_improper(&g, c6, [c5, n1, n6]), "Adenine C6 improper missing");
             assert!(
-                has_improper(&g, c6, [c5, n1, n6]),
-                "Adenine C6 improper missing"
+                has_improper(&g, n6, [c6, h61, h62]),
+                "Adenine N6 amine improper missing"
             );
         }
 
-        // Guanine: impropers at C6 ({C5, N1, O6}) and C2 ({N1, N3, N2}).
+        // Guanine: C6 + C2 ring impropers + N2 amine improper.
         {
             let mut s = Structure::new();
             s.residues.push(make_residue(Nucleotide::Guanine));
@@ -769,11 +790,17 @@ mod tests {
             let c2 = rna_atom_index(&s, 0, "C2").unwrap();
             let n3 = rna_atom_index(&s, 0, "N3").unwrap();
             let n2 = rna_atom_index(&s, 0, "N2").unwrap();
+            let h21 = rna_atom_index(&s, 0, "H21").unwrap();
+            let h22 = rna_atom_index(&s, 0, "H22").unwrap();
             assert!(has_improper(&g, c6, [c5, n1, o6]), "Guanine C6 improper missing");
             assert!(has_improper(&g, c2, [n1, n3, n2]), "Guanine C2 improper missing");
+            assert!(
+                has_improper(&g, n2, [c2, h21, h22]),
+                "Guanine N2 amine improper missing"
+            );
         }
 
-        // Cytosine: impropers at C2 ({N1, N3, O2}) and C4 ({N3, C5, N4}).
+        // Cytosine: C2 + C4 ring impropers + N4 amine improper.
         {
             let mut s = Structure::new();
             s.residues.push(make_residue(Nucleotide::Cytosine));
@@ -785,8 +812,14 @@ mod tests {
             let c4 = rna_atom_index(&s, 0, "C4").unwrap();
             let c5 = rna_atom_index(&s, 0, "C5").unwrap();
             let n4 = rna_atom_index(&s, 0, "N4").unwrap();
+            let h41 = rna_atom_index(&s, 0, "H41").unwrap();
+            let h42 = rna_atom_index(&s, 0, "H42").unwrap();
             assert!(has_improper(&g, c2, [n1, n3, o2]), "Cytosine C2 improper missing");
             assert!(has_improper(&g, c4, [n3, c5, n4]), "Cytosine C4 improper missing");
+            assert!(
+                has_improper(&g, n4, [c4, h41, h42]),
+                "Cytosine N4 amine improper missing"
+            );
         }
 
         // Uracil: impropers at C2 ({N1, N3, O2}) and C4 ({N3, C5, O4}).

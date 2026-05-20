@@ -1,6 +1,7 @@
 pub mod amino_acid;
 pub mod atom_type;
 pub mod codon;
+pub mod codon_usage;
 pub mod element;
 pub mod forcefield;
 pub mod monomer;
@@ -12,6 +13,7 @@ pub mod topology_data;
 pub use amino_acid::{AminoAcid, ParseAminoAcidError};
 pub use atom_type::{classify, classify_atom, classify_rna, AtomType};
 pub use codon::{Base, Codon, ParseCodonError, Translation};
+pub use codon_usage::{ecoli_k12_rarity_factor, ecoli_k12_w};
 pub use element::Element;
 pub use forcefield::{standard as standard_ff, ForceField};
 pub use monomer::Monomer;

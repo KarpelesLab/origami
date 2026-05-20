@@ -215,6 +215,7 @@ dependencies = [
  "geom",
  "io",
  "rayon",
+ "thiserror",
 ]
 
 [[package]]

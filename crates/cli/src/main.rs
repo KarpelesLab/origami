@@ -7,7 +7,7 @@ use chem::{standard_ff, AminoAcid, Nucleotide};
 use clap::{Parser, Subcommand, ValueEnum};
 use dynamics::{
     minimize, run_cotranslate, run_langevin, Algorithm, CylindricalTunnel, LangevinOptions,
-    MinimizeOptions, UniformRibosome,
+    MinimizeOptions, Ribosome, UniformRibosome,
 };
 use geom::Vec3;
 use energy::{
@@ -116,8 +116,18 @@ enum Command {
     /// exit-tunnel constraint.
     Cotranslate {
         /// Amino-acid sequence (one-letter codes, e.g. "MAGW").
-        #[arg(long)]
-        seq: String,
+        /// Mutually exclusive with `--mrna`.  With `--seq`, every
+        /// residue is emitted at `--interval` fs after the previous
+        /// one (uniform pacing).
+        #[arg(long, conflicts_with = "mrna")]
+        seq: Option<String>,
+        /// mRNA sequence (DNA-style A/U/G/C letters, length a
+        /// multiple of 3). When set, residues are emitted codon-paced
+        /// using the E. coli K-12 codon-usage table: rare codons
+        /// take up to 5× `--interval`, common codons take 1×.
+        /// Translation stops on the first stop codon.
+        #[arg(long, conflicts_with = "seq")]
+        mrna: Option<String>,
         /// Output trajectory PDB (multi-MODEL).
         #[arg(long)]
         output_trajectory: PathBuf,
@@ -327,6 +337,7 @@ fn main() -> Result<()> {
         }
         Command::Cotranslate {
             seq,
+            mrna,
             output_trajectory,
             interval,
             tail,
@@ -340,7 +351,8 @@ fn main() -> Result<()> {
             tunnel_length,
             with_sasa,
         } => run_cotranslate_cmd(
-            &seq,
+            seq.as_deref(),
+            mrna.as_deref(),
             &output_trajectory,
             interval,
             tail,
@@ -715,7 +727,8 @@ fn run_dynamics(
 
 #[allow(clippy::too_many_arguments)]
 fn run_cotranslate_cmd(
-    seq_str: &str,
+    seq_str: Option<&str>,
+    mrna_str: Option<&str>,
     output_traj: &Path,
     interval_fs: f64,
     tail_fs: f64,
@@ -729,8 +742,34 @@ fn run_cotranslate_cmd(
     tunnel_length_a: f64,
     with_sasa: bool,
 ) -> Result<()> {
-    let sequence = parse_aa_seq(seq_str)?;
-    let ribosome = UniformRibosome::new(sequence.clone(), interval_fs);
+    // Either AA-letter sequence (uniform pacing) or mRNA (codon-paced).
+    // clap's `conflicts_with` already ensures both aren't set.
+    let (ribosome, sequence_for_log, mode_label): (
+        Box<dyn dynamics::Ribosome>,
+        Vec<AminoAcid>,
+        String,
+    ) = match (seq_str, mrna_str) {
+        (Some(s), None) => {
+            let seq = parse_aa_seq(s)?;
+            (
+                Box::new(UniformRibosome::new(seq.clone(), interval_fs)),
+                seq,
+                format!("uniform pacing, seq={s}"),
+            )
+        }
+        (None, Some(m)) => {
+            let r = dynamics::CodonPacedRibosome::from_mrna_ecoli(m, interval_fs)
+                .with_context(|| format!("parsing mRNA {m:?}"))?;
+            let seq = r.sequence().to_vec();
+            let label = format!(
+                "codon-paced (E. coli K-12), mRNA len {} → {} residues",
+                m.len(), seq.len()
+            );
+            (Box::new(r), seq, label)
+        }
+        _ => return Err(anyhow!("cotranslate needs exactly one of --seq or --mrna")),
+    };
+    let sequence = sequence_for_log;
     let ff = standard_ff();
 
     let opts = LangevinOptions {
@@ -760,8 +799,9 @@ fn run_cotranslate_cmd(
         tunnel.as_ref().map(|t| t as &dyn dynamics::ExternalPotential);
 
     eprintln!(
-        "origami cotranslate: {} residues, interval={} fs, dt={} fs, T={} K, γ={} ps⁻¹{}{}",
+        "origami cotranslate: {} residues, {}, base interval={} fs, dt={} fs, T={} K, γ={} ps⁻¹{}{}",
         sequence.len(),
+        mode_label,
         interval_fs,
         dt_fs,
         temperature_k,
@@ -780,7 +820,7 @@ fn run_cotranslate_cmd(
     let tail_steps = (tail_fs / dt_fs).round() as usize;
     let mut frames: Vec<geom::Structure> = Vec::new();
     let mut last_residue = 0usize;
-    let final_struct = run_cotranslate(&ribosome, ff, opts, tail_steps, external, |frame| {
+    let final_struct = run_cotranslate(ribosome.as_ref(), ff, opts, tail_steps, external, |frame| {
         if frame.residue_count != last_residue {
             eprintln!(
                 "  residue {:>2}/{:<2} appended at t={:>8.1} fs (chain has {} atoms)",
@@ -795,8 +835,8 @@ fn run_cotranslate_cmd(
     });
 
     let title = format!(
-        "Cotranslate seq={} interval={}fs dt={}fs T={}K{}",
-        seq_str,
+        "Cotranslate {} interval={}fs dt={}fs T={}K{}",
+        mode_label,
         interval_fs,
         dt_fs,
         temperature_k,

@@ -12,6 +12,7 @@ chem = { path = "../chem" }
 geom = { path = "../geom" }
 energy = { path = "../energy" }
 rayon.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 approx.workspace = true

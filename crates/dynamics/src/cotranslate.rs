@@ -84,6 +84,134 @@ impl Ribosome for UniformRibosome {
     }
 }
 
+/// Codon-paced ribosome: residue `i` is emitted at the cumulative
+/// sum of `base_interval_fs × rarity(codon_k)` for `k < i`.  The
+/// rarity factor is `1.0 / max(w_codon, 0.2)` using the supplied
+/// per-codon adaptation weights (defaults to E. coli K-12 highly-
+/// expressed genes, capped at 5× slowdown — matches the empirical
+/// ribosome-profiling ceiling).
+///
+/// Stop codons in the mRNA terminate the sequence — they are not
+/// emitted and any downstream codons are ignored, mirroring the
+/// real ribosome's release step.
+///
+/// Use [`CodonPacedRibosome::from_mrna_ecoli`] for the common case
+/// of feeding it an mRNA string and the E. coli usage table.  Use
+/// [`CodonPacedRibosome::from_codons_with_rarity`] to plug in a
+/// different organism's codon-usage table (provide your own closure
+/// that returns the per-codon multiplier).
+#[derive(Debug, Clone)]
+pub struct CodonPacedRibosome {
+    sequence: Vec<AminoAcid>,
+    cumulative_times_fs: Vec<f64>,
+}
+
+impl CodonPacedRibosome {
+    /// Convenience constructor: translate an mRNA byte sequence
+    /// (`AUGCCC…`) into codons + amino acids and apply the E. coli
+    /// K-12 rarity factors.  Stops at the first stop codon.  Returns
+    /// an error if the mRNA doesn't start with AUG, contains an
+    /// invalid base, or has length not a multiple of 3.
+    pub fn from_mrna_ecoli(
+        mrna: &str,
+        base_interval_fs: f64,
+    ) -> Result<Self, MrnaParseError> {
+        let codons = parse_mrna_codons(mrna)?;
+        let ribosome = Self::from_codons_with_rarity(
+            &codons,
+            base_interval_fs,
+            chem::ecoli_k12_rarity_factor,
+        );
+        if ribosome.sequence.is_empty() {
+            return Err(MrnaParseError::Empty);
+        }
+        Ok(ribosome)
+    }
+
+    /// General constructor: hand the per-codon rarity multiplier in
+    /// directly. Stops at the first stop codon.
+    pub fn from_codons_with_rarity<F>(
+        codons: &[chem::Codon],
+        base_interval_fs: f64,
+        rarity_fn: F,
+    ) -> Self
+    where
+        F: Fn(chem::Codon) -> f64,
+    {
+        let base = base_interval_fs.max(0.0);
+        let mut sequence: Vec<AminoAcid> = Vec::with_capacity(codons.len());
+        let mut cumulative_times_fs: Vec<f64> = Vec::with_capacity(codons.len());
+        let mut t_fs = 0.0;
+        for &codon in codons {
+            match codon.translate() {
+                chem::Translation::Stop => break,
+                chem::Translation::Amino(aa) => {
+                    cumulative_times_fs.push(t_fs);
+                    sequence.push(aa);
+                    t_fs += base * rarity_fn(codon);
+                }
+            }
+        }
+        Self {
+            sequence,
+            cumulative_times_fs,
+        }
+    }
+}
+
+impl Ribosome for CodonPacedRibosome {
+    fn sequence(&self) -> &[AminoAcid] {
+        &self.sequence
+    }
+    fn emission_time_fs(&self, residue_idx: usize) -> f64 {
+        // Past-the-end requests return the time of the last residue
+        // — matches `UniformRibosome` semantics (the driver clamps
+        // requests beyond the sequence boundary in practice).
+        self.cumulative_times_fs
+            .get(residue_idx)
+            .copied()
+            .unwrap_or_else(|| {
+                self.cumulative_times_fs.last().copied().unwrap_or(0.0)
+            })
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum MrnaParseError {
+    #[error("mRNA length {0} is not a multiple of 3")]
+    NotTripletAligned(usize),
+    #[error("invalid base {0:?} at offset {1}")]
+    InvalidBase(char, usize),
+    #[error("mRNA decodes to zero residues (empty input or stop codon first)")]
+    Empty,
+}
+
+fn parse_mrna_codons(mrna: &str) -> Result<Vec<chem::Codon>, MrnaParseError> {
+    let bytes: Vec<u8> = mrna
+        .bytes()
+        .filter(|b| !b.is_ascii_whitespace())
+        .collect();
+    if bytes.len() % 3 != 0 {
+        return Err(MrnaParseError::NotTripletAligned(bytes.len()));
+    }
+    let mut codons = Vec::with_capacity(bytes.len() / 3);
+    for (i, chunk) in bytes.chunks_exact(3).enumerate() {
+        let codon = chem::Codon::from_bytes(chunk).map_err(|_| {
+            let bad_offset = i * 3
+                + chunk
+                    .iter()
+                    .position(|b| chem::Base::from_byte(*b).is_none())
+                    .unwrap_or(0);
+            MrnaParseError::InvalidBase(bytes[bad_offset] as char, bad_offset)
+        })?;
+        codons.push(codon);
+    }
+    // Empty-after-stop is enforced higher up (in `from_mrna_ecoli`),
+    // so a bare "UAA" parses as one stop codon here and produces a
+    // zero-residue sequence above.
+    Ok(codons)
+}
+
 /// An external force field that adds to the per-atom force buffer each
 /// integrator step. Designed to be a swappable "what the chain feels
 /// from its environment" — today a parameterised exit-tunnel, eventually
@@ -398,6 +526,64 @@ mod tests {
         assert_eq!(r.emission_time_fs(0), 0.0);
         assert_eq!(r.emission_time_fs(1), 500.0);
         assert_eq!(r.emission_time_fs(2), 1000.0);
+    }
+
+    #[test]
+    fn codon_paced_common_codons_match_uniform() {
+        // mRNA made entirely of E. coli's most-frequent codons should
+        // emit at the base interval per residue, identical to the
+        // uniform ribosome.
+        //   AUG = Met, GCU = Ala (w=1.0), GAA = Glu (w=1.0)
+        let mrna = "AUGGCUGAA";
+        let base_fs = 1000.0;
+        let r = CodonPacedRibosome::from_mrna_ecoli(mrna, base_fs).unwrap();
+        assert_eq!(r.sequence().len(), 3);
+        assert_eq!(r.sequence()[0], AminoAcid::Met);
+        assert_eq!(r.sequence()[1], AminoAcid::Ala);
+        assert_eq!(r.sequence()[2], AminoAcid::Glu);
+        assert!((r.emission_time_fs(0) - 0.0).abs() < 1e-9);
+        assert!((r.emission_time_fs(1) - 1000.0).abs() < 1e-9);
+        assert!((r.emission_time_fs(2) - 2000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn codon_paced_rare_codon_delays_downstream_emissions() {
+        // Replacing the second codon with AGG (rare Arg, factor 5×)
+        // pushes every downstream residue's emission later by 4 × base.
+        //   AUG (Met) + AGG (Arg, 5×) + GCU (Ala, 1×)
+        let base_fs = 1000.0;
+        let r = CodonPacedRibosome::from_mrna_ecoli("AUGAGGGCU", base_fs).unwrap();
+        assert_eq!(r.sequence(), &[AminoAcid::Met, AminoAcid::Arg, AminoAcid::Ala]);
+        assert!((r.emission_time_fs(0) - 0.0).abs() < 1e-9);
+        // After Met (1× base): residue 1 emitted at 1000 fs.
+        assert!((r.emission_time_fs(1) - 1000.0).abs() < 1e-9);
+        // After AGG (5× base) on top: residue 2 emitted at 1000 + 5000.
+        assert!((r.emission_time_fs(2) - 6000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn codon_paced_stops_on_stop_codon() {
+        // UAA is the ochre stop codon; downstream codons should be
+        // truncated from both the sequence and the emission table.
+        let r = CodonPacedRibosome::from_mrna_ecoli("AUGGCUUAAGGG", 100.0).unwrap();
+        assert_eq!(r.sequence(), &[AminoAcid::Met, AminoAcid::Ala]);
+        assert_eq!(r.sequence().len(), 2);
+    }
+
+    #[test]
+    fn mrna_parser_rejects_bad_input() {
+        assert!(matches!(
+            CodonPacedRibosome::from_mrna_ecoli("AUGGC", 100.0),
+            Err(MrnaParseError::NotTripletAligned(5))
+        ));
+        assert!(matches!(
+            CodonPacedRibosome::from_mrna_ecoli("AUGZZZGCU", 100.0),
+            Err(MrnaParseError::InvalidBase(_, _))
+        ));
+        assert!(matches!(
+            CodonPacedRibosome::from_mrna_ecoli("UAA", 100.0),
+            Err(MrnaParseError::Empty)
+        ));
     }
 
     #[test]
