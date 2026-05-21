@@ -24,6 +24,7 @@ fn ala3_minimises_with_sasa_forces() {
         gradient_tol: 5.0,
         max_step_a: 0.1,
         include_sasa: true,
+        include_cmap: false,
         ..Default::default()
     };
     let result = minimize(&mut s, &g, ff, opts);

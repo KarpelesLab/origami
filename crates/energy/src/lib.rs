@@ -6,6 +6,7 @@
 //! CHARMM stores values in kcal/mol, we convert at the leaves.
 
 pub mod bonded;
+pub mod cmap;
 pub mod forces;
 pub mod forces_bonded;
 pub mod forces_gb;
@@ -21,6 +22,7 @@ pub mod units;
 pub use bonded::{
     angle_energy, bond_energy, dihedral_energy, improper_energy, BondedBreakdown,
 };
+pub use cmap::{add_cmap_forces, cmap_energy};
 pub use forces::{
     total_force, total_force_with_cutoff, total_force_with_options, total_force_with_scratch,
 };

@@ -21,6 +21,7 @@ fn ala3_holds_target_temperature_after_burn_in() {
         seed: 7,
         randomise_initial_velocities: true,
         include_sasa: false,
+        include_cmap: false,
         constrain_h_bonds: false,
     };
 

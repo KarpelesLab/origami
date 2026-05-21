@@ -32,6 +32,8 @@ pub struct LbfgsOptions {
     pub history: usize,
     /// Include SASA in energy + forces (PSA.2). Slow but smooth.
     pub include_sasa: bool,
+    /// Include the CHARMM CMAP backbone (φ, ψ) correction.
+    pub include_cmap: bool,
 }
 
 impl Default for LbfgsOptions {
@@ -44,6 +46,7 @@ impl Default for LbfgsOptions {
             max_step_a: 0.1,
             history: 10,
             include_sasa: false,
+            include_cmap: false,
         }
     }
 }
@@ -66,7 +69,7 @@ pub fn lbfgs(
 ) -> LbfgsResult {
     let n_dofs = structure.atom_count() * 3;
 
-    let initial_energy = total_energy_with_options(structure, graph, ff, options.include_sasa);
+    let initial_energy = total_energy_with_options(structure, graph, ff, options.include_sasa, options.include_cmap);
     let mut e_prev = initial_energy;
 
     let mut history_s: VecDeque<Vec<f64>> = VecDeque::with_capacity(options.history);
@@ -85,7 +88,7 @@ pub fn lbfgs(
 
     for step in 0..options.max_steps {
         steps = step;
-        force_buffer = total_force_opts(structure, graph, ff, options.include_sasa);
+        force_buffer = total_force_opts(structure, graph, ff, options.include_sasa, options.include_cmap);
         // gradient = -force.
         flatten_vec3(&force_buffer, &mut g_curr);
         for g in g_curr.iter_mut() {
@@ -109,11 +112,12 @@ pub fn lbfgs(
         let max_dir = linf_norm(&direction);
         let mut ls_options = options.line_search;
         ls_options.include_sasa = options.include_sasa;
+        ls_options.include_cmap = options.include_cmap;
         if max_dir > 0.0 {
             ls_options.alpha0 = ls_options.alpha0.min(options.max_step_a / max_dir);
         }
 
-        let e_now = total_energy_with_options(structure, graph, ff, options.include_sasa);
+        let e_now = total_energy_with_options(structure, graph, ff, options.include_sasa, options.include_cmap);
         let res = backtracking(
             structure,
             graph,
@@ -161,7 +165,7 @@ pub fn lbfgs(
 
         // Update history with (s = x_new - x_prev, y = g_new - g_prev) using
         // the next gradient.
-        let force_after = total_force_opts(structure, graph, ff, options.include_sasa);
+        let force_after = total_force_opts(structure, graph, ff, options.include_sasa, options.include_cmap);
         let mut g_after = vec![0.0_f64; n_dofs];
         flatten_vec3(&force_after, &mut g_after);
         for g in g_after.iter_mut() {
@@ -201,7 +205,7 @@ pub fn lbfgs(
 
     LbfgsResult {
         steps,
-        final_energy: total_energy_with_options(structure, graph, ff, options.include_sasa),
+        final_energy: total_energy_with_options(structure, graph, ff, options.include_sasa, options.include_cmap),
         initial_energy,
         max_force,
         converged,

@@ -138,6 +138,7 @@ fn rna_chain_langevin_runs_without_explosion() {
         seed: 1729,
         randomise_initial_velocities: true,
         include_sasa: false,
+        include_cmap: false,
         constrain_h_bonds: false,
     };
 

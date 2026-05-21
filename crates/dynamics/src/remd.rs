@@ -68,6 +68,8 @@ pub struct RemdOptions {
     pub seed: u64,
     /// Pass through SASA forces (hydrophobic collapse driver).
     pub include_sasa: bool,
+    /// Pass through CHARMM CMAP backbone (φ, ψ) corrections.
+    pub include_cmap: bool,
     /// SHAKE the X-H bonds (enables dt = 2 fs).
     pub constrain_h_bonds: bool,
 }
@@ -83,6 +85,7 @@ impl Default for RemdOptions {
             save_every: 100,
             seed: 0,
             include_sasa: false,
+            include_cmap: false,
             constrain_h_bonds: false,
         }
     }
@@ -212,6 +215,7 @@ where
             ff,
             DEFAULT_CUTOFF_A,
             opts.include_sasa,
+            opts.include_cmap,
             &mut scratch,
             &mut forces,
         );
@@ -370,6 +374,7 @@ where
                     ff,
                     DEFAULT_CUTOFF_A,
                     opts.include_sasa,
+                    opts.include_cmap,
                     &mut rep.scratch,
                     &mut rep.forces,
                 );

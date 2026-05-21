@@ -26,6 +26,7 @@ fn ala3_remd_4_replicas_swaps_correctly() {
         save_every: 0,
         seed: 17,
         include_sasa: false,
+        include_cmap: false,
         constrain_h_bonds: false,
     };
     let summary = run_remd(&s, &g, ff, opts, |_| {});

@@ -126,7 +126,7 @@ fn main() {
     // Combined.
     println!();
     timeit("total_force (no SASA) [AoS]", n_iter, || {
-        forces = energy::total_force_with_options(&s, &graph, ff, DEFAULT_CUTOFF_A, false);
+        forces = energy::total_force_with_options(&s, &graph, ff, DEFAULT_CUTOFF_A, false, false);
     });
     // SoA path used by the Langevin integrator — scratch allocated once,
     // reused across calls.
@@ -136,6 +136,7 @@ fn main() {
             &graph,
             ff,
             DEFAULT_CUTOFF_A,
+            false,
             false,
             &mut scratch,
             &mut forces,

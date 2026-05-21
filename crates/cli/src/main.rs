@@ -168,6 +168,9 @@ enum Command {
         /// `--with-sasa` flag on `origami dynamics`. Off by default.
         #[arg(long)]
         with_sasa: bool,
+        /// Include the CHARMM CMAP backbone (φ, ψ) correction.
+        #[arg(long)]
+        with_cmap: bool,
     },
     /// Run Langevin molecular dynamics at constant temperature, writing
     /// a multi-MODEL trajectory PDB.
@@ -203,6 +206,10 @@ enum Command {
         /// contribution PSA.2 currently provides.
         #[arg(long)]
         with_sasa: bool,
+        /// Include the CHARMM CMAP backbone (φ, ψ) correction.
+        /// Better helical secondary-structure accuracy.
+        #[arg(long)]
+        with_cmap: bool,
         /// Constrain every X-H bond length with SHAKE. Removes the
         /// hydrogen-stretch high-frequency mode that otherwise forces
         /// dt ≤ 1 fs; combine with `--dt 2.0` for a 2× longer
@@ -246,6 +253,9 @@ enum Command {
         /// Include SASA (hydrophobic) forces.
         #[arg(long)]
         with_sasa: bool,
+        /// Include the CHARMM CMAP backbone (φ, ψ) correction.
+        #[arg(long)]
+        with_cmap: bool,
         /// SHAKE the X-H bonds (enables dt = 2 fs).
         #[arg(long)]
         shake_h: bool,
@@ -273,6 +283,11 @@ enum Command {
         /// Slow; off by default.
         #[arg(long)]
         with_sasa: bool,
+        /// Include the CHARMM CMAP backbone (φ, ψ) correction in the
+        /// gradient.  Improves backbone secondary-structure accuracy
+        /// (especially helices).
+        #[arg(long)]
+        with_cmap: bool,
     },
     /// Per-frame trajectory analysis: Cα RMSD vs reference, radius of
     /// gyration, end-to-end distance; optional residue-residue contact
@@ -329,8 +344,8 @@ fn main() -> Result<()> {
             run_build(seq.as_deref(), from_fasta.as_deref(), rna, output.as_deref())
         }
         Command::Energy { input, skip_sasa } => run_energy(&input, skip_sasa),
-        Command::Minimize { input, output, algorithm, max_steps, tol, max_step, with_sasa } => {
-            run_minimize(&input, &output, algorithm, max_steps, tol, max_step, with_sasa)
+        Command::Minimize { input, output, algorithm, max_steps, tol, max_step, with_sasa, with_cmap } => {
+            run_minimize(&input, &output, algorithm, max_steps, tol, max_step, with_sasa, with_cmap)
         }
         Command::Render { input, output, output_dir, width, height, show_hydrogens, frame_dt_fs } => {
             run_render(&input, output.as_deref(), output_dir.as_deref(), width, height, show_hydrogens, frame_dt_fs)
@@ -350,6 +365,7 @@ fn main() -> Result<()> {
             tunnel_radius,
             tunnel_length,
             with_sasa,
+            with_cmap,
         } => run_cotranslate_cmd(
             seq.as_deref(),
             mrna.as_deref(),
@@ -365,6 +381,7 @@ fn main() -> Result<()> {
             tunnel_radius,
             tunnel_length,
             with_sasa,
+            with_cmap,
         ),
         Command::Dynamics {
             input,
@@ -377,6 +394,7 @@ fn main() -> Result<()> {
             seed,
             zero_initial_velocity,
             with_sasa,
+            with_cmap,
             shake_h,
         } => run_dynamics(
             &input,
@@ -389,6 +407,7 @@ fn main() -> Result<()> {
             seed,
             !zero_initial_velocity,
             with_sasa,
+            with_cmap,
             shake_h,
         ),
         Command::Remd {
@@ -402,6 +421,7 @@ fn main() -> Result<()> {
             friction,
             seed,
             with_sasa,
+            with_cmap,
             shake_h,
         } => run_remd_cmd(
             &input,
@@ -414,6 +434,7 @@ fn main() -> Result<()> {
             friction,
             seed,
             with_sasa,
+            with_cmap,
             shake_h,
         ),
         Command::Analyze {
@@ -532,6 +553,7 @@ fn run_remd_cmd(
     friction_ps_inv: f64,
     seed: u64,
     with_sasa: bool,
+    with_cmap: bool,
     shake_h: bool,
 ) -> Result<()> {
     if temperatures.len() < 2 {
@@ -556,6 +578,7 @@ fn run_remd_cmd(
         save_every,
         seed,
         include_sasa: with_sasa,
+        include_cmap: with_cmap,
         constrain_h_bonds: shake_h,
     };
 
@@ -658,6 +681,7 @@ fn run_dynamics(
     seed: u64,
     randomise_initial_velocities: bool,
     include_sasa: bool,
+    include_cmap: bool,
     shake_h: bool,
 ) -> Result<()> {
     let file = fs::File::open(input)
@@ -676,6 +700,7 @@ fn run_dynamics(
         seed,
         randomise_initial_velocities,
         include_sasa,
+        include_cmap,
         constrain_h_bonds: shake_h,
     };
 
@@ -741,6 +766,7 @@ fn run_cotranslate_cmd(
     tunnel_radius_a: f64,
     tunnel_length_a: f64,
     with_sasa: bool,
+    with_cmap: bool,
 ) -> Result<()> {
     // Either AA-letter sequence (uniform pacing) or mRNA (codon-paced).
     // clap's `conflicts_with` already ensures both aren't set.
@@ -781,6 +807,7 @@ fn run_cotranslate_cmd(
         seed,
         randomise_initial_velocities: true,
         include_sasa: with_sasa,
+        include_cmap: with_cmap,
         constrain_h_bonds: false,
     };
 
@@ -864,6 +891,7 @@ fn run_minimize(
     tol: f64,
     max_step_a: f64,
     include_sasa: bool,
+    include_cmap: bool,
 ) -> Result<()> {
     let file = fs::File::open(input)
         .with_context(|| format!("opening {}", input.display()))?;
@@ -880,6 +908,7 @@ fn run_minimize(
         gradient_tol: tol,
         max_step_a,
         include_sasa,
+        include_cmap,
         ..Default::default()
     };
     let result = minimize(&mut structure, &graph, ff, opts);

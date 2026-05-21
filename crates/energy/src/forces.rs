@@ -29,19 +29,23 @@ pub fn total_force_with_cutoff(
     ff: &ForceField,
     cutoff_a: f64,
 ) -> Vec<Vec3> {
-    total_force_with_options(structure, graph, ff, cutoff_a, false)
+    total_force_with_options(structure, graph, ff, cutoff_a, false, false)
 }
 
-/// Compute the total atomic force vector with optional SASA contribution.
-/// PSA.2 — when `include_sasa` is true, `add_sasa_forces` is called and
-/// the result includes the hydrophobic gradient. SASA forces are slow
-/// (numerical central differencing), so this is opt-in.
+/// Compute the total atomic force vector with optional SASA and CMAP
+/// contributions.  When `include_sasa` is true `add_sasa_forces` is
+/// called for the hydrophobic gradient; when `include_cmap` is true
+/// `add_cmap_forces` is called for the CHARMM backbone (φ, ψ)
+/// correction.  Both off by default to preserve historical numerical
+/// baselines (the Trp-cage and Ala₃ acceptance tests lock in those
+/// values).
 pub fn total_force_with_options(
     structure: &Structure,
     graph: &TopologyGraph,
     ff: &ForceField,
     cutoff_a: f64,
     include_sasa: bool,
+    include_cmap: bool,
 ) -> Vec<Vec3> {
     let n = structure.atom_count();
     let mut forces = vec![Vec3::zeros(); n];
@@ -59,6 +63,9 @@ pub fn total_force_with_options(
     add_gb_forces(structure, ff, &mut forces);
     if include_sasa {
         add_sasa_forces(structure, ff, &mut forces);
+    }
+    if include_cmap {
+        crate::cmap::add_cmap_forces(structure, graph, ff, &mut forces);
     }
     forces
 }
@@ -81,6 +88,7 @@ pub fn total_force_with_scratch(
     ff: &ForceField,
     cutoff_a: f64,
     include_sasa: bool,
+    include_cmap: bool,
     scratch: &mut crate::scratch::ForceScratch,
     forces: &mut Vec<Vec3>,
 ) {
@@ -124,6 +132,9 @@ pub fn total_force_with_scratch(
         crate::powersasa::analytical::add_sasa_forces_analytical_with_scratch(
             structure, ff, scratch, forces,
         );
+    }
+    if include_cmap {
+        crate::cmap::add_cmap_forces(structure, graph, ff, forces);
     }
 }
 
@@ -244,11 +255,11 @@ mod tests {
         ]).unwrap();
         let g = build_topology_graph(&s);
         let ff = standard_ff();
-        let aos = total_force_with_options(&s, &g, ff, DEFAULT_CUTOFF_A, false);
+        let aos = total_force_with_options(&s, &g, ff, DEFAULT_CUTOFF_A, false, false);
 
         let mut scratch = crate::scratch::ForceScratch::new(&s, &g, ff);
         let mut soa = Vec::new();
-        super::total_force_with_scratch(&s, &g, ff, DEFAULT_CUTOFF_A, false, &mut scratch, &mut soa);
+        super::total_force_with_scratch(&s, &g, ff, DEFAULT_CUTOFF_A, false, false, &mut scratch, &mut soa);
 
         assert_eq!(aos.len(), soa.len());
         for (i, (a, b)) in aos.iter().zip(soa.iter()).enumerate() {

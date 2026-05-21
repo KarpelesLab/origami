@@ -85,6 +85,7 @@ fn crambin_stays_native_like_during_short_md() {
         seed: 0,
         randomise_initial_velocities: true,
         include_sasa: false,
+        include_cmap: false,
         constrain_h_bonds: false,
     };
     let summary = run_langevin(&mut s, &g, ff, opts, |_| {});

@@ -15,7 +15,7 @@ pub use atom_type::{classify, classify_atom, classify_rna, AtomType};
 pub use codon::{Base, Codon, ParseCodonError, Translation};
 pub use codon_usage::{ecoli_k12_rarity_factor, ecoli_k12_w};
 pub use element::Element;
-pub use forcefield::{standard as standard_ff, ForceField};
+pub use forcefield::{standard as standard_ff, CmapGrid, ForceField};
 pub use monomer::Monomer;
 pub use nucleotide::{Nucleotide, NucleotideTopology};
 pub use properties::AminoAcidProperties;

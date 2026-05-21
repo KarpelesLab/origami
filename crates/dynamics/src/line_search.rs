@@ -24,6 +24,9 @@ pub struct LineSearchOptions {
     /// on whether SASA is in or out, so this propagates from
     /// `MinimizeOptions::include_sasa`.
     pub include_sasa: bool,
+    /// Include the CHARMM CMAP backbone (φ, ψ) correction — same
+    /// agreement-with-gradient requirement applies.
+    pub include_cmap: bool,
 }
 
 impl Default for LineSearchOptions {
@@ -34,6 +37,7 @@ impl Default for LineSearchOptions {
             c1: 1e-4,
             min_alpha: 1e-12,
             include_sasa: false,
+            include_cmap: false,
         }
     }
 }
@@ -75,7 +79,7 @@ pub fn backtracking(
             *s = alpha * p;
         }
         apply_displacement(structure, &step);
-        let e_new = total_energy_with_options(structure, graph, ff, options.include_sasa);
+        let e_new = total_energy_with_options(structure, graph, ff, options.include_sasa, options.include_cmap);
         // Undo the step so the caller sees the structure unchanged.
         for s in step.iter_mut() {
             *s = -*s;

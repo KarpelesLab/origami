@@ -122,7 +122,7 @@ pub fn add_angle_forces(
 ///
 /// Standard formulation (Bekker 1996; Smith 1993). Independent of whether
 /// the surrounding term is a periodic dihedral or a harmonic improper.
-fn dihedral_gradient(
+pub(crate) fn dihedral_gradient(
     pa: Vec3,
     pb: Vec3,
     pc: Vec3,

@@ -22,6 +22,11 @@ pub struct MinimizeOptions {
     /// Include SASA (hydrophobic) term in energy + forces (PSA.2). Off
     /// by default to preserve historical numerical baselines.
     pub include_sasa: bool,
+    /// Include the CHARMM CMAP backbone (φ, ψ) correction. Off by
+    /// default to preserve the historical Trp-cage / Ala₃ energy
+    /// baselines; turn on for better backbone-secondary-structure
+    /// accuracy (especially helices).
+    pub include_cmap: bool,
 }
 
 impl Default for MinimizeOptions {
@@ -33,6 +38,7 @@ impl Default for MinimizeOptions {
             energy_tol: 0.01,
             max_step_a: 0.1,
             include_sasa: false,
+            include_cmap: false,
         }
     }
 }
@@ -87,6 +93,7 @@ pub fn minimize(
                 energy_tol: opts.energy_tol,
                 max_step_a: opts.max_step_a,
                 include_sasa: opts.include_sasa,
+                include_cmap: opts.include_cmap,
                 ..Default::default()
             };
             steepest_descent(structure, graph, ff, sd_opts).into()
@@ -98,6 +105,7 @@ pub fn minimize(
                 energy_tol: opts.energy_tol,
                 max_step_a: opts.max_step_a,
                 include_sasa: opts.include_sasa,
+                include_cmap: opts.include_cmap,
                 ..Default::default()
             };
             lbfgs(structure, graph, ff, lbfgs_opts).into()

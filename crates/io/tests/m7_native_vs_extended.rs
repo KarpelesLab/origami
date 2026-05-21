@@ -109,6 +109,7 @@ fn villin_hp35_native_beats_extended() {
             energy_tol: 1.0,
             max_step_a: 0.1,
             include_sasa: false,
+            include_cmap: false,
         },
     );
 

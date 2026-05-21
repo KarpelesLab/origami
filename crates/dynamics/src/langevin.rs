@@ -70,6 +70,10 @@ pub struct LangevinOptions {
     /// Include SASA forces (PSA.2). Slow; off by default since the
     /// numerical SASA gradient costs ~100 ms per call on Trp-cage.
     pub include_sasa: bool,
+    /// Include the CHARMM CMAP backbone (φ, ψ) correction in the
+    /// force. Off by default to preserve historical baselines; turn
+    /// on for better helical secondary-structure stability.
+    pub include_cmap: bool,
     /// Apply SHAKE iterative bond-length constraints to every X-H
     /// bond after each position half-step. Freezes the high-frequency
     /// hydrogen stretches so the integrator can step at dt = 2 fs
@@ -89,6 +93,7 @@ impl Default for LangevinOptions {
             seed: 0,
             randomise_initial_velocities: true,
             include_sasa: false,
+            include_cmap: false,
             constrain_h_bonds: false,
         }
     }
@@ -160,6 +165,7 @@ where
         ff,
         DEFAULT_CUTOFF_A,
         opts.include_sasa,
+        opts.include_cmap,
         &mut scratch,
         &mut forces,
     );
@@ -302,6 +308,7 @@ where
             ff,
             DEFAULT_CUTOFF_A,
             opts.include_sasa,
+            opts.include_cmap,
             &mut scratch,
             &mut forces,
         );

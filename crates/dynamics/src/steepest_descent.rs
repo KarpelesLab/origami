@@ -26,6 +26,8 @@ pub struct SdOptions {
     /// gradient evaluations and line-search energy comparisons include
     /// the hydrophobic term. Slow (~100 ms/grad on Trp-cage).
     pub include_sasa: bool,
+    /// Include the CHARMM CMAP backbone (φ, ψ) correction.
+    pub include_cmap: bool,
 }
 
 impl Default for SdOptions {
@@ -37,6 +39,7 @@ impl Default for SdOptions {
             line_search: LineSearchOptions::default(),
             max_step_a: 0.1,
             include_sasa: false,
+            include_cmap: false,
         }
     }
 }
@@ -59,7 +62,7 @@ pub fn steepest_descent(
 ) -> SdResult {
     let n_atoms = structure.atom_count();
     let n_dofs = n_atoms * 3;
-    let initial_energy = total_energy_with_options(structure, graph, ff, options.include_sasa);
+    let initial_energy = total_energy_with_options(structure, graph, ff, options.include_sasa, options.include_cmap);
     let mut e_prev = initial_energy;
     let mut gradient_flat = vec![0.0_f64; n_dofs];
     let mut direction_flat = vec![0.0_f64; n_dofs];
@@ -70,7 +73,7 @@ pub fn steepest_descent(
 
     for step in 0..options.max_steps {
         steps = step;
-        let forces = total_force_opts(structure, graph, ff, options.include_sasa);
+        let forces = total_force_opts(structure, graph, ff, options.include_sasa, options.include_cmap);
         // gradient = -force; descent direction = -gradient = +force.
         flatten_vec3(&forces, &mut direction_flat);
         // gradient_flat is the negative of direction_flat for line search:
@@ -87,11 +90,12 @@ pub fn steepest_descent(
         let max_dir = linf_norm(&direction_flat);
         let mut ls_options = options.line_search;
         ls_options.include_sasa = options.include_sasa;
+        ls_options.include_cmap = options.include_cmap;
         if max_dir > 0.0 {
             ls_options.alpha0 = ls_options.alpha0.min(options.max_step_a / max_dir);
         }
 
-        let e_now = total_energy_with_options(structure, graph, ff, options.include_sasa);
+        let e_now = total_energy_with_options(structure, graph, ff, options.include_sasa, options.include_cmap);
         let res = backtracking(
             structure,
             graph,
@@ -119,7 +123,7 @@ pub fn steepest_descent(
     }
     SdResult {
         steps,
-        final_energy: total_energy_with_options(structure, graph, ff, options.include_sasa),
+        final_energy: total_energy_with_options(structure, graph, ff, options.include_sasa, options.include_cmap),
         initial_energy,
         max_force,
         converged,

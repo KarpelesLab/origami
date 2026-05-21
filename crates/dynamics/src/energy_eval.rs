@@ -4,24 +4,28 @@
 
 use chem::ForceField;
 use energy::bonded::bonded_energy;
+use energy::cmap::cmap_energy;
 use energy::gb::gb_energy;
 use energy::nonbonded::nonbonded_energy;
 use energy::powersasa::powersasa_energy;
 use energy::{total_force_with_options, DEFAULT_CUTOFF_A};
 use geom::{Structure, TopologyGraph, Vec3};
 
-/// Total potential energy used in M4 minimisation (no SASA). For
-/// compatibility with existing tests that lock in numerical results.
+/// Total potential energy used in M4 minimisation (no SASA, no CMAP).
+/// For compatibility with existing tests that lock in numerical results.
 pub fn total_energy(structure: &Structure, graph: &TopologyGraph, ff: &ForceField) -> f64 {
-    total_energy_with_options(structure, graph, ff, false)
+    total_energy_with_options(structure, graph, ff, false, false)
 }
 
-/// Total potential energy with optional SASA term (PSA.2).
+/// Total potential energy with optional SASA (PSA.2) and CHARMM CMAP
+/// backbone (φ, ψ) correction.  Both off by default to preserve the
+/// historical Trp-cage / Ala₃ acceptance baselines.
 pub fn total_energy_with_options(
     structure: &Structure,
     graph: &TopologyGraph,
     ff: &ForceField,
     include_sasa: bool,
+    include_cmap: bool,
 ) -> f64 {
     let bonded = bonded_energy(structure, graph, ff);
     let nb = nonbonded_energy(structure, graph, ff, DEFAULT_CUTOFF_A);
@@ -30,23 +34,26 @@ pub fn total_energy_with_options(
     if include_sasa {
         total += powersasa_energy(structure, ff).sasa_kj_mol;
     }
+    if include_cmap {
+        total += cmap_energy(structure, graph, ff);
+    }
     total
 }
 
-/// Total atomic forces used in M4 minimisation (no SASA, preserves
-/// historical numerical baselines).
+/// Total atomic forces used in M4 minimisation (no SASA, no CMAP).
 pub fn total_force(structure: &Structure, graph: &TopologyGraph, ff: &ForceField) -> Vec<Vec3> {
-    total_force_with_options(structure, graph, ff, DEFAULT_CUTOFF_A, false)
+    total_force_with_options(structure, graph, ff, DEFAULT_CUTOFF_A, false, false)
 }
 
-/// Total atomic forces with optional SASA term (PSA.2).
+/// Total atomic forces with optional SASA (PSA.2) and CMAP terms.
 pub fn total_force_opts(
     structure: &Structure,
     graph: &TopologyGraph,
     ff: &ForceField,
     include_sasa: bool,
+    include_cmap: bool,
 ) -> Vec<Vec3> {
-    total_force_with_options(structure, graph, ff, DEFAULT_CUTOFF_A, include_sasa)
+    total_force_with_options(structure, graph, ff, DEFAULT_CUTOFF_A, include_sasa, include_cmap)
 }
 
 /// Apply a flat displacement vector (3N entries) to a structure.

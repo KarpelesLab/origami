@@ -52,6 +52,29 @@ pub struct ImproperParams {
     pub psi0_deg: f64,
 }
 
+/// CHARMM CMAP — a 24×24 grid of backbone (φ, ψ) energy corrections.
+/// Grid spacing is 15° and the angles range from -180° to +165° with
+/// wraparound (so index 24 wraps to index 0).  Stored in **kcal/mol**;
+/// the energy code converts to kJ/mol at the leaves.
+///
+/// `data` is laid out as `data[phi_idx * GRID_SIZE + psi_idx]`.
+#[derive(Debug, Clone)]
+pub struct CmapGrid {
+    pub data: Vec<f64>,
+}
+
+impl CmapGrid {
+    pub const GRID_SIZE: usize = 24;
+    pub const GRID_SPACING_DEG: f64 = 15.0;
+
+    /// Energy value at integer grid indices (with wraparound).
+    pub fn at(&self, phi_idx: usize, psi_idx: usize) -> f64 {
+        let i = phi_idx % Self::GRID_SIZE;
+        let j = psi_idx % Self::GRID_SIZE;
+        self.data[i * Self::GRID_SIZE + j]
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct NonbondedParams {
     pub epsilon: f64,   // kcal/mol (positive — CHARMM stores -eps; we negate)
@@ -77,6 +100,13 @@ pub struct ForceField {
     /// `central X X specific_off`. We store as (central, specific) → params.
     wildcard_impropers: HashMap<(AtomType, AtomType), ImproperParams>,
     nonbonded: HashMap<AtomType, NonbondedParams>,
+    /// CHARMM CMAP backbone 2D corrections.  Keyed on
+    /// (CA atom type of residue i, N atom type of residue i+1) —
+    /// the two atom types that vary across the 6 CMAP grids in
+    /// par_all36m_prot.prm. CT1/CT2/CP1 distinguishes the central
+    /// CA (non-Gly/non-Pro vs Gly vs Pro); NH1/N distinguishes the
+    /// next residue (non-Pro vs Pro).
+    cmap: HashMap<(AtomType, AtomType), CmapGrid>,
     /// Per-(residue, atom-name) partial charge from the .rtf topology file.
     /// Atom names are stored in PDB v3.3 form (matching what our chain
     /// builder produces).
@@ -179,6 +209,13 @@ impl ForceField {
             Monomer::Rna(nt) => self.partial_charge_rna(nt, atom_name),
         }
     }
+
+    /// Lookup the CMAP grid for a residue whose central CA has atom
+    /// type `ca` and whose next residue's N has atom type `next_n`.
+    /// CHARMM36m has 6 grids covering (CT1/CT2/CP1) × (NH1/N).
+    pub fn cmap(&self, ca: AtomType, next_n: AtomType) -> Option<&CmapGrid> {
+        self.cmap.get(&(ca, next_n))
+    }
 }
 
 fn canonical_pair(a: AtomType, b: AtomType) -> (AtomType, AtomType) {
@@ -267,6 +304,10 @@ pub fn parse(text: &str) -> ForceField {
 /// adds RNA-specific entries that don't collide.
 pub fn parse_into(text: &str, ff: &mut ForceField) {
     let mut section = Section::None;
+    // CMAP block state: accumulates one grid's float values across
+    // many lines, then commits when 576 = 24×24 values are in hand.
+    let mut cmap_pending_key: Option<(AtomType, AtomType)> = None;
+    let mut cmap_buffer: Vec<f64> = Vec::with_capacity(CmapGrid::GRID_SIZE * CmapGrid::GRID_SIZE);
 
     for raw in text.lines() {
         // Drop comments.
@@ -281,6 +322,10 @@ pub fn parse_into(text: &str, ff: &mut ForceField) {
 
         // Section headers.
         if let Some(s) = match_section_header(trimmed) {
+            // Finish any pending CMAP grid when we leave the section.
+            if section == Section::Cmap && cmap_pending_key.is_some() {
+                commit_cmap_if_full(&mut cmap_pending_key, &mut cmap_buffer, ff);
+            }
             section = s;
             continue;
         }
@@ -297,10 +342,15 @@ pub fn parse_into(text: &str, ff: &mut ForceField) {
             Section::Dihedrals => parse_dihedral_line(trimmed, ff),
             Section::Impropers => parse_improper_line(trimmed, ff),
             Section::Nonbonded => parse_nonbonded_line(trimmed, ff),
+            Section::Cmap => parse_cmap_line(trimmed, &mut cmap_pending_key, &mut cmap_buffer, ff),
             // Sections we ignore.
-            Section::Cmap | Section::Hbond | Section::Nbfix | Section::None => {}
+            Section::Hbond | Section::Nbfix | Section::None => {}
             Section::End => break,
         }
+    }
+    // EOF-flush any pending CMAP grid.
+    if cmap_pending_key.is_some() {
+        commit_cmap_if_full(&mut cmap_pending_key, &mut cmap_buffer, ff);
     }
 }
 
@@ -468,6 +518,85 @@ fn parse_improper_line(line: &str, ff: &mut ForceField) {
             ff.impropers.entry(key).or_insert(params);
         }
         _ => {}
+    }
+}
+
+/// Parse one line of the CMAP block.
+///
+/// A CMAP block starts with an 8-atom-name header followed by the
+/// grid size (24).  Subsequent lines hold 24×24 = 576 float values
+/// spread across many lines; once accumulated, the grid is keyed
+/// on (CA atom type, next-N atom type) — the two atom types that
+/// distinguish CHARMM36m's six CMAPs.  The other 6 atoms in the
+/// header are always `C` plus the same N/CA pair twice (because the
+/// 8-tuple is `φ atoms ++ ψ atoms` for the central residue), so they
+/// carry no information beyond the key we extract.
+fn parse_cmap_line(
+    line: &str,
+    pending_key: &mut Option<(AtomType, AtomType)>,
+    buffer: &mut Vec<f64>,
+    ff: &mut ForceField,
+) {
+    let tokens: Vec<&str> = line.split_ascii_whitespace().collect();
+    if tokens.is_empty() {
+        return;
+    }
+    // CMAP grid-header lines have 9 tokens (8 atom names + grid size).
+    // Heuristic: if the LAST token parses as an integer and the FIRST
+    // token parses as a known atom-type name, treat the line as a
+    // header; otherwise it's a row of grid floats.
+    let last_int = tokens.last().and_then(|s| s.parse::<usize>().ok());
+    let first_atom = AtomType::from_charmm_name(tokens[0]);
+    if let (Some(grid_size), Some(_)) = (last_int, first_atom) {
+        if tokens.len() == 9 {
+            // Flush any previous in-flight grid before starting a new one.
+            commit_cmap_if_full(pending_key, buffer, ff);
+            // Extract the (CA, next-N) key from tokens[2] (column 3,
+            // 0-indexed) and tokens[7] (column 8). These are the two
+            // tokens that vary across CHARMM36m's six grids.
+            let ca = match AtomType::from_charmm_name(tokens[2]) {
+                Some(t) => t,
+                None => return, // Unknown atom type — skip block.
+            };
+            let next_n = match AtomType::from_charmm_name(tokens[7]) {
+                Some(t) => t,
+                None => return,
+            };
+            // Sanity: bail if grid size differs from our compile-time
+            // assumption (CHARMM has always used 24).
+            if grid_size != CmapGrid::GRID_SIZE {
+                return;
+            }
+            *pending_key = Some((ca, next_n));
+            buffer.clear();
+            return;
+        }
+    }
+    // Otherwise: row of grid floats.
+    if pending_key.is_some() {
+        for tok in tokens {
+            if let Ok(v) = tok.parse::<f64>() {
+                buffer.push(v);
+            }
+        }
+        // Commit once we have a full grid.
+        commit_cmap_if_full(pending_key, buffer, ff);
+    }
+}
+
+/// Finalise a CMAP grid into `ff` if `buffer` holds the full 576 values.
+fn commit_cmap_if_full(
+    pending_key: &mut Option<(AtomType, AtomType)>,
+    buffer: &mut Vec<f64>,
+    ff: &mut ForceField,
+) {
+    let n = CmapGrid::GRID_SIZE * CmapGrid::GRID_SIZE;
+    if buffer.len() == n {
+        if let Some(key) = pending_key.take() {
+            ff.cmap.entry(key).or_insert(CmapGrid {
+                data: std::mem::take(buffer),
+            });
+        }
     }
 }
 
@@ -966,6 +1095,40 @@ mod tests {
                 "{nt:?} summed charge {sum:.3} != -1.00"
             );
         }
+    }
+
+    #[test]
+    fn cmap_grids_loaded() {
+        let ff = standard();
+        // All six CHARMM36m CMAPs present.
+        let ca_classes = [AtomType::CT1, AtomType::CT2, AtomType::CP1];
+        let next_ns = [AtomType::NH1, AtomType::N];
+        let mut total = 0;
+        for &ca in &ca_classes {
+            for &n in &next_ns {
+                let g = ff.cmap(ca, n);
+                assert!(g.is_some(), "missing CMAP for (CA={:?}, N_next={:?})", ca, n);
+                assert_eq!(g.unwrap().data.len(), 24 * 24);
+                total += 1;
+            }
+        }
+        assert_eq!(total, 6);
+    }
+
+    #[test]
+    fn cmap_alanine_grid_known_value() {
+        // The alanine map (CT1 / NH1 next) — first value at φ=-180,
+        // ψ=-180 — should match the .prm file's leading "0.13" value
+        // (the file header was: "C NH1 CT1 C NH1 CT1 C NH1   24",
+        // then the !-180 sub-block starts with "0.13 0.77 0.97 …").
+        let ff = standard();
+        let g = ff.cmap(AtomType::CT1, AtomType::NH1).unwrap();
+        assert!((g.at(0, 0) - 0.13).abs() < 1e-6);
+        assert!((g.at(0, 1) - 0.77).abs() < 1e-6);
+        // φ=-180, ψ=-180 corresponds to indices (0, 0); φ=-165 to (1, 0).
+        // The .prm shows row "-165" starts with "-0.13 1.38 ...".
+        assert!((g.at(1, 0) - (-0.13)).abs() < 1e-6);
+        assert!((g.at(1, 1) - 1.38).abs() < 1e-6);
     }
 
     #[test]

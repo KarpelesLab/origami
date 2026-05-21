@@ -355,6 +355,7 @@ where
                 energy_tol: 0.1,
                 max_step_a: 0.1,
                 include_sasa: false,
+                include_cmap: false,
             },
         );
         // Seed velocities for new atoms now that positions are stable.
@@ -452,6 +453,7 @@ fn run_slice<F>(
         ff,
         DEFAULT_CUTOFF_A,
         opts.include_sasa,
+        opts.include_cmap,
         &mut scratch,
         &mut forces,
     );
@@ -483,6 +485,7 @@ fn run_slice<F>(
             ff,
             DEFAULT_CUTOFF_A,
             opts.include_sasa,
+            opts.include_cmap,
             &mut scratch,
             &mut forces,
         );
@@ -650,6 +653,7 @@ mod tests {
             seed: 1,
             randomise_initial_velocities: true,
             include_sasa: false,
+            include_cmap: false,
             constrain_h_bonds: false,
         };
         let ff = standard_ff();
