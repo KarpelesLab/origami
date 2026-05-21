@@ -1116,6 +1116,38 @@ mod tests {
     }
 
     #[test]
+    fn cmap_is_a_correction_not_a_full_potential() {
+        // CMAP is added on top of the existing periodic dihedral
+        // potential.  The α-helix and β-sheet basins in the *combined*
+        // potential live where the periodic terms already put them;
+        // CMAP's job is to nudge the relative depths and barrier
+        // shapes to match QM data.  Concretely, the alanine map's
+        // value in the α-helix basin (φ ≈ -60°, ψ ≈ -45°) is small
+        // and slightly negative — verifies the grid isn't loaded
+        // upside-down or transposed.
+        let ff = standard();
+        let grid = ff.cmap(AtomType::CT1, AtomType::NH1).unwrap();
+        let alpha_phi_idx = ((-60.0 + 180.0) / 15.0) as usize;
+        let alpha_psi_idx = ((-45.0 + 180.0) / 15.0) as usize;
+        let alpha_val = grid.at(alpha_phi_idx, alpha_psi_idx);
+        // Per the loaded .prm: row "-60" has -0.48 at ψ=-45.
+        assert!(
+            (alpha_val - (-0.48)).abs() < 0.01,
+            "α-helix CMAP value {alpha_val} (expected ≈ -0.48)"
+        );
+        // β-sheet region (φ ≈ -120°, ψ ≈ +120°): row "-120" idx 20.
+        let beta_phi_idx = ((-120.0 + 180.0) / 15.0) as usize;
+        let beta_psi_idx = ((120.0 + 180.0) / 15.0) as usize;
+        let beta_val = grid.at(beta_phi_idx, beta_psi_idx);
+        // Row "-120" position 20 (ψ=120°): value is "-0.97" per the
+        // .prm grid.
+        assert!(
+            (beta_val - (-0.97)).abs() < 0.01,
+            "β-sheet CMAP value {beta_val} (expected ≈ -0.97)"
+        );
+    }
+
+    #[test]
     fn cmap_alanine_grid_known_value() {
         // The alanine map (CT1 / NH1 next) — first value at φ=-180,
         // ψ=-180 — should match the .prm file's leading "0.13" value
