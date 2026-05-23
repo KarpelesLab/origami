@@ -27,5 +27,7 @@
 
 pub mod context;
 pub mod lj;
+pub mod nonbonded;
 
 pub use context::GpuContext;
+pub use nonbonded::{nonbonded_force_gpu, NonbondedPipeline, NonbondedSetup};
