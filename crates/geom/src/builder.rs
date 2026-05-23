@@ -235,19 +235,21 @@ mod rna_ic {
     const fn deg(d: f64) -> f64 {
         d * PI / 180.0
     }
-    // Bond lengths.
-    pub const P_O5: f64 = 1.593;
-    pub const P_OP: f64 = 1.485;
-    pub const O5_C5: f64 = 1.440;
-    pub const C5_C4: f64 = 1.510;
-    pub const C4_O4: f64 = 1.451;
-    pub const C4_C3: f64 = 1.524;
-    pub const C3_O3: f64 = 1.423;
-    pub const C3_C2: f64 = 1.525;
-    pub const C2_O2: f64 = 1.413;
-    pub const C2_C1: f64 = 1.528;
-    pub const C1_N: f64 = 1.464;
-    pub const O3_P: f64 = 1.593; // inter-residue
+    // Bond lengths (matched to CHARMM27 par_all27_na.prm r₀ values so
+    // the NeRF starting structure sits at the FF equilibrium).  CHARMM
+    // atom-type pair in comment.
+    pub const P_O5: f64 = 1.600; // ON2-P
+    pub const P_OP: f64 = 1.480; // ON3-P
+    pub const O5_C5: f64 = 1.440; // CN8B-ON2
+    pub const C5_C4: f64 = 1.512; // CN7-CN8B
+    pub const C4_O4: f64 = 1.480; // CN7-ON6B (furanose ring O)
+    pub const C4_C3: f64 = 1.529; // CN7-CN7
+    pub const C3_O3: f64 = 1.433; // CN7-ON2
+    pub const C3_C2: f64 = 1.460; // CN7-CN7B (RNA-specific short bond)
+    pub const C2_O2: f64 = 1.400; // CN7B-ON5 (2'-hydroxyl)
+    pub const C2_C1: f64 = 1.450; // CN7B-CN7B (RNA-specific short bond)
+    pub const C1_N: f64 = 1.456; // CN7B-NN2 / NN2B glycosidic
+    pub const O3_P: f64 = 1.600; // ON2-P inter-residue
     // Bond angles.
     pub const O3_P_O5: f64 = deg(104.0);
     pub const C3_O3_P: f64 = deg(119.7);
