@@ -28,11 +28,17 @@ impl GpuContext {
             force_fallback_adapter: false,
         }))
         .ok_or_else(|| GpuInitError::NoAdapter("no compatible adapter found".to_string()))?;
+        // The default `wgpu::Limits` cap `max_storage_buffers_per_shader_stage`
+        // at 8, which the Verlet kernel exceeds (11 storage buffers).
+        // Apple Silicon supports 128+; bump to whatever the adapter
+        // actually offers so we don't have to artificially pack
+        // bindings.
+        let required_limits = adapter.limits();
         let (device, queue) = pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("origami-gpu"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
+                required_limits,
                 memory_hints: wgpu::MemoryHints::Performance,
             },
             None,

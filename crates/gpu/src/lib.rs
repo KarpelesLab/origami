@@ -29,7 +29,9 @@ pub mod context;
 pub mod gb;
 pub mod lj;
 pub mod nonbonded;
+pub mod nonbonded_verlet;
 
 pub use context::GpuContext;
 pub use gb::{GbPipeline, GbSetup};
 pub use nonbonded::{nonbonded_force_gpu, NonbondedPipeline, NonbondedSetup};
+pub use nonbonded_verlet::{pair_list_to_csr, VerletNonbondedPipeline, VerletNonbondedSetup};
