@@ -96,21 +96,32 @@ fn bench_nonbonded_at_three_sizes() {
             let p = ff.nonbonded(*t).unwrap();
             [(p.epsilon as f32) * KCAL_TO_KJ, p.rmin_half as f32]
         }).collect();
+        let lj_params_14: Vec<[f32; 2]> = unique.iter().map(|t| {
+            let p = ff.nonbonded(*t).unwrap();
+            let eps_14 = p.epsilon_14.unwrap_or(p.epsilon);
+            let rmin_half_14 = p.rmin_half_14.unwrap_or(p.rmin_half);
+            [(eps_14 as f32) * KCAL_TO_KJ, rmin_half_14 as f32]
+        }).collect();
         let mut exclusions = vec![0u32; (n * n).div_ceil(32)];
+        let mut one_four = vec![0u32; (n * n).div_ceil(32)];
         for i in 0..n {
             for j in 0..n {
                 if i == j { continue; }
-                if g.is_bonded(i, j) || g.is_one_three(i, j) || g.is_one_four(i, j) {
-                    let bit = i * n + j;
+                let bit = i * n + j;
+                if g.is_bonded(i, j) || g.is_one_three(i, j) {
                     exclusions[bit / 32] |= 1u32 << (bit % 32);
+                } else if g.is_one_four(i, j) {
+                    one_four[bit / 32] |= 1u32 << (bit % 32);
                 }
             }
         }
         let setup = || NonbondedSetup {
             type_index: &type_index,
             lj_params: &lj_params,
+            lj_params_14: &lj_params_14,
             charges: &charges,
             exclusions: &exclusions,
+            one_four_mask: &one_four,
             cutoff_a: CUTOFF_A,
         };
 

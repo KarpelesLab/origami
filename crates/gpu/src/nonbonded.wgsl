@@ -24,15 +24,24 @@ struct Params {
 @group(0) @binding(1) var<storage, read> positions: array<vec4<f32>>;     // .xyz position, .w unused
 @group(0) @binding(2) var<storage, read> type_index: array<u32>;          // per-atom type index
 @group(0) @binding(3) var<storage, read> lj_params: array<vec2<f32>>;     // .x = epsilon (kJ/mol), .y = rmin/2 (Å)
-@group(0) @binding(4) var<storage, read> charges: array<f32>;             // per-atom partial charge (e)
-@group(0) @binding(5) var<storage, read> exclusions: array<u32>;          // flat bitmap, n*n bits
-@group(0) @binding(6) var<storage, read_write> forces: array<vec4<f32>>;  // output (.xyz, .w unused)
+@group(0) @binding(4) var<storage, read> lj_params_14: array<vec2<f32>>;  // CHARMM 1-4 specials per type
+@group(0) @binding(5) var<storage, read> charges: array<f32>;             // per-atom partial charge (e)
+@group(0) @binding(6) var<storage, read> exclusions: array<u32>;          // 1-2/1-3 exclusion bitmap (n*n bits)
+@group(0) @binding(7) var<storage, read> one_four_mask: array<u32>;       // 1-4 bitmap (n*n bits)
+@group(0) @binding(8) var<storage, read_write> forces: array<vec4<f32>>;  // output (.xyz, .w unused)
 
 const COULOMB_K_KJ: f32 = 1389.35455;  // 332.0637 × 4.184
 
 fn is_excluded(i: u32, j: u32) -> bool {
     let bit_idx = i * params.n_atoms + j;
     let word = exclusions[bit_idx / 32u];
+    let mask = 1u << (bit_idx % 32u);
+    return (word & mask) != 0u;
+}
+
+fn is_one_four(i: u32, j: u32) -> bool {
+    let bit_idx = i * params.n_atoms + j;
+    let word = one_four_mask[bit_idx / 32u];
     let mask = 1u << (bit_idx % 32u);
     return (word & mask) != 0u;
 }
@@ -64,12 +73,17 @@ fn nonbonded_force(@builtin(global_invocation_id) gid: vec3<u32>) {
         let r = sqrt(r2);
         let inv_r2 = 1.0 / r2;
 
-        // ---- LJ ----
+        // ---- LJ — use CHARMM ε_14 / Rmin/2_14 specials on 1-4 pairs
+        // when the caller supplied them (the host pre-resolves the
+        // unwrap_or back to the regular ε / Rmin/2 if no specials).
         let tj = type_index[j];
-        let pj_eps = lj_params[tj].x;
-        let pj_rmin_half = lj_params[tj].y;
-        let eps = sqrt(pi_eps * pj_eps);
-        let rmin = pi_rmin_half + pj_rmin_half;
+        let one_four = is_one_four(i, j);
+        let eps_i = select(pi_eps, lj_params_14[ti].x, one_four);
+        let rmin_half_i = select(pi_rmin_half, lj_params_14[ti].y, one_four);
+        let eps_j = select(lj_params[tj].x, lj_params_14[tj].x, one_four);
+        let rmin_half_j = select(lj_params[tj].y, lj_params_14[tj].y, one_four);
+        let eps = sqrt(eps_i * eps_j);
+        let rmin = rmin_half_i + rmin_half_j;
         let ratio = rmin / r;
         let r2_ratio = ratio * ratio;
         let r6_ratio = r2_ratio * r2_ratio * r2_ratio;

@@ -1,0 +1,273 @@
+//! Stateful Generalized-Born OBC II pipeline — runs both the
+//! Born-radii kernel and the GB pair-force kernel.  Constructed
+//! once for a given atom count + radii + scales + charges; each
+//! step calls [`GbPipeline::update_positions`] then
+//! [`GbPipeline::compute_forces`].
+
+use wgpu::util::DeviceExt;
+
+use crate::context::GpuContext;
+
+pub struct GbSetup<'a> {
+    /// Per-atom intrinsic vdW radius (Å).  Match
+    /// `energy::gb::intrinsic_radius` exactly.
+    pub rho: &'a [f32],
+    /// Per-atom reduced radius (ρ − OBC_OFFSET, OBC_OFFSET = 0.09 Å).
+    pub rho_tilde: &'a [f32],
+    /// Per-atom HCT scale factor (`energy::gb::hct_scale`).
+    pub scale: &'a [f32],
+    /// Per-atom partial charge (e).
+    pub charges: &'a [f32],
+    /// Cutoff in Å.  CPU default is `BORN_RADIUS_CUTOFF_A = 20.0` for
+    /// the Born-radius integral and `GB_DEFAULT_CUTOFF_A = 10.0` for
+    /// the pair-force sum; this struct uses the *same* cutoff for
+    /// both stages.  Pass 20.0 to match the CPU's Born-radius scan.
+    pub cutoff_a: f32,
+    /// Pair-force cutoff (typically 10 Å).
+    pub pair_cutoff_a: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct BornParams {
+    n_atoms: u32,
+    cutoff_sq: f32,
+    _pad0: u32,
+    _pad1: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct ForceParams {
+    n_atoms: u32,
+    cutoff_sq: f32,
+    prefactor_kj: f32,
+    _pad: u32,
+}
+
+pub struct GbPipeline {
+    n_atoms: usize,
+    // Born-radius stage.
+    born_pipeline: wgpu::ComputePipeline,
+    born_bind_group: wgpu::BindGroup,
+    // Force stage.
+    force_pipeline: wgpu::ComputePipeline,
+    force_bind_group: wgpu::BindGroup,
+    // Shared buffers.
+    positions_buf: wgpu::Buffer,
+    r_eff_buf: wgpu::Buffer,
+    forces_buf: wgpu::Buffer,
+    readback_buf: wgpu::Buffer,
+    forces_size: u64,
+    pos_padded: Vec<[f32; 4]>,
+    ctx: &'static GpuContext,
+}
+
+const EPSILON_WATER: f32 = 78.5;
+const EPSILON_SOLUTE: f32 = 1.0;
+const KCAL_TO_KJ: f32 = 4.184;
+const COULOMB_KCAL_PER_E2: f32 = 332.0637;
+
+impl GbPipeline {
+    pub fn new(ctx: &'static GpuContext, n_atoms: usize, setup: GbSetup) -> Self {
+        assert_eq!(setup.rho.len(), n_atoms);
+        assert_eq!(setup.rho_tilde.len(), n_atoms);
+        assert_eq!(setup.scale.len(), n_atoms);
+        assert_eq!(setup.charges.len(), n_atoms);
+
+        let device = &ctx.device;
+
+        let positions_size = (n_atoms * std::mem::size_of::<[f32; 4]>()) as u64;
+        let positions_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gb_positions"),
+            size: positions_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let rho_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("gb_rho"),
+            contents: bytemuck::cast_slice(setup.rho),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let rho_tilde_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("gb_rho_tilde"),
+            contents: bytemuck::cast_slice(setup.rho_tilde),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let scale_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("gb_scale"),
+            contents: bytemuck::cast_slice(setup.scale),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let charges_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("gb_charges"),
+            contents: bytemuck::cast_slice(setup.charges),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let r_eff_size = (n_atoms * std::mem::size_of::<f32>()) as u64;
+        let r_eff_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gb_r_eff"),
+            size: r_eff_size,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let forces_size = positions_size;
+        let forces_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gb_forces"),
+            size: forces_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let readback_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gb_readback"),
+            size: forces_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // ---- Born-radius stage ----
+        let born_params = BornParams {
+            n_atoms: n_atoms as u32,
+            cutoff_sq: setup.cutoff_a * setup.cutoff_a,
+            _pad0: 0,
+            _pad1: 0,
+        };
+        let born_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("gb_born_params"),
+            contents: bytemuck::bytes_of(&born_params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let born_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("gb_born.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("gb_born.wgsl").into()),
+        });
+        let born_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("gb_born_pipeline"),
+            layout: None,
+            module: &born_shader,
+            entry_point: Some("born_radii"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let born_layout = born_pipeline.get_bind_group_layout(0);
+        let born_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("gb_born_bind"),
+            layout: &born_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: born_params_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: positions_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: rho_tilde_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: rho_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: scale_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 5, resource: r_eff_buf.as_entire_binding() },
+            ],
+        });
+
+        // ---- GB pair-force stage ----
+        let prefactor_kj =
+            (1.0 / EPSILON_SOLUTE - 1.0 / EPSILON_WATER) * COULOMB_KCAL_PER_E2 * KCAL_TO_KJ;
+        let force_params = ForceParams {
+            n_atoms: n_atoms as u32,
+            cutoff_sq: setup.pair_cutoff_a * setup.pair_cutoff_a,
+            prefactor_kj,
+            _pad: 0,
+        };
+        let force_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("gb_force_params"),
+            contents: bytemuck::bytes_of(&force_params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let force_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("gb_force.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("gb_force.wgsl").into()),
+        });
+        let force_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("gb_force_pipeline"),
+            layout: None,
+            module: &force_shader,
+            entry_point: Some("gb_force"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let force_layout = force_pipeline.get_bind_group_layout(0);
+        let force_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("gb_force_bind"),
+            layout: &force_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: force_params_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: positions_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: charges_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: r_eff_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: forces_buf.as_entire_binding() },
+            ],
+        });
+
+        Self {
+            n_atoms,
+            born_pipeline,
+            born_bind_group,
+            force_pipeline,
+            force_bind_group,
+            positions_buf,
+            r_eff_buf,
+            forces_buf,
+            readback_buf,
+            forces_size,
+            pos_padded: vec![[0.0; 4]; n_atoms],
+            ctx,
+        }
+    }
+
+    pub fn update_positions(&mut self, positions: &[[f32; 3]]) {
+        assert_eq!(positions.len(), self.n_atoms);
+        for (i, p) in positions.iter().enumerate() {
+            self.pos_padded[i] = [p[0], p[1], p[2], 0.0];
+        }
+        self.ctx
+            .queue
+            .write_buffer(&self.positions_buf, 0, bytemuck::cast_slice(&self.pos_padded));
+    }
+
+    /// Dispatch the Born-radii pass *and* the pair-force pass.
+    /// Returns one `[f32; 3]` force vector per atom.
+    pub fn compute_forces(&self) -> Vec<[f32; 3]> {
+        let device = &self.ctx.device;
+        let queue = &self.ctx.queue;
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("gb_encoder"),
+        });
+        let wg_count = self.n_atoms.div_ceil(64) as u32;
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("gb_born_pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.born_pipeline);
+            pass.set_bind_group(0, &self.born_bind_group, &[]);
+            pass.dispatch_workgroups(wg_count, 1, 1);
+        }
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("gb_force_pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.force_pipeline);
+            pass.set_bind_group(0, &self.force_bind_group, &[]);
+            pass.dispatch_workgroups(wg_count, 1, 1);
+        }
+        encoder.copy_buffer_to_buffer(&self.forces_buf, 0, &self.readback_buf, 0, self.forces_size);
+        queue.submit(Some(encoder.finish()));
+
+        let slice = self.readback_buf.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+        let _ = device.poll(wgpu::Maintain::Wait);
+        rx.recv().expect("map_async sender dropped").expect("buffer map");
+        let data = slice.get_mapped_range();
+        let padded: &[[f32; 4]] = bytemuck::cast_slice(&data);
+        let out: Vec<[f32; 3]> = padded.iter().map(|v| [v[0], v[1], v[2]]).collect();
+        drop(data);
+        self.readback_buf.unmap();
+        out
+    }
+}

@@ -26,8 +26,10 @@
 //! - [`lj`] — the LJ kernel + its CPU-callable wrapper.
 
 pub mod context;
+pub mod gb;
 pub mod lj;
 pub mod nonbonded;
 
 pub use context::GpuContext;
+pub use gb::{GbPipeline, GbSetup};
 pub use nonbonded::{nonbonded_force_gpu, NonbondedPipeline, NonbondedSetup};
