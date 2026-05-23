@@ -8,6 +8,7 @@ members = [
     "crates/dynamics",
     "crates/io",
     "crates/cli",
+    "crates/gpu",
 ]
 
 [workspace.package]
@@ -25,3 +26,6 @@ approx = "0.5"
 nalgebra = "0.34"
 image = { version = "0.25", default-features = false, features = ["png"] }
 rayon = "1.10"
+wgpu = { version = "23", default-features = false, features = ["metal", "wgsl"] }
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
