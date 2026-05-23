@@ -332,7 +332,16 @@ fn parse_atom_record(line: &str, lineno: usize) -> Result<AtomRecord, PdbReadErr
 /// terminus, but which our chain builder doesn't yet model. We silently
 /// skip them when reading.
 fn is_terminal_patch_atom(name: &str) -> bool {
-    matches!(name, "H1" | "H2" | "H3" | "OXT" | "HXT")
+    // Protein N-terminal (NH3+ extras, OXT/HXT C-terminal carboxylate)
+    // and RNA 5'/3' end-cap atoms we don't model (5'-triphosphate OP3,
+    // free 5'-OH H5T/HO5', free 3'-OH H3T/HO3'). The H1 / H2 / H3
+    // names collide with guanine's imine H1 and adenine's H2 — those
+    // residues are looked up by `canonical_rna_atom_name` *before*
+    // this check fires, so the collision is harmless in practice.
+    matches!(name, "H1" | "H2" | "H3" | "OXT" | "HXT"
+        | "OP3" | "HOP3"
+        | "H5T" | "HO5'" | "HO5"
+        | "H3T" | "HO3'" | "HO3")
 }
 
 /// Convert a PDB atom name to wwPDB v3.3 form (digit-suffixed).
