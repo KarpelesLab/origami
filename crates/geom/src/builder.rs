@@ -266,19 +266,27 @@ mod rna_ic {
     // Torsions. The main backbone path uses "extended" values; the
     // ribose-branch torsions are tuned (see the ring-closure test) so
     // the C1'-O4' separation lands near the 1.41 Å bond length.
+    // Backbone torsions: γ = 180° (trans) gives a properly extended
+    // single-strand chain with bases spaced apart, instead of the
+    // 54° (A-form gauche) value which placed consecutive bases on
+    // top of each other (~10⁹ kJ/mol LJ clash, see the FIX.rna-bond-r0
+    // commit message).  Other torsions kept at canonical RNA values.
     pub const ALPHA: f64 = deg(-68.0); // O3'p-P-O5'-C5'
     pub const BETA: f64 = deg(178.0); //  P-O5'-C5'-C4'
-    pub const GAMMA: f64 = deg(54.0); //  O5'-C5'-C4'-C3'
+    pub const GAMMA: f64 = deg(180.0); // O5'-C5'-C4'-C3' (trans, extended)
     pub const DELTA: f64 = deg(82.0); //  C5'-C4'-C3'-O3'
     pub const EPSILON: f64 = deg(-153.0); // C4'-C3'-O3'-P(next)
     pub const ZETA: f64 = deg(-71.0); // C3'-O3'-P-O5'
-    // The ribose-branch torsions are solved (grid search over the
-    // three ring placements) so the implicit C1'-O4' ring-closure
-    // bond lands within 1e-3 Å of its 1.414 Å target.
-    pub const O4_TORS: f64 = deg(-24.0); // O5'-C5'-C4'-O4'
-    pub const C2_TORS: f64 = deg(-63.0); // C5'-C4'-C3'-C2'
-    pub const C1_TORS: f64 = deg(-72.0); // C4'-C3'-C2'-C1'
-    pub const O2_TORS: f64 = deg(48.0); //  C4'-C3'-C2'-O2'
+    // Ribose-branch torsions solved via grid search (see
+    // crates/geom/tests/rna_ribose_search.rs) for the γ=180° backbone
+    // + the CHARMM-r₀ bond lengths above.  Closes the implicit
+    // C1'-O4' ring-closure bond at 1.414 Å within search resolution.
+    pub const O4_TORS: f64 = deg(111.0); // O5'-C5'-C4'-O4'
+    pub const C2_TORS: f64 = deg(-159.0); // C5'-C4'-C3'-C2'
+    pub const C1_TORS: f64 = deg(24.0); // C4'-C3'-C2'-C1'
+    // O2_TORS retuned for the new C1' position so the 2'-hydroxyl
+    // doesn't clash with C1' (was 0.61 Å with the old O2_TORS=48°).
+    pub const O2_TORS: f64 = deg(-156.0); // C4'-C3'-C2'-O2'
     pub const CHI: f64 = deg(-160.0); //   C3'-C2'-C1'-N (anti)
     pub const OP1_TORS: f64 = deg(120.0);
     pub const OP2_TORS: f64 = deg(-120.0);

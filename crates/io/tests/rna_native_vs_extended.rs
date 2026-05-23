@@ -92,12 +92,22 @@ fn uucg_hairpin_native_beats_extended() {
     );
 
     // Acceptance threshold: native should beat extended by at least
-    // 10 000 kJ/mol — comparable to the small-protein gaps and well
-    // outside seed/starting-point noise.  The actual gap on the
-    // baseline run is ~23 000 kJ/mol; locking in 10 000 leaves room
-    // for force-field or minimiser refinements without surprises.
+    // 1 500 kJ/mol.  The actual gap on this baseline is ~2 900
+    // kJ/mol, which is the right order of magnitude for a 5-bp
+    // hairpin (each base-pair H-bond ≈ 20 kJ/mol, each stack ≈ 10
+    // kJ/mol, plus GB solvation differences).
+    //
+    // An earlier version of this test asserted a 10 000 kJ/mol gap.
+    // That value was artefact-inflated: the chem nucleotide topology
+    // table was missing all base C-H / N-H bonds, so those pairs
+    // were counted as non-bonded "clashes" with huge positive LJ
+    // contributions.  The extended chain (with NeRF-perfect 1.080 Å
+    // H bond lengths) suffered worse than the NMR native, which made
+    // the gap look ~10× bigger than it really is.  The FIX.rna-bond-r0
+    // → FIX.rna-builder-geometry commits added the missing H bonds
+    // and the gap settled at the honest ~3 000 kJ/mol value.
     assert!(
-        gap > 10_000.0,
-        "UUCG hairpin: native should score ≥10 000 kJ/mol below extended, got {gap}"
+        gap > 1500.0,
+        "UUCG hairpin: native should score ≥1500 kJ/mol below extended, got {gap}"
     );
 }

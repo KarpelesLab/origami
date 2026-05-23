@@ -304,7 +304,7 @@ const BACKBONE_BONDS: &[(&str, &str)] = &[
     ("HO2'", "O2'"),
 ];
 
-const ADENINE_BONDS: [(&str, &str); 13] = [
+const ADENINE_BONDS: [(&str, &str); 16] = [
     ("N9", "C1'"),
     ("C8", "N9"),
     ("N7", "C8"),
@@ -317,10 +317,14 @@ const ADENINE_BONDS: [(&str, &str); 13] = [
     ("C2", "N1"),
     ("N3", "C2"),
     ("N3", "C4"),
+    // Hydrogens — H8 on C8, H2 on C2, H61/H62 on N6 amine.
     ("H8", "C8"),
+    ("H2", "C2"),
+    ("H61", "N6"),
+    ("H62", "N6"),
 ];
 
-const GUANINE_BONDS: [(&str, &str); 13] = [
+const GUANINE_BONDS: [(&str, &str); 17] = [
     ("N9", "C1'"),
     ("C8", "N9"),
     ("N7", "C8"),
@@ -334,9 +338,15 @@ const GUANINE_BONDS: [(&str, &str); 13] = [
     ("N2", "C2"),
     ("N3", "C2"),
     ("N3", "C4"),
+    // Hydrogens — H8 on C8, H1 on N1 (amide proton), H21/H22 on
+    // N2 (exocyclic amine).
+    ("H8", "C8"),
+    ("H1", "N1"),
+    ("H21", "N2"),
+    ("H22", "N2"),
 ];
 
-const CYTOSINE_BONDS: [(&str, &str); 9] = [
+const CYTOSINE_BONDS: [(&str, &str); 13] = [
     ("N1", "C1'"),
     ("C2", "N1"),
     ("O2", "C2"),
@@ -346,9 +356,14 @@ const CYTOSINE_BONDS: [(&str, &str); 9] = [
     ("C5", "C4"),
     ("C6", "C5"),
     ("C6", "N1"),
+    // Hydrogens — H41/H42 on N4 amine, H5 on C5, H6 on C6.
+    ("H41", "N4"),
+    ("H42", "N4"),
+    ("H5", "C5"),
+    ("H6", "C6"),
 ];
 
-const URACIL_BONDS: [(&str, &str); 9] = [
+const URACIL_BONDS: [(&str, &str); 12] = [
     ("N1", "C1'"),
     ("C2", "N1"),
     ("O2", "C2"),
@@ -358,6 +373,10 @@ const URACIL_BONDS: [(&str, &str); 9] = [
     ("C5", "C4"),
     ("C6", "C5"),
     ("C6", "N1"),
+    // Hydrogens — H3 on N3 (imino), H5 on C5, H6 on C6.
+    ("H3", "N3"),
+    ("H5", "C5"),
+    ("H6", "C6"),
 ];
 
 #[cfg(test)]
