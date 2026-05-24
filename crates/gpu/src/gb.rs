@@ -4,6 +4,8 @@
 //! step calls [`GbPipeline::update_positions`] then
 //! [`GbPipeline::compute_forces`].
 
+use std::sync::Arc;
+
 use wgpu::util::DeviceExt;
 
 use crate::context::GpuContext;
@@ -67,14 +69,14 @@ pub struct GbPipeline {
     force_params_buf: wgpu::Buffer,
     charges_buf: wgpu::Buffer,
     // Shared buffers.
-    positions_buf: wgpu::Buffer,
+    positions_buf: Arc<wgpu::Buffer>,
     // Holds the per-atom effective Born radii produced by `gb_born.wgsl`
     // and consumed by `gb_force.wgsl`.  Bound into both bind groups; we
     // don't read it on the CPU but we have to keep it alive while the
     // pipeline exists or wgpu will drop the GPU resource.
     #[allow(dead_code)]
     r_eff_buf: wgpu::Buffer,
-    forces_buf: wgpu::Buffer,
+    forces_buf: Arc<wgpu::Buffer>,
     readback_buf: wgpu::Buffer,
     forces_size: u64,
     pos_padded: Vec<[f32; 4]>,
@@ -96,20 +98,40 @@ const COULOMB_KCAL_PER_E2: f32 = 332.0637;
 
 impl GbPipeline {
     pub fn new(ctx: &'static GpuContext, n_atoms: usize, setup: GbSetup) -> Self {
+        let positions_size = (n_atoms * std::mem::size_of::<[f32; 4]>()) as u64;
+        let positions_buf = Arc::new(ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gb_positions"),
+            size: positions_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+        let forces_buf = Arc::new(ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gb_forces"),
+            size: positions_size,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+        Self::new_with_external_buffers(ctx, n_atoms, setup, positions_buf, Some(forces_buf))
+    }
+
+    /// External-buffer constructor — see
+    /// [`crate::nonbonded_verlet::VerletNonbondedPipeline::new_with_external_buffers`].
+    pub fn new_with_external_buffers(
+        ctx: &'static GpuContext,
+        n_atoms: usize,
+        setup: GbSetup,
+        positions_buf: Arc<wgpu::Buffer>,
+        forces_buf: Option<Arc<wgpu::Buffer>>,
+    ) -> Self {
         assert_eq!(setup.rho.len(), n_atoms);
         assert_eq!(setup.rho_tilde.len(), n_atoms);
         assert_eq!(setup.scale.len(), n_atoms);
         assert_eq!(setup.charges.len(), n_atoms);
 
         let device = &ctx.device;
-
         let positions_size = (n_atoms * std::mem::size_of::<[f32; 4]>()) as u64;
-        let positions_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("gb_positions"),
-            size: positions_size,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
         let rho_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("gb_rho"),
             contents: bytemuck::cast_slice(setup.rho),
@@ -138,11 +160,15 @@ impl GbPipeline {
             mapped_at_creation: false,
         });
         let forces_size = positions_size;
-        let forces_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("gb_forces"),
-            size: forces_size,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
+        let forces_buf = forces_buf.unwrap_or_else(|| {
+            Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("gb_forces"),
+                size: forces_size,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }))
         });
         let readback_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("gb_readback"),
@@ -349,6 +375,10 @@ impl GbPipeline {
     pub fn compute_forces(&self) -> Vec<[f32; 3]> {
         let device = &self.ctx.device;
         let queue = &self.ctx.queue;
+        // The kernel accumulates into `forces` — standalone callers
+        // need a fresh zero state per call.
+        let zeroes = vec![0u8; self.forces_size as usize];
+        queue.write_buffer(&self.forces_buf, 0, &zeroes);
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("gb_encoder"),
         });
@@ -367,6 +397,15 @@ impl GbPipeline {
         drop(data);
         self.readback_buf.unmap();
         out
+    }
+
+    /// Zero the pipeline's persistent forces buffer.  See
+    /// [`crate::nonbonded_verlet::VerletNonbondedPipeline::clear_forces`].
+    pub fn clear_forces(&self) {
+        let zeroes = vec![0u8; self.forces_size as usize];
+        self.ctx
+            .queue
+            .write_buffer(&self.forces_buf, 0, &zeroes);
     }
 
     /// Record both compute passes (Born radii → pair force) into a

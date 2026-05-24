@@ -21,6 +21,8 @@
 //! Same kJ/mol/Å sign convention, same 1-4 LJ specials handling, same
 //! reaction-field Coulomb sign as `NonbondedPipeline`.
 
+use std::sync::Arc;
+
 use wgpu::util::DeviceExt;
 
 use crate::context::GpuContext;
@@ -64,7 +66,7 @@ pub struct VerletNonbondedPipeline {
     pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     params_buf: wgpu::Buffer,
-    positions_buf: wgpu::Buffer,
+    positions_buf: Arc<wgpu::Buffer>,
     atom_lj_buf: wgpu::Buffer,
     charges_buf: wgpu::Buffer,
     exclusions_buf: wgpu::Buffer,
@@ -73,7 +75,7 @@ pub struct VerletNonbondedPipeline {
     nbr_start_buf: wgpu::Buffer,
     nbr_indices_buf: wgpu::Buffer,
     nbr_indices_capacity: usize,
-    forces_buf: wgpu::Buffer,
+    forces_buf: Arc<wgpu::Buffer>,
     readback_buf: wgpu::Buffer,
     forces_size: u64,
     bind_group: wgpu::BindGroup,
@@ -83,6 +85,34 @@ pub struct VerletNonbondedPipeline {
 
 impl VerletNonbondedPipeline {
     pub fn new(ctx: &'static GpuContext, n_atoms: usize, setup: VerletNonbondedSetup) -> Self {
+        let positions_size = (n_atoms * std::mem::size_of::<[f32; 4]>()) as u64;
+        let positions_buf = Arc::new(ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("nbv_positions"),
+            size: positions_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+        let forces_buf = Arc::new(ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("nbv_forces"),
+            size: positions_size,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+        Self::new_with_external_buffers(ctx, n_atoms, setup, positions_buf, Some(forces_buf))
+    }
+
+    /// Like [`new`](Self::new) but binds to caller-supplied positions
+    /// and (optionally) forces buffers — they're wrapped in `Arc` so
+    /// the integrator-on-GPU path can share them across pipelines.
+    pub fn new_with_external_buffers(
+        ctx: &'static GpuContext,
+        n_atoms: usize,
+        setup: VerletNonbondedSetup,
+        positions_buf: Arc<wgpu::Buffer>,
+        forces_buf: Option<Arc<wgpu::Buffer>>,
+    ) -> Self {
         assert_eq!(setup.atom_lj_data.len(), n_atoms);
         assert_eq!(setup.charges.len(), n_atoms);
         let n_excl_words = (n_atoms * n_atoms).div_ceil(32);
@@ -103,12 +133,6 @@ impl VerletNonbondedPipeline {
             usage: wgpu::BufferUsages::UNIFORM,
         });
         let positions_size = (n_atoms * std::mem::size_of::<[f32; 4]>()) as u64;
-        let positions_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("nbv_positions"),
-            size: positions_size,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
         let atom_lj_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("nbv_atom_lj"),
             contents: bytemuck::cast_slice(setup.atom_lj_data),
@@ -152,11 +176,15 @@ impl VerletNonbondedPipeline {
             mapped_at_creation: false,
         });
         let forces_size = positions_size;
-        let forces_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("nbv_forces"),
-            size: forces_size,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
+        let forces_buf = forces_buf.unwrap_or_else(|| {
+            Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("nbv_forces"),
+                size: forces_size,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }))
         });
         let readback_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("nbv_readback"),
@@ -285,6 +313,13 @@ impl VerletNonbondedPipeline {
     pub fn compute(&self) -> Vec<[f32; 3]> {
         let device = &self.ctx.device;
         let queue = &self.ctx.queue;
+        // The kernel accumulates into `forces` (so it can compose with
+        // bonded kernels into the same buffer in the integrator path).
+        // Standalone callers expect each `compute()` to return that
+        // step's forces, not a running sum, so we zero the buffer
+        // first.
+        let zeroes = vec![0u8; self.forces_size as usize];
+        queue.write_buffer(&self.forces_buf, 0, &zeroes);
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("nbv_encoder"),
         });
@@ -303,6 +338,17 @@ impl VerletNonbondedPipeline {
         drop(data);
         self.readback_buf.unmap();
         out
+    }
+
+    /// Zero the pipeline's persistent forces buffer.  Call before
+    /// `record_compute` in the fused integrator path so accumulation
+    /// starts from zero each step.  Cheap (one `write_buffer`, ~70 KB
+    /// at ~5000 atoms).
+    pub fn clear_forces(&self) {
+        let zeroes = vec![0u8; self.forces_size as usize];
+        self.ctx
+            .queue
+            .write_buffer(&self.forces_buf, 0, &zeroes);
     }
 
     /// Record the compute pass into a caller-owned encoder.  Used by

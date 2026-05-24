@@ -92,5 +92,8 @@ fn nonbonded_verlet(@builtin(global_invocation_id) gid: vec3<u32>) {
         let coul_coeff = -COULOMB_K_KJ * qq * (inv_r2 / r - params.inv_rc3);
         acc = acc + dx * (lj_coeff + coul_coeff);
     }
-    forces[i] = vec4<f32>(acc, 0.0);
+    // ACCUMULATE: bonded kernels run first and write into this same
+    // forces buffer.  Reading-modifying-writing is safe because each
+    // thread only touches forces[i] (no cross-thread races).
+    forces[i] = forces[i] + vec4<f32>(acc, 0.0);
 }

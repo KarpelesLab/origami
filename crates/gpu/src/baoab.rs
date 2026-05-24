@@ -24,6 +24,8 @@
 //! Neither is part of this commit — they're the next chunks of the
 //! integrator-on-GPU arc.
 
+use std::sync::Arc;
+
 use wgpu::util::DeviceExt;
 
 use crate::context::GpuContext;
@@ -74,10 +76,10 @@ pub struct BaoabPipeline {
     bind_group_layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
     params_buf: wgpu::Buffer,
-    positions_buf: wgpu::Buffer,
-    velocities_buf: wgpu::Buffer,
+    positions_buf: Arc<wgpu::Buffer>,
+    velocities_buf: Arc<wgpu::Buffer>,
     masses_buf: wgpu::Buffer,
-    forces_buf: wgpu::Buffer,
+    forces_buf: Arc<wgpu::Buffer>,
     rng_state_buf: wgpu::Buffer,
     pos_readback_buf: wgpu::Buffer,
     vel_readback_buf: wgpu::Buffer,
@@ -94,28 +96,55 @@ impl BaoabPipeline {
         masses_da: &[f32],
         initial_rng_state: &[[u32; 4]],
     ) -> Self {
+        Self::new_with_external_buffers(ctx, n_atoms, masses_da, initial_rng_state, None, None, None)
+    }
+
+    /// External-buffer constructor.  Pass `Some(buffer)` to bind any of
+    /// (positions, velocities, forces) to a caller-owned buffer that's
+    /// shared with other pipelines (bonded, nonbonded, GB) for the
+    /// integrator-on-GPU path.  Pass `None` to have BaoabPipeline
+    /// create its own buffer.  Whichever ones BaoabPipeline creates,
+    /// it owns for its lifetime; the externally-supplied ones must
+    /// outlive the BaoabPipeline.
+    pub fn new_with_external_buffers(
+        ctx: &'static GpuContext,
+        n_atoms: usize,
+        masses_da: &[f32],
+        initial_rng_state: &[[u32; 4]],
+        positions_buf: Option<Arc<wgpu::Buffer>>,
+        velocities_buf: Option<Arc<wgpu::Buffer>>,
+        forces_buf: Option<Arc<wgpu::Buffer>>,
+    ) -> Self {
         assert_eq!(masses_da.len(), n_atoms);
         assert_eq!(initial_rng_state.len(), n_atoms);
         let device = &ctx.device;
 
         let n_padded = n_atoms * std::mem::size_of::<[f32; 4]>();
-        let positions_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("baoab_positions"),
-            size: n_padded as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
+        let positions_buf = positions_buf.unwrap_or_else(|| {
+            Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("baoab_positions"),
+                size: n_padded as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }))
         });
-        let velocities_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("baoab_velocities"),
-            size: n_padded as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
+        let velocities_buf = velocities_buf.unwrap_or_else(|| {
+            Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("baoab_velocities"),
+                size: n_padded as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }))
         });
-        let forces_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("baoab_forces"),
-            size: n_padded as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
+        let forces_buf = forces_buf.unwrap_or_else(|| {
+            Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("baoab_forces"),
+                size: n_padded as u64,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }))
         });
         let masses_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("baoab_masses"),

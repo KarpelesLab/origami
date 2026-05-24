@@ -49,7 +49,7 @@ fn gb_force(@builtin(global_invocation_id) gid: vec3<u32>) {
     let ri = r_eff[i];
     var acc = vec3<f32>(0.0, 0.0, 0.0);
     if (qi == 0.0) {
-        forces[i] = vec4<f32>(acc, 0.0);
+        // ACCUMULATE — see nonbonded_verlet.wgsl for the rationale.
         return;
     }
     let count = nbr_count[i];
@@ -75,5 +75,5 @@ fn gb_force(@builtin(global_invocation_id) gid: vec3<u32>) {
         let coeff = params.prefactor_kj * (qi * qj) / f_gb_sq * d_fgb_dr / r;
         acc = acc + dx * coeff;
     }
-    forces[i] = vec4<f32>(acc, 0.0);
+    forces[i] = forces[i] + vec4<f32>(acc, 0.0);
 }
