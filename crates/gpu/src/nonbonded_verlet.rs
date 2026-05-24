@@ -30,9 +30,12 @@ use crate::context::GpuContext;
 /// list is no longer enumerated inside the kernel — instead, the caller
 /// uploads a per-atom neighbour list via [`VerletNonbondedPipeline::update_neighbours`].
 pub struct VerletNonbondedSetup<'a> {
-    pub type_index: &'a [u32],
-    pub lj_params: &'a [[f32; 2]],
-    pub lj_params_14: &'a [[f32; 2]],
+    /// Per-atom LJ parameters, pre-resolved from the
+    /// (type → params) indirection: each entry is
+    /// `[eps, rmin_half, eps_14, rmin_half_14]`.  Doing the
+    /// type-lookup up front eliminates one indirect global load
+    /// per inner-loop iteration on the GPU.
+    pub atom_lj_data: &'a [[f32; 4]],
     pub charges: &'a [f32],
     pub exclusions: &'a [u32],
     pub one_four_mask: &'a [u32],
@@ -62,9 +65,7 @@ pub struct VerletNonbondedPipeline {
     bind_group_layout: wgpu::BindGroupLayout,
     params_buf: wgpu::Buffer,
     positions_buf: wgpu::Buffer,
-    type_index_buf: wgpu::Buffer,
-    lj_table_buf: wgpu::Buffer,
-    lj_table_14_buf: wgpu::Buffer,
+    atom_lj_buf: wgpu::Buffer,
     charges_buf: wgpu::Buffer,
     exclusions_buf: wgpu::Buffer,
     one_four_buf: wgpu::Buffer,
@@ -82,9 +83,8 @@ pub struct VerletNonbondedPipeline {
 
 impl VerletNonbondedPipeline {
     pub fn new(ctx: &'static GpuContext, n_atoms: usize, setup: VerletNonbondedSetup) -> Self {
-        assert_eq!(setup.type_index.len(), n_atoms);
+        assert_eq!(setup.atom_lj_data.len(), n_atoms);
         assert_eq!(setup.charges.len(), n_atoms);
-        assert_eq!(setup.lj_params.len(), setup.lj_params_14.len());
         let n_excl_words = (n_atoms * n_atoms).div_ceil(32);
         assert_eq!(setup.exclusions.len(), n_excl_words);
         assert_eq!(setup.one_four_mask.len(), n_excl_words);
@@ -109,19 +109,9 @@ impl VerletNonbondedPipeline {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let type_index_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("nbv_type_index"),
-            contents: bytemuck::cast_slice(setup.type_index),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let lj_table_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("nbv_lj_table"),
-            contents: bytemuck::cast_slice(setup.lj_params),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let lj_table_14_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("nbv_lj_table_14"),
-            contents: bytemuck::cast_slice(setup.lj_params_14),
+        let atom_lj_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("nbv_atom_lj"),
+            contents: bytemuck::cast_slice(setup.atom_lj_data),
             usage: wgpu::BufferUsages::STORAGE,
         });
         let charges_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -193,9 +183,7 @@ impl VerletNonbondedPipeline {
             &bind_group_layout,
             &params_buf,
             &positions_buf,
-            &type_index_buf,
-            &lj_table_buf,
-            &lj_table_14_buf,
+            &atom_lj_buf,
             &charges_buf,
             &exclusions_buf,
             &one_four_buf,
@@ -211,9 +199,7 @@ impl VerletNonbondedPipeline {
             bind_group_layout,
             params_buf,
             positions_buf,
-            type_index_buf,
-            lj_table_buf,
-            lj_table_14_buf,
+            atom_lj_buf,
             charges_buf,
             exclusions_buf,
             one_four_buf,
@@ -269,9 +255,7 @@ impl VerletNonbondedPipeline {
                 &self.bind_group_layout,
                 &self.params_buf,
                 &self.positions_buf,
-                &self.type_index_buf,
-                &self.lj_table_buf,
-                &self.lj_table_14_buf,
+                &self.atom_lj_buf,
                 &self.charges_buf,
                 &self.exclusions_buf,
                 &self.one_four_buf,
@@ -377,9 +361,7 @@ fn create_bind_group(
     layout: &wgpu::BindGroupLayout,
     params: &wgpu::Buffer,
     positions: &wgpu::Buffer,
-    type_index: &wgpu::Buffer,
-    lj_table: &wgpu::Buffer,
-    lj_table_14: &wgpu::Buffer,
+    atom_lj: &wgpu::Buffer,
     charges: &wgpu::Buffer,
     exclusions: &wgpu::Buffer,
     one_four: &wgpu::Buffer,
@@ -394,16 +376,14 @@ fn create_bind_group(
         entries: &[
             wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 1, resource: positions.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: type_index.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: lj_table.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 4, resource: lj_table_14.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 5, resource: charges.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 6, resource: exclusions.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 7, resource: one_four.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 8, resource: nbr_count.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 9, resource: nbr_start.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 10, resource: nbr_indices.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 11, resource: forces.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: atom_lj.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 3, resource: charges.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 4, resource: exclusions.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 5, resource: one_four.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 6, resource: nbr_count.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 7, resource: nbr_start.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 8, resource: nbr_indices.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 9, resource: forces.as_entire_binding() },
         ],
     })
 }

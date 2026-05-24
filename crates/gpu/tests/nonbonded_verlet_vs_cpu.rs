@@ -44,27 +44,18 @@ fn gpu_verlet_matches_cpu_on_ala3() {
             charges.push(ff.partial_charge_for(r.monomer, a.name).unwrap_or(0.0) as f32);
         }
     }
-    let mut unique_types: Vec<AtomType> = atom_types.clone();
-    unique_types.sort();
-    unique_types.dedup();
-    let type_index: Vec<u32> = atom_types
-        .iter()
-        .map(|t| unique_types.iter().position(|x| x == t).unwrap() as u32)
-        .collect();
-    let lj_params: Vec<[f32; 2]> = unique_types
-        .iter()
-        .map(|t| {
-            let p = ff.nonbonded(*t).unwrap();
-            [(p.epsilon as f32) * KCAL_TO_KJ, p.rmin_half as f32]
-        })
-        .collect();
-    let lj_params_14: Vec<[f32; 2]> = unique_types
+    let atom_lj_data: Vec<[f32; 4]> = atom_types
         .iter()
         .map(|t| {
             let p = ff.nonbonded(*t).unwrap();
             let eps_14 = p.epsilon_14.unwrap_or(p.epsilon);
             let rmin_half_14 = p.rmin_half_14.unwrap_or(p.rmin_half);
-            [(eps_14 as f32) * KCAL_TO_KJ, rmin_half_14 as f32]
+            [
+                (p.epsilon as f32) * KCAL_TO_KJ,
+                p.rmin_half as f32,
+                (eps_14 as f32) * KCAL_TO_KJ,
+                rmin_half_14 as f32,
+            ]
         })
         .collect();
     let mut exclusions = vec![0u32; (n * n).div_ceil(32)];
@@ -100,9 +91,7 @@ fn gpu_verlet_matches_cpu_on_ala3() {
         ctx,
         n,
         VerletNonbondedSetup {
-            type_index: &type_index,
-            lj_params: &lj_params,
-            lj_params_14: &lj_params_14,
+            atom_lj_data: &atom_lj_data,
             charges: &charges,
             exclusions: &exclusions,
             one_four_mask: &one_four,
@@ -170,21 +159,18 @@ fn gpu_verlet_handles_buffer_growth() {
             charges.push(ff.partial_charge_for(r.monomer, a.name).unwrap_or(0.0) as f32);
         }
     }
-    let mut unique_types: Vec<AtomType> = atom_types.clone();
-    unique_types.sort();
-    unique_types.dedup();
-    let type_index: Vec<u32> = atom_types
-        .iter()
-        .map(|t| unique_types.iter().position(|x| x == t).unwrap() as u32)
-        .collect();
-    let lj_params: Vec<[f32; 2]> = unique_types
+    let atom_lj_data: Vec<[f32; 4]> = atom_types
         .iter()
         .map(|t| {
             let p = ff.nonbonded(*t).unwrap();
-            [(p.epsilon as f32) * KCAL_TO_KJ, p.rmin_half as f32]
+            [
+                (p.epsilon as f32) * KCAL_TO_KJ,
+                p.rmin_half as f32,
+                (p.epsilon as f32) * KCAL_TO_KJ,
+                p.rmin_half as f32,
+            ]
         })
         .collect();
-    let lj_params_14: Vec<[f32; 2]> = lj_params.clone();
     let mut exclusions = vec![0u32; (n * n).div_ceil(32)];
     let mut one_four = vec![0u32; (n * n).div_ceil(32)];
     for i in 0..n {
@@ -218,9 +204,7 @@ fn gpu_verlet_handles_buffer_growth() {
         ctx,
         n,
         VerletNonbondedSetup {
-            type_index: &type_index,
-            lj_params: &lj_params,
-            lj_params_14: &lj_params_14,
+            atom_lj_data: &atom_lj_data,
             charges: &charges,
             exclusions: &exclusions,
             one_four_mask: &one_four,

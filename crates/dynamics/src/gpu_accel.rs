@@ -101,31 +101,24 @@ impl GpuAccelerator {
                 scale.push(hct_scale_pub(a.element) as f32);
             }
         }
-        // Compress atom types so the LJ table is only as wide as the
-        // distinct set we actually use.
-        let mut unique_types: Vec<AtomType> = atom_types.clone();
-        unique_types.sort();
-        unique_types.dedup();
-        let type_index: Vec<u32> = atom_types
-            .iter()
-            .map(|t| unique_types.iter().position(|x| x == t).unwrap() as u32)
-            .collect();
-        let lj_params: Vec<[f32; 2]> = unique_types
+        // Pre-resolve the (atom → type → LJ params) chain into a flat
+        // per-atom `vec4(eps, rmin_half, eps_14, rmin_half_14)`.  The
+        // GPU inner loop reads one cache line per neighbour instead
+        // of doing two indirect lookups.
+        let atom_lj_data: Vec<[f32; 4]> = atom_types
             .iter()
             .map(|t| {
                 let p = ff.nonbonded(*t).unwrap_or_else(|| {
                     panic!("no nonbonded params for {:?}", t)
                 });
-                [(p.epsilon as f32) * KCAL_TO_KJ, p.rmin_half as f32]
-            })
-            .collect();
-        let lj_params_14: Vec<[f32; 2]> = unique_types
-            .iter()
-            .map(|t| {
-                let p = ff.nonbonded(*t).unwrap();
                 let eps14 = p.epsilon_14.unwrap_or(p.epsilon);
                 let rmh14 = p.rmin_half_14.unwrap_or(p.rmin_half);
-                [(eps14 as f32) * KCAL_TO_KJ, rmh14 as f32]
+                [
+                    (p.epsilon as f32) * KCAL_TO_KJ,
+                    p.rmin_half as f32,
+                    (eps14 as f32) * KCAL_TO_KJ,
+                    rmh14 as f32,
+                ]
             })
             .collect();
         // Exclusion + 1-4 bitmaps in the layout the GPU kernels expect.
@@ -153,9 +146,7 @@ impl GpuAccelerator {
             ctx,
             n,
             VerletNonbondedSetup {
-                type_index: &type_index,
-                lj_params: &lj_params,
-                lj_params_14: &lj_params_14,
+                atom_lj_data: &atom_lj_data,
                 charges: &charges,
                 exclusions: &exclusions,
                 one_four_mask: &one_four,
