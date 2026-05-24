@@ -17,4 +17,5 @@ thiserror.workspace = true
 
 [dev-dependencies]
 approx.workspace = true
+bytemuck.workspace = true
 io = { path = "../io" }
