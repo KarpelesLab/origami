@@ -25,12 +25,14 @@
 //!   Vulkan elsewhere via wgpu's backend fallback).
 //! - [`lj`] — the LJ kernel + its CPU-callable wrapper.
 
+pub mod baoab;
 pub mod context;
 pub mod gb;
 pub mod lj;
 pub mod nonbonded;
 pub mod nonbonded_verlet;
 
+pub use baoab::{make_rng_state, BaoabPipeline};
 pub use context::GpuContext;
 pub use gb::{GbPipeline, GbSetup};
 pub use nonbonded::{nonbonded_force_gpu, NonbondedPipeline, NonbondedSetup};
