@@ -140,6 +140,7 @@ fn rna_chain_langevin_runs_without_explosion() {
         include_sasa: false,
         include_cmap: false,
         constrain_h_bonds: false,
+        use_gpu: false,
     };
 
     let mut last_t = 0.0;

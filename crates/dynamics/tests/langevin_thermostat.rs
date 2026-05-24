@@ -23,6 +23,7 @@ fn ala3_holds_target_temperature_after_burn_in() {
         include_sasa: false,
         include_cmap: false,
         constrain_h_bonds: false,
+        use_gpu: false,
     };
 
     // Collect (step, T_inst, KE) at each checkpoint so we can post-filter

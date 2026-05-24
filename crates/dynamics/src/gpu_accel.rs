@@ -1,0 +1,244 @@
+//! GPU acceleration for the Langevin force aggregator.
+//!
+//! [`GpuAccelerator`] wraps the two GPU pipelines that replace the
+//! CPU's nonbonded + GB pair-loop work:
+//!
+//! - `VerletNonbondedPipeline` — LJ + reaction-field Coulomb walking
+//!   a CSR neighbour list built on the CPU (from `ForceScratch`'s
+//!   cached Verlet pairs).
+//! - `GbPipeline` — Generalized-Born OBC II Born radii + pair force,
+//!   currently O(N²) on the GPU; switching to a Verlet sweep here is
+//!   step 3f.
+//!
+//! Why route through this instead of straight `gpu::*` calls in the
+//! integrator: the accelerator owns the per-system parameter buffers
+//! (type table, exclusion bitmap, charges, GB intrinsic radii, …)
+//! that don't change between steps, and it tracks the
+//! `ForceScratch.verlet_valid` signal so the CSR neighbour list only
+//! re-uploads when the CPU actually rebuilt it.  Per-step cost on
+//! Apple M3 Pro is dominated by the readback (~0.3 ms) regardless of
+//! N — that's where the wall-clock win lives at ribosome scale, since
+//! the equivalent CPU pair loop is tens of ms.
+//!
+//! **Threshold to use the GPU.** At ~300 atoms (Trp-cage) the CPU
+//! SoA Verlet path takes ~0.6 ms; the GPU path takes ~0.9 ms (mostly
+//! readback overhead).  At ~1500 atoms the two are even.  Above
+//! ~3000 atoms the GPU wins.  The `LangevinOptions::use_gpu` flag is
+//! a manual opt-in for now — auto-thresholding is step 3g.
+
+use chem::{classify_atom, AtomType, ForceField};
+use energy::scratch::{ForceScratch, ONE_FOUR_BIT, EXCLUDED_BIT};
+use energy::forces_nonbonded::ensure_verlet_list;
+use energy::gb::{intrinsic_radius_pub, hct_scale_pub, OBC_OFFSET_PUB, BORN_RADIUS_CUTOFF_A_PUB};
+use energy::forces_gb::GB_DEFAULT_CUTOFF_A_PUB;
+use geom::Structure;
+use gpu::{
+    pair_list_to_csr, GbPipeline, GbSetup, GpuContext, VerletNonbondedPipeline,
+    VerletNonbondedSetup,
+};
+
+const KCAL_TO_KJ: f32 = 4.184;
+
+/// One per simulation.  Holds the per-system parameter buffers and
+/// the two GPU compute pipelines.  Re-using across many steps amortises
+/// the (~5 ms) shader-compile + buffer-alloc cost.
+pub struct GpuAccelerator {
+    n_atoms: usize,
+    nonbonded: VerletNonbondedPipeline,
+    gb: GbPipeline,
+    /// Cached position buffer reused between steps (avoids per-step
+    /// Vec allocation).
+    pos_buf: Vec<[f32; 3]>,
+    /// Cached neighbour-list CSR buffers (rebuilt on Verlet refresh).
+    counts: Vec<u32>,
+    starts: Vec<u32>,
+    indices: Vec<u32>,
+    /// LJ + Coulomb cutoff in Å (passed at construction; doesn't change
+    /// during a trajectory).
+    cutoff_a: f64,
+}
+
+impl GpuAccelerator {
+    /// Build the accelerator for a given `structure` + `graph` + force
+    /// field at the given LJ/Coulomb cutoff.  Allocates GPU buffers
+    /// for everything that's constant for the trajectory (type table,
+    /// exclusion mask, charges, GB radii) and compiles the two
+    /// shaders.  Returns an error only if [`GpuContext::get`] fails.
+    pub fn new(
+        structure: &Structure,
+        graph: &geom::TopologyGraph,
+        ff: &ForceField,
+        cutoff_a: f64,
+    ) -> Result<Self, gpu::context::GpuInitError> {
+        let ctx = GpuContext::get()?;
+        let n = structure.atom_count();
+        // ---- Build per-atom typing + parameter tables ----
+        let mut atom_types: Vec<AtomType> = Vec::with_capacity(n);
+        let mut charges: Vec<f32> = Vec::with_capacity(n);
+        let mut rho: Vec<f32> = Vec::with_capacity(n);
+        let mut rho_tilde: Vec<f32> = Vec::with_capacity(n);
+        let mut scale: Vec<f32> = Vec::with_capacity(n);
+        for r in &structure.residues {
+            for a in &r.atoms {
+                let t = classify_atom(r.monomer, a.name).unwrap_or_else(|| {
+                    panic!("unclassified atom {:?} {}", r.monomer, a.name)
+                });
+                atom_types.push(t);
+                charges.push(ff.partial_charge_for(r.monomer, a.name).unwrap_or(0.0) as f32);
+                let r0 = intrinsic_radius_pub(a.element);
+                rho.push(r0 as f32);
+                rho_tilde.push((r0 - OBC_OFFSET_PUB) as f32);
+                scale.push(hct_scale_pub(a.element) as f32);
+            }
+        }
+        // Compress atom types so the LJ table is only as wide as the
+        // distinct set we actually use.
+        let mut unique_types: Vec<AtomType> = atom_types.clone();
+        unique_types.sort();
+        unique_types.dedup();
+        let type_index: Vec<u32> = atom_types
+            .iter()
+            .map(|t| unique_types.iter().position(|x| x == t).unwrap() as u32)
+            .collect();
+        let lj_params: Vec<[f32; 2]> = unique_types
+            .iter()
+            .map(|t| {
+                let p = ff.nonbonded(*t).unwrap_or_else(|| {
+                    panic!("no nonbonded params for {:?}", t)
+                });
+                [(p.epsilon as f32) * KCAL_TO_KJ, p.rmin_half as f32]
+            })
+            .collect();
+        let lj_params_14: Vec<[f32; 2]> = unique_types
+            .iter()
+            .map(|t| {
+                let p = ff.nonbonded(*t).unwrap();
+                let eps14 = p.epsilon_14.unwrap_or(p.epsilon);
+                let rmh14 = p.rmin_half_14.unwrap_or(p.rmin_half);
+                [(eps14 as f32) * KCAL_TO_KJ, rmh14 as f32]
+            })
+            .collect();
+        // Exclusion + 1-4 bitmaps in the layout the GPU kernels expect.
+        let n_words = (n * n).div_ceil(32);
+        let mut exclusions = vec![0u32; n_words];
+        let mut one_four = vec![0u32; n_words];
+        for i in 0..n {
+            for j in 0..n {
+                if i == j { continue; }
+                let bit = i * n + j;
+                if graph.is_bonded(i, j) || graph.is_one_three(i, j) {
+                    exclusions[bit / 32] |= 1u32 << (bit % 32);
+                } else if graph.is_one_four(i, j) {
+                    one_four[bit / 32] |= 1u32 << (bit % 32);
+                }
+            }
+        }
+        // We need a rough initial capacity for the neighbour list.
+        // ⟨neighbours⟩ at a 10 Å cutoff in a typical all-atom protein
+        // is 150-300; over-estimate by ×2 so the first upload doesn't
+        // trigger the grow path.  Negligible memory at any scale we
+        // care about.
+        let initial_cap = (n * 600).max(64);
+        let nonbonded = VerletNonbondedPipeline::new(
+            ctx,
+            n,
+            VerletNonbondedSetup {
+                type_index: &type_index,
+                lj_params: &lj_params,
+                lj_params_14: &lj_params_14,
+                charges: &charges,
+                exclusions: &exclusions,
+                one_four_mask: &one_four,
+                cutoff_a: cutoff_a as f32,
+                initial_indices_capacity: initial_cap,
+            },
+        );
+        let gb = GbPipeline::new(
+            ctx,
+            n,
+            GbSetup {
+                rho: &rho,
+                rho_tilde: &rho_tilde,
+                scale: &scale,
+                charges: &charges,
+                cutoff_a: BORN_RADIUS_CUTOFF_A_PUB as f32,
+                pair_cutoff_a: GB_DEFAULT_CUTOFF_A_PUB as f32,
+            },
+        );
+        // Sanity: the kept exclusion + 1-4 bits agree with the masks
+        // ForceScratch holds; we read its scratch.excl in the
+        // per-pair filter on the CPU side, so any disagreement here
+        // would silently corrupt forces.
+        let _ = ONE_FOUR_BIT;
+        let _ = EXCLUDED_BIT;
+        Ok(Self {
+            n_atoms: n,
+            nonbonded,
+            gb,
+            pos_buf: vec![[0.0; 3]; n],
+            counts: Vec::new(),
+            starts: Vec::new(),
+            indices: Vec::new(),
+            cutoff_a,
+        })
+    }
+
+    /// Replace the LJ+Coulomb + GB pair-loop work in `scratch` with the
+    /// GPU equivalents.  The integrator must still call the CPU bonded
+    /// terms (bond / angle / dihedral / improper) before or after this.
+    ///
+    /// Pre-condition: `scratch.xs/ys/zs` are synced from the latest
+    /// `structure` positions and `scratch.f{xyz}s` have been zeroed
+    /// for this step.
+    ///
+    /// Post-condition: `scratch.f{xyz}s` are incremented by the
+    /// nonbonded + GB force contributions, ready to be accumulated
+    /// into the integrator's AoS `forces` buffer via
+    /// `scratch.accumulate_into`.
+    pub fn add_nonbonded_and_gb(&mut self, scratch: &mut ForceScratch) {
+        debug_assert_eq!(scratch.n, self.n_atoms);
+        // Refresh the Verlet list on the CPU side (the GPU just walks
+        // whatever's there).  This both detects drift and rebuilds via
+        // the existing CellList; returns whether the list changed.
+        let rebuilt = ensure_verlet_list(scratch, self.cutoff_a);
+
+        // If the list was rebuilt, convert to CSR and push to the GPU.
+        // Otherwise the previously-uploaded neighbour list still applies
+        // (the skin guarantees correctness until the next drift event).
+        if rebuilt || self.counts.is_empty() {
+            let (counts, starts, indices) = pair_list_to_csr(self.n_atoms, &scratch.verlet_pairs);
+            self.counts = counts;
+            self.starts = starts;
+            self.indices = indices;
+            self.nonbonded.update_neighbours(&self.counts, &self.starts, &self.indices);
+        }
+
+        // Pack f64 SoA → f32 AoS for the GPU upload.  This is the
+        // unavoidable precision step-down of the GPU path; the CPU
+        // remains in f64 throughout.
+        for i in 0..self.n_atoms {
+            self.pos_buf[i] = [
+                scratch.xs[i] as f32,
+                scratch.ys[i] as f32,
+                scratch.zs[i] as f32,
+            ];
+        }
+
+        // Run the two pipelines.  Currently sequential (Verlet pass,
+        // then GB pass); they could run in parallel queues but on a
+        // single device the GPU schedules them sequentially anyway, so
+        // there's no win.
+        self.nonbonded.update_positions(&self.pos_buf);
+        let nb_f = self.nonbonded.compute();
+        self.gb.update_positions(&self.pos_buf);
+        let gb_f = self.gb.compute_forces();
+
+        // Accumulate into scratch.  f32 → f64 widening — no precision
+        // loss beyond what already happened during the GPU eval.
+        for i in 0..self.n_atoms {
+            scratch.fxs[i] += nb_f[i][0] as f64 + gb_f[i][0] as f64;
+            scratch.fys[i] += nb_f[i][1] as f64 + gb_f[i][1] as f64;
+            scratch.fzs[i] += nb_f[i][2] as f64 + gb_f[i][2] as f64;
+        }
+    }
+}

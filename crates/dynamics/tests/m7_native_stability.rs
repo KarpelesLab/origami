@@ -38,6 +38,7 @@ fn trp_cage_native_stays_near_native_during_2ps_md() {
         include_sasa: false,
         include_cmap: false,
         constrain_h_bonds: false,
+        use_gpu: false,
     };
     let summary = run_langevin(&mut s, &g, ff, opts, |_| {});
     assert!(!summary.diverged, "trajectory diverged");

@@ -80,6 +80,17 @@ pub struct LangevinOptions {
     /// without the bond-vibration aliasing that forces dt ≤ 1 fs in
     /// unconstrained MD. Off by default.
     pub constrain_h_bonds: bool,
+    /// Route the LJ + reaction-field Coulomb pair sum and the
+    /// Generalized-Born pair force through the GPU compute kernels
+    /// in `crates/gpu`.  Bonded terms (bond/angle/dihedral/improper),
+    /// SASA, and CMAP still run on the CPU — the GPU only takes the
+    /// O(N · ⟨nbrs⟩) and O(N²) pair sums that dominate the per-step
+    /// cost at >1000 atoms.  Off by default: at Trp-cage scale (300
+    /// atoms) the GPU dispatch + readback overhead is larger than
+    /// what it saves.  Above ~3000 atoms the GPU consistently wins.
+    /// Requires the `gpu` crate to find a usable adapter; falls back
+    /// to CPU with a stderr warning if construction fails.
+    pub use_gpu: bool,
 }
 
 impl Default for LangevinOptions {
@@ -95,6 +106,7 @@ impl Default for LangevinOptions {
             include_sasa: false,
             include_cmap: false,
             constrain_h_bonds: false,
+            use_gpu: false,
         }
     }
 }
@@ -159,15 +171,28 @@ where
     // O(n²) exclusion bitmap build exactly once.
     let mut scratch = ForceScratch::new(structure, graph, ff);
     let mut forces: Vec<Vec3> = Vec::with_capacity(n);
-    total_force_with_scratch(
+    // Optional GPU accelerator — built once, reused every step.  If
+    // construction fails (no compatible adapter, etc.) we transparently
+    // fall back to the CPU path and warn.
+    let mut gpu_accel: Option<crate::gpu_accel::GpuAccelerator> = if opts.use_gpu {
+        match crate::gpu_accel::GpuAccelerator::new(structure, graph, ff, DEFAULT_CUTOFF_A) {
+            Ok(a) => Some(a),
+            Err(e) => {
+                eprintln!("warning: GPU acceleration requested but unavailable ({e}); using CPU");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    eval_forces(
         structure,
         graph,
         ff,
-        DEFAULT_CUTOFF_A,
-        opts.include_sasa,
-        opts.include_cmap,
+        &opts,
         &mut scratch,
         &mut forces,
+        gpu_accel.as_mut(),
     );
 
     // Optional SHAKE constraints (X-H bonds). Build once at run start;
@@ -302,15 +327,14 @@ where
         }
 
         // Recompute forces at the new positions.
-        total_force_with_scratch(
+        eval_forces(
             structure,
             graph,
             ff,
-            DEFAULT_CUTOFF_A,
-            opts.include_sasa,
-            opts.include_cmap,
+            &opts,
             &mut scratch,
             &mut forces,
+            gpu_accel.as_mut(),
         );
 
         // B (second half): v += a · dt/2
@@ -370,6 +394,72 @@ where
         atoms_count: n,
         diverged,
         shake_failures,
+    }
+}
+
+/// One force evaluation, routed to the GPU accelerator if present.
+///
+/// CPU path: identical to the inline call to `total_force_with_scratch`
+/// that the integrator used before GPU support landed.  GPU path:
+/// the bonded terms still run on the CPU, but the LJ + Coulomb +
+/// GB pair sums route through [`crate::gpu_accel::GpuAccelerator`]
+/// in f32.  SASA / CMAP, when enabled, still run on the CPU because
+/// neither has a GPU kernel yet.
+fn eval_forces(
+    structure: &Structure,
+    graph: &TopologyGraph,
+    ff: &ForceField,
+    opts: &LangevinOptions,
+    scratch: &mut ForceScratch,
+    forces: &mut Vec<Vec3>,
+    gpu: Option<&mut crate::gpu_accel::GpuAccelerator>,
+) {
+    if let Some(g) = gpu {
+        // Manually do what `total_force_with_scratch` does, but
+        // replace the SoA nonbonded+GB calls with the GPU accelerator.
+        let n = structure.atom_count();
+        if forces.len() != n {
+            forces.clear();
+            forces.resize(n, Vec3::zeros());
+        } else {
+            forces.iter_mut().for_each(|f| *f = Vec3::zeros());
+        }
+        // Bonded terms — CPU only.
+        let atom_types = energy::forces_bonded::build_atom_types(structure);
+        let positions: Vec<Vec3> = structure
+            .residues
+            .iter()
+            .flat_map(|r| r.atoms.iter().map(|a| a.position))
+            .collect();
+        energy::forces_bonded::add_bond_forces(&positions, graph, ff, &atom_types, forces);
+        energy::forces_bonded::add_angle_forces(&positions, graph, ff, &atom_types, forces);
+        energy::forces_bonded::add_dihedral_forces(&positions, graph, ff, &atom_types, forces);
+        energy::forces_bonded::add_improper_forces(&positions, graph, ff, &atom_types, forces);
+        // GPU pair sums — sync positions into scratch, zero the SoA
+        // force buffer, hand to the accelerator.
+        scratch.sync_positions(structure);
+        scratch.zero_forces();
+        g.add_nonbonded_and_gb(scratch);
+        scratch.accumulate_into(forces);
+        if opts.include_sasa {
+            energy::powersasa::analytical::add_sasa_forces_analytical_with_scratch(
+                structure, ff, scratch, forces,
+            );
+        }
+        if opts.include_cmap {
+            energy::cmap::add_cmap_forces(structure, graph, ff, forces);
+        }
+    } else {
+        total_force_with_scratch(
+            structure,
+            graph,
+            ff,
+            DEFAULT_CUTOFF_A,
+            opts.include_sasa,
+            opts.include_cmap,
+            scratch,
+            forces,
+        );
     }
 }
 

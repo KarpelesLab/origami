@@ -123,22 +123,20 @@ pub fn add_nonbonded_forces_default(
 /// looks up the bonded/1-3/1-4 mask from a flat `[u8]` bitmap, both
 /// of which let the compiler avoid the `Vec3` AoS load pattern and
 /// the `Vec::contains` walk in the original AoS path.
-pub fn add_nonbonded_forces_soa(
-    scratch: &mut crate::scratch::ForceScratch,
-    cutoff_a: f64,
-) {
+/// Rebuild the Verlet neighbour list on `scratch` if any atom has
+/// drifted more than `VERLET_SKIN / 2` since the last build (or if the
+/// list has never been built).  The list covers `cutoff_a + VERLET_SKIN`
+/// so the inner pair loop still applies the true `cutoff_a` and the
+/// skin only widens the candidate set.
+///
+/// Returns `true` if a rebuild happened — callers (e.g. the GPU
+/// accelerator) use that signal to decide whether to re-upload the
+/// neighbour list to the device.
+///
+/// Pre-condition: `scratch.xs/ys/zs` are up to date — call
+/// [`crate::scratch::ForceScratch::sync_positions`] first.
+pub fn ensure_verlet_list(scratch: &mut crate::scratch::ForceScratch, cutoff_a: f64) -> bool {
     let n = scratch.n;
-    let cutoff_sq = cutoff_a * cutoff_a;
-    let kj_per_kcal = kcal_to_kj(1.0);
-    let rf = CoulombRf::for_cutoff(cutoff_a);
-    let inv_rc3 = rf.inv_rc3;
-    let coulomb_kj = kcal_to_kj(crate::nonbonded::COULOMB_CONST_KCAL_A_PER_E2);
-
-    // Verlet neighbour list: rebuild the candidate pair list only when
-    // an atom has drifted more than VERLET_SKIN/2 from its position at
-    // the last rebuild. The cached list covers `cutoff + skin`; the
-    // inner loop still applies the true `cutoff`, so the skin only
-    // widens the candidate set.
     let skin = crate::scratch::VERLET_SKIN_A;
     let half_skin_sq = (0.5 * skin) * (0.5 * skin);
     let need_rebuild = !scratch.verlet_valid || {
@@ -154,23 +152,40 @@ pub fn add_nonbonded_forces_soa(
         }
         moved
     };
-
-    if need_rebuild {
-        let mut positions: Vec<Vec3> = Vec::with_capacity(n);
-        for i in 0..n {
-            positions.push(Vec3::new(scratch.xs[i], scratch.ys[i], scratch.zs[i]));
-        }
-        let list_cutoff = cutoff_a + skin;
-        let cl = CellList::build(&positions, list_cutoff);
-        scratch.verlet_pairs.clear();
-        for (i, j, _r) in cl.iter_pairs_within(&positions, list_cutoff) {
-            scratch.verlet_pairs.push((i as u32, j as u32));
-        }
-        scratch.verlet_ref_x.copy_from_slice(&scratch.xs);
-        scratch.verlet_ref_y.copy_from_slice(&scratch.ys);
-        scratch.verlet_ref_z.copy_from_slice(&scratch.zs);
-        scratch.verlet_valid = true;
+    if !need_rebuild {
+        return false;
     }
+    let mut positions: Vec<Vec3> = Vec::with_capacity(n);
+    for i in 0..n {
+        positions.push(Vec3::new(scratch.xs[i], scratch.ys[i], scratch.zs[i]));
+    }
+    let list_cutoff = cutoff_a + skin;
+    let cl = CellList::build(&positions, list_cutoff);
+    scratch.verlet_pairs.clear();
+    for (i, j, _r) in cl.iter_pairs_within(&positions, list_cutoff) {
+        scratch.verlet_pairs.push((i as u32, j as u32));
+    }
+    scratch.verlet_ref_x.copy_from_slice(&scratch.xs);
+    scratch.verlet_ref_y.copy_from_slice(&scratch.ys);
+    scratch.verlet_ref_z.copy_from_slice(&scratch.zs);
+    scratch.verlet_valid = true;
+    true
+}
+
+pub fn add_nonbonded_forces_soa(
+    scratch: &mut crate::scratch::ForceScratch,
+    cutoff_a: f64,
+) {
+    let n = scratch.n;
+    let cutoff_sq = cutoff_a * cutoff_a;
+    let kj_per_kcal = kcal_to_kj(1.0);
+    let rf = CoulombRf::for_cutoff(cutoff_a);
+    let inv_rc3 = rf.inv_rc3;
+    let coulomb_kj = kcal_to_kj(crate::nonbonded::COULOMB_CONST_KCAL_A_PER_E2);
+
+    // Verlet neighbour list maintenance — extracted so the GPU code
+    // path can reuse the exact same drift detector + cell-list rebuild.
+    ensure_verlet_list(scratch, cutoff_a);
     // Move the pair list out of the scratch so the rest of the
     // function can take a fresh `&mut scratch` for the force buffers.
     // Restored at every exit point.

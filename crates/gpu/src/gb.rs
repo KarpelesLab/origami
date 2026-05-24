@@ -55,6 +55,11 @@ pub struct GbPipeline {
     force_bind_group: wgpu::BindGroup,
     // Shared buffers.
     positions_buf: wgpu::Buffer,
+    // Holds the per-atom effective Born radii produced by `gb_born.wgsl`
+    // and consumed by `gb_force.wgsl`.  Bound into both bind groups; we
+    // don't read it on the CPU but we have to keep it alive while the
+    // pipeline exists or wgpu will drop the GPU resource.
+    #[allow(dead_code)]
     r_eff_buf: wgpu::Buffer,
     forces_buf: wgpu::Buffer,
     readback_buf: wgpu::Buffer,

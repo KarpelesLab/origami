@@ -216,6 +216,13 @@ enum Command {
         /// trajectory per wall-second.
         #[arg(long)]
         shake_h: bool,
+        /// Route the LJ + Coulomb + GB pair-loop work through the GPU
+        /// compute kernels.  At small N (≲1000 atoms) the GPU dispatch
+        /// + readback overhead outweighs what it saves; the flag pays
+        /// off above ~3000 atoms.  Falls back to CPU with a warning
+        /// if no GPU adapter is available.
+        #[arg(long)]
+        with_gpu: bool,
     },
     /// Replica-exchange molecular dynamics. Runs N Langevin trajectories
     /// at different temperatures with periodic Metropolis swaps between
@@ -396,6 +403,7 @@ fn main() -> Result<()> {
             with_sasa,
             with_cmap,
             shake_h,
+            with_gpu,
         } => run_dynamics(
             &input,
             &output_trajectory,
@@ -409,6 +417,7 @@ fn main() -> Result<()> {
             with_sasa,
             with_cmap,
             shake_h,
+            with_gpu,
         ),
         Command::Remd {
             input,
@@ -683,6 +692,7 @@ fn run_dynamics(
     include_sasa: bool,
     include_cmap: bool,
     shake_h: bool,
+    use_gpu: bool,
 ) -> Result<()> {
     let file = fs::File::open(input)
         .with_context(|| format!("opening {}", input.display()))?;
@@ -702,6 +712,7 @@ fn run_dynamics(
         include_sasa,
         include_cmap,
         constrain_h_bonds: shake_h,
+        use_gpu,
     };
 
     eprintln!(
@@ -809,6 +820,7 @@ fn run_cotranslate_cmd(
         include_sasa: with_sasa,
         include_cmap: with_cmap,
         constrain_h_bonds: false,
+        use_gpu: false,
     };
 
     let tunnel = if with_tunnel {

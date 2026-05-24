@@ -30,6 +30,7 @@ fn cotranslate_ala5_grows_to_five_residues() {
         include_sasa: false,
         include_cmap: false,
         constrain_h_bonds: false,
+        use_gpu: false,
     };
     let ff = standard_ff();
 
@@ -85,6 +86,7 @@ fn cotranslate_with_tunnel_keeps_chain_inside_radius() {
         include_sasa: false,
         include_cmap: false,
         constrain_h_bonds: false,
+        use_gpu: false,
     };
     let ff = standard_ff();
 

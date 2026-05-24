@@ -30,6 +30,7 @@ fn trp_cage_dt2_with_shake_is_stable() {
         include_sasa: false,
         include_cmap: false,
         constrain_h_bonds: true,
+        use_gpu: false,
     };
     let summary = run_langevin(&mut s, &g, ff, opts, |_| {});
     assert!(!summary.diverged, "dt = 2 fs + SHAKE diverged");

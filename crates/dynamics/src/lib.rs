@@ -7,6 +7,7 @@
 
 pub mod cotranslate;
 pub mod energy_eval;
+pub mod gpu_accel;
 pub mod langevin;
 pub mod lbfgs;
 pub mod line_search;
@@ -15,6 +16,8 @@ pub mod remd;
 pub mod rng;
 pub mod shake;
 pub mod steepest_descent;
+
+pub use gpu_accel::GpuAccelerator;
 
 pub use cotranslate::{
     run_cotranslate, CodonPacedRibosome, CotranslateFrame, CylindricalTunnel, ExternalPotential,

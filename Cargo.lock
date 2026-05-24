@@ -336,6 +336,7 @@ dependencies = [
  "chem",
  "energy",
  "geom",
+ "gpu",
  "io",
  "rayon",
  "thiserror 2.0.18",
