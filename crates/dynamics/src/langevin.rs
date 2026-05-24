@@ -417,6 +417,15 @@ fn eval_forces(
     if let Some(g) = gpu {
         // Manually do what `total_force_with_scratch` does, but
         // replace the SoA nonbonded+GB calls with the GPU accelerator.
+        //
+        // The CPU bonded loop and the GPU pair loop are independent —
+        // bonded writes into a thread-private `forces` Vec, the GPU
+        // writes into `scratch.f{xyz}s`.  Neither reads the other.  So
+        // we run them concurrently via `std::thread::scope`: the CPU
+        // does bonded work while the GPU is running its kernels.  On
+        // Apple Silicon the CPU bonded path is ~0.5-5 ms (linear in
+        // atom count) and the GPU pair-loop is ~2-12 ms, so the
+        // overlap is essentially "free CPU bonded".
         let n = structure.atom_count();
         if forces.len() != n {
             forces.clear();
@@ -424,22 +433,52 @@ fn eval_forces(
         } else {
             forces.iter_mut().for_each(|f| *f = Vec3::zeros());
         }
-        // Bonded terms — CPU only.
         let atom_types = energy::forces_bonded::build_atom_types(structure);
         let positions: Vec<Vec3> = structure
             .residues
             .iter()
             .flat_map(|r| r.atoms.iter().map(|a| a.position))
             .collect();
-        energy::forces_bonded::add_bond_forces(&positions, graph, ff, &atom_types, forces);
-        energy::forces_bonded::add_angle_forces(&positions, graph, ff, &atom_types, forces);
-        energy::forces_bonded::add_dihedral_forces(&positions, graph, ff, &atom_types, forces);
-        energy::forces_bonded::add_improper_forces(&positions, graph, ff, &atom_types, forces);
-        // GPU pair sums — sync positions into scratch, zero the SoA
-        // force buffer, hand to the accelerator.
+        // Sync positions into scratch up front so the GPU thread doesn't
+        // need a structure reference (avoids the lifetime gymnastics of
+        // passing `structure` into a scoped thread along with `&mut g`).
         scratch.sync_positions(structure);
         scratch.zero_forces();
-        g.add_nonbonded_and_gb(scratch);
+
+        // Threshold: thread spawn + join is ~100-200 µs per call.  CPU
+        // bonded work scales roughly as 0.5 µs/atom (5 ms at 10k atoms,
+        // 50 µs at 100 atoms).  Below ~1000 atoms the spawn overhead
+        // exceeds the bonded work we'd be overlapping with the GPU,
+        // so we fall through to the sequential path.  Benchmark data:
+        // concurrent wins 1.3-2.1× at 1500-5800 atoms; loses 30-150 %
+        // at 300-800 atoms.  Tuned on Apple M3 Pro.
+        const CONCURRENT_THRESHOLD: usize = 1000;
+        if n >= CONCURRENT_THRESHOLD {
+            std::thread::scope(|s| {
+                // Thread A: GPU pair forces.  Moves `g` and `scratch`
+                // by mutable reference into the spawned closure.
+                s.spawn(|| {
+                    g.add_nonbonded_and_gb(scratch);
+                });
+                // Main thread: CPU bonded forces.
+                energy::forces_bonded::add_bond_forces(&positions, graph, ff, &atom_types, forces);
+                energy::forces_bonded::add_angle_forces(&positions, graph, ff, &atom_types, forces);
+                energy::forces_bonded::add_dihedral_forces(&positions, graph, ff, &atom_types, forces);
+                energy::forces_bonded::add_improper_forces(&positions, graph, ff, &atom_types, forces);
+            });
+        } else {
+            // Sequential fallback: bonded first (CPU only), then GPU
+            // pair forces.  At this scale the GPU dispatch is the
+            // dominant cost anyway, so overlap can't help much.
+            energy::forces_bonded::add_bond_forces(&positions, graph, ff, &atom_types, forces);
+            energy::forces_bonded::add_angle_forces(&positions, graph, ff, &atom_types, forces);
+            energy::forces_bonded::add_dihedral_forces(&positions, graph, ff, &atom_types, forces);
+            energy::forces_bonded::add_improper_forces(&positions, graph, ff, &atom_types, forces);
+            g.add_nonbonded_and_gb(scratch);
+        }
+
+        // Post-join: scratch.f* contains pair forces, fold into the
+        // bonded-already-populated `forces` buffer.
         scratch.accumulate_into(forces);
         if opts.include_sasa {
             energy::powersasa::analytical::add_sasa_forces_analytical_with_scratch(
