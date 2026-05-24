@@ -134,3 +134,97 @@ fn baoab_second_half(@builtin(global_invocation_id) gid: vec3<u32>) {
     let vel = velocities[i].xyz + f * (inv_m_accel * half_dt);
     velocities[i] = vec4<f32>(vel, 0.0);
 }
+
+// ---- Sub-step kernels for the SHAKE-enabled integrator path. ----
+//
+// The folded `baoab_first_half` (B-A-O-A) above doesn't have
+// hookpoints for SHAKE to intervene between operations.  Below are
+// the constituent sub-steps as separate entry points; the SHAKE-
+// enabled integrator orchestrates:
+//
+//   B  →  save pos→ref + A  →  SHAKE  →  project v
+//      →  O
+//      →  save pos→ref + A  →  SHAKE  →  project v
+//      →  [force recompute]  →  B
+//
+// 9 dispatches per step (B + 3×{save+A, SHAKE, project_v} per A side
+// counting both A halves but only one SHAKE per A, plus O, plus B) +
+// 4 force-eval dispatches = 13 per step.
+
+@compute @workgroup_size(64)
+fn baoab_b_only(@builtin(global_invocation_id) gid: vec3<u32>) {
+    // Same as `baoab_second_half` — half-dt velocity update from
+    // current forces.  Renamed alias so the integrator can call
+    // either path's name without confusion.
+    let i = gid.x;
+    if (i >= params.n_atoms) {
+        return;
+    }
+    let mass = masses[i];
+    let inv_m_accel = params.accel_factor / mass;
+    let half_dt = params.half_dt;
+    let f = forces_total[i].xyz;
+    let vel = velocities[i].xyz + f * (inv_m_accel * half_dt);
+    velocities[i] = vec4<f32>(vel, 0.0);
+}
+
+// SHAKE needs a reference position from before the A step.  This
+// kernel does both jobs in one pass: snapshot positions → ref_pos,
+// then apply A.  Avoids a separate copy-buffer-to-buffer command.
+// `ref_positions` here lives in a dedicated buffer bound at group 1
+// (the existing group 0 bindings can't change without breaking the
+// other kernels in this shader module).
+
+@group(1) @binding(0) var<storage, read_write> ref_positions: array<vec4<f32>>;
+
+@compute @workgroup_size(64)
+fn baoab_save_ref_and_a(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= params.n_atoms) {
+        return;
+    }
+    let half_dt = params.half_dt;
+    let pos = positions[i].xyz;
+    ref_positions[i] = vec4<f32>(pos, 0.0);
+    let vel = velocities[i].xyz;
+    positions[i] = vec4<f32>(pos + vel * half_dt, 0.0);
+}
+
+// Project velocities so they're consistent with the constraint-
+// realised displacement: v = (pos_after_SHAKE − ref) / half_dt.
+@compute @workgroup_size(64)
+fn baoab_project_v(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= params.n_atoms) {
+        return;
+    }
+    let half_dt = params.half_dt;
+    let inv_half_dt = 1.0 / half_dt;
+    let pos = positions[i].xyz;
+    let ref_p = ref_positions[i].xyz;
+    let vel = (pos - ref_p) * inv_half_dt;
+    velocities[i] = vec4<f32>(vel, 0.0);
+}
+
+// Pure O-step: v = α v + σ ξ.
+@compute @workgroup_size(64)
+fn baoab_o_only(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= params.n_atoms) {
+        return;
+    }
+    let mass = masses[i];
+    var state = rng_state[i];
+    let sigma = sqrt(params.o_sigma_sq_base / mass);
+    let xi_x = gaussian(&state);
+    let xi_y = gaussian(&state);
+    let xi_z = gaussian(&state);
+    var vel = velocities[i].xyz;
+    vel = vec3<f32>(
+        params.alpha * vel.x + sigma * xi_x,
+        params.alpha * vel.y + sigma * xi_y,
+        params.alpha * vel.z + sigma * xi_z,
+    );
+    velocities[i] = vec4<f32>(vel, 0.0);
+    rng_state[i] = state;
+}

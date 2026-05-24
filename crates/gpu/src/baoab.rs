@@ -86,6 +86,19 @@ pub struct BaoabPipeline {
     pos_padded: Vec<[f32; 4]>,
     vel_padded: Vec<[f32; 4]>,
     forces_padded: Vec<[f32; 4]>,
+    // ---- SHAKE-mode optional state ----
+    //
+    // Populated by `enable_shake_mode`.  When `None`, only the folded
+    // `first_half` / `second_half` kernels are usable.  When `Some`,
+    // the integrator can also dispatch the granular kernels
+    // (`b_only`, `save_ref_and_a`, `project_v`, `o_only`) that compose
+    // with a SHAKE pass between A steps.
+    shake_bind_group_layout: Option<wgpu::BindGroupLayout>,
+    shake_bind_group: Option<wgpu::BindGroup>,
+    b_only_pipeline: Option<wgpu::ComputePipeline>,
+    save_ref_and_a_pipeline: Option<wgpu::ComputePipeline>,
+    project_v_pipeline: Option<wgpu::ComputePipeline>,
+    o_only_pipeline: Option<wgpu::ComputePipeline>,
     ctx: &'static GpuContext,
 }
 
@@ -310,8 +323,107 @@ impl BaoabPipeline {
             pos_padded: vec![[0.0; 4]; n_atoms],
             vel_padded: vec![[0.0; 4]; n_atoms],
             forces_padded: vec![[0.0; 4]; n_atoms],
+            shake_bind_group_layout: None,
+            shake_bind_group: None,
+            b_only_pipeline: None,
+            save_ref_and_a_pipeline: None,
+            project_v_pipeline: None,
+            o_only_pipeline: None,
             ctx,
         }
+    }
+
+    /// Enable the granular SHAKE-mode kernels (b_only,
+    /// save_ref_and_a, project_v, o_only).  Compiles the additional
+    /// pipelines, builds the group-1 bind group with
+    /// `ref_positions_buf`, and stores everything for later
+    /// `record_*` calls.  After this returns, `record_b_only` etc.
+    /// become callable; before, they panic.
+    pub fn enable_shake_mode(&mut self, ref_positions_buf: &Arc<wgpu::Buffer>) {
+        let device = &self.ctx.device;
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("baoab.wgsl (shake-mode)"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("baoab.wgsl").into()),
+        });
+        // Group 1 = ref_positions (read-write since baoab_save_ref_and_a
+        // writes to it).
+        let shake_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("baoab_shake_bgl"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let shake_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("baoab_shake_pl"),
+            bind_group_layouts: &[&self.bind_group_layout, &shake_bgl],
+            push_constant_ranges: &[],
+        });
+        let make_pipe = |label: &'static str, entry: &str| -> wgpu::ComputePipeline {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(label),
+                layout: Some(&shake_pipeline_layout),
+                module: &shader,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        };
+        let b_only = make_pipe("baoab_b_only_pipeline", "baoab_b_only");
+        let save_ref_and_a = make_pipe("baoab_save_ref_and_a_pipeline", "baoab_save_ref_and_a");
+        let project_v = make_pipe("baoab_project_v_pipeline", "baoab_project_v");
+        let o_only = make_pipe("baoab_o_only_pipeline", "baoab_o_only");
+        let shake_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("baoab_shake_bind_group"),
+            layout: &shake_bgl,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: ref_positions_buf.as_entire_binding(),
+            }],
+        });
+        self.shake_bind_group_layout = Some(shake_bgl);
+        self.shake_bind_group = Some(shake_bg);
+        self.b_only_pipeline = Some(b_only);
+        self.save_ref_and_a_pipeline = Some(save_ref_and_a);
+        self.project_v_pipeline = Some(project_v);
+        self.o_only_pipeline = Some(o_only);
+    }
+
+    fn record_shake_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        pipe: &wgpu::ComputePipeline,
+        label: &str,
+    ) {
+        let shake_bg = self.shake_bind_group.as_ref()
+            .expect("BaoabPipeline::enable_shake_mode must be called before recording SHAKE-mode kernels");
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some(label),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipe);
+        pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.set_bind_group(1, shake_bg, &[]);
+        pass.dispatch_workgroups(self.n_atoms.div_ceil(64) as u32, 1, 1);
+    }
+
+    pub fn record_b_only(&self, encoder: &mut wgpu::CommandEncoder) {
+        self.record_shake_pass(encoder, self.b_only_pipeline.as_ref().unwrap(), "baoab_b_only_pass");
+    }
+    pub fn record_save_ref_and_a(&self, encoder: &mut wgpu::CommandEncoder) {
+        self.record_shake_pass(encoder, self.save_ref_and_a_pipeline.as_ref().unwrap(), "baoab_save_ref_and_a_pass");
+    }
+    pub fn record_project_v(&self, encoder: &mut wgpu::CommandEncoder) {
+        self.record_shake_pass(encoder, self.project_v_pipeline.as_ref().unwrap(), "baoab_project_v_pass");
+    }
+    pub fn record_o_only(&self, encoder: &mut wgpu::CommandEncoder) {
+        self.record_shake_pass(encoder, self.o_only_pipeline.as_ref().unwrap(), "baoab_o_only_pass");
     }
 
     pub fn upload_positions(&mut self, positions: &[[f32; 3]]) {
@@ -397,6 +509,8 @@ impl BaoabPipeline {
     pub fn positions_buffer(&self) -> &wgpu::Buffer { &self.positions_buf }
     pub fn velocities_buffer(&self) -> &wgpu::Buffer { &self.velocities_buf }
     pub fn forces_buffer(&self) -> &wgpu::Buffer { &self.forces_buf }
+    pub fn positions_buffer_arc(&self) -> Arc<wgpu::Buffer> { self.positions_buf.clone() }
+    pub fn forces_buffer_arc(&self) -> Arc<wgpu::Buffer> { self.forces_buf.clone() }
 
     /// Download current positions back to the CPU.  Used at save-frame
     /// boundaries.

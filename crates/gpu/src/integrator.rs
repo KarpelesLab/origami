@@ -17,11 +17,14 @@
 //! says it's time, then re-uploads via the existing
 //! `update_neighbours` methods.
 
+use std::sync::Arc;
+
 use crate::baoab::{make_rng_state, BaoabPipeline};
 use crate::bonded::{BondedPipeline, BondedSetup};
 use crate::context::GpuContext;
 use crate::gb::{GbPipeline, GbSetup};
 use crate::nonbonded_verlet::{VerletNonbondedPipeline, VerletNonbondedSetup};
+use crate::shake::{PerXShakeData, ShakePipeline};
 
 pub struct IntegratorPipeline {
     n_atoms: usize,
@@ -29,6 +32,14 @@ pub struct IntegratorPipeline {
     nonbonded: VerletNonbondedPipeline,
     gb: GbPipeline,
     baoab: BaoabPipeline,
+    /// Set via [`enable_shake`].  When `Some`, [`step_n_shake`] becomes
+    /// callable and the BAOAB granular kernels are active.
+    shake: Option<ShakePipeline>,
+    /// The ref_positions buffer SHAKE reads — shared between
+    /// `BaoabPipeline::save_ref_and_a` (writes) and the SHAKE kernel
+    /// (reads).  Owned here for lifetime management.
+    #[allow(dead_code)]
+    ref_positions_buf: Option<Arc<wgpu::Buffer>>,
     ctx: &'static GpuContext,
 }
 
@@ -115,7 +126,97 @@ impl IntegratorPipeline {
             Some(positions_buf), Some(velocities_buf), Some(forces_buf),
         );
 
-        Self { n_atoms, bonded, nonbonded, gb, baoab, ctx }
+        Self {
+            n_atoms, bonded, nonbonded, gb, baoab,
+            shake: None,
+            ref_positions_buf: None,
+            ctx,
+        }
+    }
+
+    /// Enable the SHAKE-mode integrator path.  Compiles the SHAKE
+    /// kernel, allocates the ref_positions buffer, enables the
+    /// granular BAOAB kernels.  After this returns, [`step_n_shake`]
+    /// is callable.
+    pub fn enable_shake(&mut self, shake_data: &PerXShakeData, max_iters: u32, tol_sq: f32) {
+        let device = &self.ctx.device;
+        let positions_size = (self.n_atoms * std::mem::size_of::<[f32; 4]>()) as u64;
+        let ref_positions_buf = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("integ_ref_positions"),
+            size: positions_size,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        }));
+        let shake = ShakePipeline::new(
+            self.ctx,
+            self.n_atoms,
+            self.baoab.positions_buffer_arc(),
+            ref_positions_buf.clone(),
+            shake_data,
+            max_iters,
+            tol_sq,
+        );
+        self.baoab.enable_shake_mode(&ref_positions_buf);
+        self.ref_positions_buf = Some(ref_positions_buf);
+        self.shake = Some(shake);
+    }
+
+    /// SHAKE-enabled per-step recipe (12 dispatches per step + the
+    /// initial force eval once per call):
+    ///
+    ///   B  →  save+A  →  SHAKE  →  project_v
+    ///     →  O
+    ///     →  save+A  →  SHAKE  →  project_v
+    ///     →  force eval at new pos
+    ///     →  B
+    ///
+    /// Each B uses the persistent forces buffer.  The initial force
+    /// eval (before the loop) seeds the first B.
+    pub fn step_n_shake(&self, n_steps: usize) {
+        let shake = self.shake.as_ref().expect("call enable_shake first");
+        let device = &self.ctx.device;
+        let queue = &self.ctx.queue;
+        // Initial force evaluation at r_0.
+        {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("integ_shake_initial_force_eval_encoder"),
+            });
+            self.record_force_eval(&mut encoder);
+            queue.submit(Some(encoder.finish()));
+        }
+        // SHAKE adds 6 dispatches per step (2 × {save+A, SHAKE,
+        // project_v}); plus the 6 dispatches that were already there
+        // (force eval + 2 × B + O).  Total ~12 dispatches per step.
+        // CHUNK of 8 keeps each submit at ~96 dispatches.
+        const CHUNK: usize = 8;
+        let mut remaining = n_steps;
+        while remaining > 0 {
+            let this_chunk = remaining.min(CHUNK);
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("integ_shake_step_chunk_encoder"),
+            });
+            for _ in 0..this_chunk {
+                // Leading B (uses forces at r_n from last step).
+                self.baoab.record_b_only(&mut encoder);
+                // First A + SHAKE + velocity projection.
+                self.baoab.record_save_ref_and_a(&mut encoder);
+                shake.record(&mut encoder);
+                self.baoab.record_project_v(&mut encoder);
+                // O.
+                self.baoab.record_o_only(&mut encoder);
+                // Second A + SHAKE + velocity projection.
+                self.baoab.record_save_ref_and_a(&mut encoder);
+                shake.record(&mut encoder);
+                self.baoab.record_project_v(&mut encoder);
+                // Force eval at r_{n+1}.
+                self.record_force_eval(&mut encoder);
+                // Trailing B.
+                self.baoab.record_b_only(&mut encoder);
+            }
+            queue.submit(Some(encoder.finish()));
+            remaining -= this_chunk;
+        }
+        let _ = device.poll(wgpu::Maintain::Wait);
     }
 
     pub fn upload_positions(&mut self, positions: &[[f32; 3]]) {

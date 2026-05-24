@@ -19,10 +19,12 @@
 
 use std::time::Instant;
 
-use chem::{standard_ff, AminoAcid};
+use chem::{classify_atom, standard_ff, AminoAcid, AtomType, Element};
+use dynamics::shake::build_h_bond_constraints;
+use dynamics::full_gpu_integrator::FullGpuIntegrator;
 use dynamics::{minimize, run_langevin, Algorithm, LangevinOptions, MinimizeOptions};
-use geom::{build_extended_chain, build_topology_graph};
-use gpu::GpuContext;
+use geom::{build_extended_chain, build_topology_graph, Vec3};
+use gpu::{build_per_x_shake_data, GpuContext, ShakeConstraint};
 use io::read_pdb;
 
 fn read_fixture(path: &str) -> geom::Structure {
@@ -142,6 +144,86 @@ fn bench_one(path: &str, label: &str, warmup: usize, timed: usize) {
         "  speedup vs CPU: pair-only {:.2}×, full-integrator {:.2}×",
         speedup_pair, speedup_full
     );
+
+    // SHAKE-mode integrator at dt = 2 fs.  Walltime metric is
+    // ms/simulated-fs (= ms/step / 2), which is what matters for
+    // trajectories of fixed simulated length.
+    bench_shake_arm(&s, &g, ff, label, warmup, timed, cpu_per_step_ms);
+}
+
+fn bench_shake_arm(
+    s: &geom::Structure,
+    g: &geom::TopologyGraph,
+    ff: &chem::ForceField,
+    _label: &str,
+    warmup: usize,
+    timed: usize,
+    cpu_ms_per_fs_dt1: f64,
+) {
+    let n = s.atom_count();
+    let atom_types: Vec<AtomType> = s.residues.iter()
+        .flat_map(|r| r.atoms.iter()
+            .map(|a| classify_atom(r.monomer, a.name).unwrap()))
+        .collect();
+    let cpu_constraints = build_h_bond_constraints(s, g, ff, &atom_types);
+    let atoms_flat: Vec<Element> = s.residues.iter()
+        .flat_map(|r| r.atoms.iter().map(|a| a.element)).collect();
+    let gpu_constraints: Vec<ShakeConstraint> = cpu_constraints.iter().map(|c| {
+        let (x, h) = if atoms_flat[c.i] == Element::H {
+            (c.j as u32, c.i as u32)
+        } else {
+            (c.i as u32, c.j as u32)
+        };
+        ShakeConstraint { x_atom: x, h_atom: h, d_sq: c.d_sq as f32 }
+    }).collect();
+    let masses_f32: Vec<f32> = s.residues.iter()
+        .flat_map(|r| r.atoms.iter().map(|a| a.element.mass_da() as f32))
+        .collect();
+    let shake_data = build_per_x_shake_data(n, &gpu_constraints, &masses_f32);
+
+    // ---- Fair baseline: time the SAME `step_batch(timed)` call on
+    // a non-SHAKE FullGpuIntegrator (dt = 1 fs).  Strips out
+    // run_langevin's callback / save-every / construction overhead so
+    // we're comparing apples-to-apples.
+    let mut no_shake = match FullGpuIntegrator::new(s, g, ff, 1.0, 2.0, 310.0, 1) {
+        Ok(f) => f,
+        Err(e) => { eprintln!("  SHAKE arm: GPU unavailable ({e})"); return; }
+    };
+    let velocities = vec![Vec3::zeros(); n];
+    no_shake.upload_initial_state(s, &velocities);
+    no_shake.step_batch(warmup);
+    let t0 = Instant::now();
+    no_shake.step_batch(timed);
+    let no_shake_secs = t0.elapsed().as_secs_f64();
+    let no_shake_ms_per_step = no_shake_secs * 1000.0 / timed as f64;
+    eprintln!(
+        "  GPU (no SHAKE, dt=1 fs, bare step_batch): {timed} steps in {:.2} s — {:.3} ms/step = {:.3} ms/fs",
+        no_shake_secs, no_shake_ms_per_step, no_shake_ms_per_step / 1.0
+    );
+
+    let mut full = match FullGpuIntegrator::new(s, g, ff, 2.0, 2.0, 310.0, 1) {
+        Ok(f) => f,
+        Err(e) => { eprintln!("  SHAKE arm: GPU unavailable ({e})"); return; }
+    };
+    full.enable_shake(&shake_data, 64, 1e-6);
+    full.upload_initial_state(s, &velocities);
+    full.step_batch_shake(warmup);
+    let t0 = Instant::now();
+    full.step_batch_shake(timed);
+    let secs = t0.elapsed().as_secs_f64();
+    let ms_per_step = secs * 1000.0 / timed as f64;
+    let ms_per_fs = ms_per_step / 2.0;  // dt = 2 fs
+    eprintln!(
+        "  GPU (SHAKE, dt=2 fs, bare step_batch_shake): {timed} steps in {:.2} s — {:.3} ms/step = {:.3} ms/fs",
+        secs, ms_per_step, ms_per_fs
+    );
+    eprintln!(
+        "  per-fs comparison: no-SHAKE {:.3} ms/fs vs SHAKE {:.3} ms/fs — SHAKE speedup {:.2}× (also vs CPU: {:.2}×)",
+        no_shake_ms_per_step,
+        ms_per_fs,
+        no_shake_ms_per_step / ms_per_fs,
+        cpu_ms_per_fs_dt1 / ms_per_fs
+    );
 }
 
 /// Variant of [`bench_one`] that works directly on a built (in-memory)
@@ -226,6 +308,7 @@ fn bench_built(mut s: geom::Structure, label: &str, warmup: usize, timed: usize)
         "  speedup vs CPU: pair-only {:.2}×, full-integrator {:.2}×",
         speedup_pair, speedup_full
     );
+    bench_shake_arm(&s, &g, ff, label, warmup, timed, cpu_ms);
 }
 
 #[test]

@@ -41,7 +41,7 @@ use energy::DEFAULT_CUTOFF_A;
 use geom::{Structure, TopologyGraph, Vec3};
 use gpu::{
     pair_list_to_csr, AngleTerm, BondTerm, BondedSetup, DihedralTerm, GbSetup, GpuContext,
-    ImproperTerm, IntegratorPipeline, PeriodicTerm, VerletNonbondedSetup,
+    ImproperTerm, IntegratorPipeline, PerXShakeData, PeriodicTerm, VerletNonbondedSetup,
 };
 
 const KCAL_TO_KJ: f32 = 4.184;
@@ -226,6 +226,20 @@ impl FullGpuIntegrator {
     pub fn step_batch(&mut self, n_steps: usize) {
         self.refresh_neighbour_lists();
         self.integ.step_n(n_steps);
+    }
+
+    /// Enable SHAKE on the underlying integrator pipeline.  After
+    /// this, [`step_batch_shake`] is callable.
+    pub fn enable_shake(&mut self, shake_data: &PerXShakeData, max_iters: u32, tol_sq: f32) {
+        self.integ.enable_shake(shake_data, max_iters, tol_sq);
+    }
+
+    /// SHAKE-mode batched step.  Same drift-check + neighbour refresh
+    /// machinery as [`step_batch`]; calls `step_n_shake` instead of
+    /// `step_n`.
+    pub fn step_batch_shake(&mut self, n_steps: usize) {
+        self.refresh_neighbour_lists();
+        self.integ.step_n_shake(n_steps);
     }
 
     fn refresh_neighbour_lists(&mut self) {
