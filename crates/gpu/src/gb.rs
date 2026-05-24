@@ -25,6 +25,11 @@ pub struct GbSetup<'a> {
     pub cutoff_a: f32,
     /// Pair-force cutoff (typically 10 Å).
     pub pair_cutoff_a: f32,
+    /// Initial capacity of the per-atom neighbour-index buffer in
+    /// *entries*.  Grows automatically on a too-small upload.  At a
+    /// 20 Å Born cutoff a dense all-atom system has ~3000-6000
+    /// neighbours per atom, so `n_atoms * 5000` is a safe default.
+    pub initial_indices_capacity: usize,
 }
 
 #[repr(C)]
@@ -49,10 +54,18 @@ pub struct GbPipeline {
     n_atoms: usize,
     // Born-radius stage.
     born_pipeline: wgpu::ComputePipeline,
+    born_bind_group_layout: wgpu::BindGroupLayout,
     born_bind_group: wgpu::BindGroup,
+    born_params_buf: wgpu::Buffer,
+    rho_tilde_buf: wgpu::Buffer,
+    rho_buf: wgpu::Buffer,
+    scale_buf: wgpu::Buffer,
     // Force stage.
     force_pipeline: wgpu::ComputePipeline,
+    force_bind_group_layout: wgpu::BindGroupLayout,
     force_bind_group: wgpu::BindGroup,
+    force_params_buf: wgpu::Buffer,
+    charges_buf: wgpu::Buffer,
     // Shared buffers.
     positions_buf: wgpu::Buffer,
     // Holds the per-atom effective Born radii produced by `gb_born.wgsl`
@@ -65,6 +78,14 @@ pub struct GbPipeline {
     readback_buf: wgpu::Buffer,
     forces_size: u64,
     pos_padded: Vec<[f32; 4]>,
+    // Neighbour-list (CSR) buffers — shared between both compute
+    // passes.  The pair-force kernel filters internally by the
+    // smaller 10 Å pair cutoff; the Born-radius kernel walks the
+    // full 20 Å list.
+    nbr_count_buf: wgpu::Buffer,
+    nbr_start_buf: wgpu::Buffer,
+    nbr_indices_buf: wgpu::Buffer,
+    nbr_indices_capacity: usize,
     ctx: &'static GpuContext,
 }
 
@@ -130,6 +151,27 @@ impl GbPipeline {
             mapped_at_creation: false,
         });
 
+        // ---- Neighbour-list buffers (shared by both passes) ----
+        let nbr_count_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gb_nbr_count"),
+            size: (n_atoms * std::mem::size_of::<u32>()).max(4) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let nbr_start_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gb_nbr_start"),
+            size: (n_atoms * std::mem::size_of::<u32>()).max(4) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let cap = setup.initial_indices_capacity.max(64);
+        let nbr_indices_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gb_nbr_indices"),
+            size: (cap * std::mem::size_of::<u32>()) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         // ---- Born-radius stage ----
         let born_params = BornParams {
             n_atoms: n_atoms as u32,
@@ -154,19 +196,20 @@ impl GbPipeline {
             compilation_options: Default::default(),
             cache: None,
         });
-        let born_layout = born_pipeline.get_bind_group_layout(0);
-        let born_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("gb_born_bind"),
-            layout: &born_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: born_params_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: positions_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: rho_tilde_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: rho_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: scale_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 5, resource: r_eff_buf.as_entire_binding() },
-            ],
-        });
+        let born_bind_group_layout = born_pipeline.get_bind_group_layout(0);
+        let born_bind_group = create_born_bind_group(
+            device,
+            &born_bind_group_layout,
+            &born_params_buf,
+            &positions_buf,
+            &rho_tilde_buf,
+            &rho_buf,
+            &scale_buf,
+            &r_eff_buf,
+            &nbr_count_buf,
+            &nbr_start_buf,
+            &nbr_indices_buf,
+        );
 
         // ---- GB pair-force stage ----
         let prefactor_kj =
@@ -194,32 +237,100 @@ impl GbPipeline {
             compilation_options: Default::default(),
             cache: None,
         });
-        let force_layout = force_pipeline.get_bind_group_layout(0);
-        let force_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("gb_force_bind"),
-            layout: &force_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: force_params_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: positions_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: charges_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: r_eff_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: forces_buf.as_entire_binding() },
-            ],
-        });
+        let force_bind_group_layout = force_pipeline.get_bind_group_layout(0);
+        let force_bind_group = create_force_bind_group(
+            device,
+            &force_bind_group_layout,
+            &force_params_buf,
+            &positions_buf,
+            &charges_buf,
+            &r_eff_buf,
+            &forces_buf,
+            &nbr_count_buf,
+            &nbr_start_buf,
+            &nbr_indices_buf,
+        );
 
         Self {
             n_atoms,
             born_pipeline,
+            born_bind_group_layout,
             born_bind_group,
+            born_params_buf,
+            rho_tilde_buf,
+            rho_buf,
+            scale_buf,
             force_pipeline,
+            force_bind_group_layout,
             force_bind_group,
+            force_params_buf,
+            charges_buf,
             positions_buf,
             r_eff_buf,
             forces_buf,
             readback_buf,
             forces_size,
             pos_padded: vec![[0.0; 4]; n_atoms],
+            nbr_count_buf,
+            nbr_start_buf,
+            nbr_indices_buf,
+            nbr_indices_capacity: cap,
             ctx,
+        }
+    }
+
+    /// Upload a fresh neighbour list — same CSR layout as the
+    /// nonbonded Verlet pipeline: `counts[i]`, `starts[i]`, and a
+    /// flat `indices` array with both directions of every pair.
+    /// Excluded pairs (1-2 / 1-3 etc.) do not exist for GB, so no
+    /// exclusion bitmap is needed.
+    ///
+    /// Auto-grows the indices buffer + rebuilds bind groups if the
+    /// upload exceeds the current capacity.
+    pub fn update_neighbours(&mut self, counts: &[u32], starts: &[u32], indices: &[u32]) {
+        assert_eq!(counts.len(), self.n_atoms);
+        assert_eq!(starts.len(), self.n_atoms);
+        let device = &self.ctx.device;
+        let queue = &self.ctx.queue;
+        if indices.len() > self.nbr_indices_capacity {
+            let new_cap = indices.len().next_power_of_two().max(64);
+            self.nbr_indices_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("gb_nbr_indices"),
+                size: (new_cap * std::mem::size_of::<u32>()) as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.nbr_indices_capacity = new_cap;
+            self.born_bind_group = create_born_bind_group(
+                device,
+                &self.born_bind_group_layout,
+                &self.born_params_buf,
+                &self.positions_buf,
+                &self.rho_tilde_buf,
+                &self.rho_buf,
+                &self.scale_buf,
+                &self.r_eff_buf,
+                &self.nbr_count_buf,
+                &self.nbr_start_buf,
+                &self.nbr_indices_buf,
+            );
+            self.force_bind_group = create_force_bind_group(
+                device,
+                &self.force_bind_group_layout,
+                &self.force_params_buf,
+                &self.positions_buf,
+                &self.charges_buf,
+                &self.r_eff_buf,
+                &self.forces_buf,
+                &self.nbr_count_buf,
+                &self.nbr_start_buf,
+                &self.nbr_indices_buf,
+            );
+        }
+        queue.write_buffer(&self.nbr_count_buf, 0, bytemuck::cast_slice(counts));
+        queue.write_buffer(&self.nbr_start_buf, 0, bytemuck::cast_slice(starts));
+        if !indices.is_empty() {
+            queue.write_buffer(&self.nbr_indices_buf, 0, bytemuck::cast_slice(indices));
         }
     }
 
@@ -275,4 +386,64 @@ impl GbPipeline {
         self.readback_buf.unmap();
         out
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_born_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    params: &wgpu::Buffer,
+    positions: &wgpu::Buffer,
+    rho_tilde: &wgpu::Buffer,
+    rho: &wgpu::Buffer,
+    scale: &wgpu::Buffer,
+    r_eff: &wgpu::Buffer,
+    nbr_count: &wgpu::Buffer,
+    nbr_start: &wgpu::Buffer,
+    nbr_indices: &wgpu::Buffer,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("gb_born_bind"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: positions.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: rho_tilde.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 3, resource: rho.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 4, resource: scale.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 5, resource: r_eff.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 6, resource: nbr_count.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 7, resource: nbr_start.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 8, resource: nbr_indices.as_entire_binding() },
+        ],
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_force_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    params: &wgpu::Buffer,
+    positions: &wgpu::Buffer,
+    charges: &wgpu::Buffer,
+    r_eff: &wgpu::Buffer,
+    forces: &wgpu::Buffer,
+    nbr_count: &wgpu::Buffer,
+    nbr_start: &wgpu::Buffer,
+    nbr_indices: &wgpu::Buffer,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("gb_force_bind"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: positions.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: charges.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 3, resource: r_eff.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 4, resource: forces.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 5, resource: nbr_count.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 6, resource: nbr_start.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 7, resource: nbr_indices.as_entire_binding() },
+        ],
+    })
 }

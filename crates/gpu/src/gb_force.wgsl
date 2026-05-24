@@ -1,16 +1,28 @@
-// Generalized-Born OBC II pair-force kernel.
-// One thread per atom i.  Reads effective Born radii produced by the
-// `gb_born.wgsl` kernel.  Output: per-atom GB pair force (kJ/mol/Å).
+// Generalized-Born OBC II pair-force kernel — Verlet-list variant.
+// One thread per atom i.  Walks i's precomputed neighbour list (built
+// at the 20-Å Born cutoff + skin, *not* the 10-Å pair cutoff — see
+// below).  Reads effective Born radii produced by `gb_born.wgsl`.
+//
+// Output: per-atom GB pair force (kJ/mol/Å).
 //
 // Sign convention matches `energy::forces_gb::add_gb_forces_soa`
 // exactly:  F_i = Σ_j prefactor_kj · q_i q_j / f_GB² · df_GB/dr · r̂_ij
 // where r̂_ij = (r_j - r_i) / r and the prefactor *for forces* is the
 // positive version (the energy's −½ becomes +1 after differentiation
 // because every pair contributes twice to the sum).
+//
+// Why one neighbour list for two cutoffs: the GB Born-radius pass
+// needs a 20 Å list; the GB pair force only needs 10 Å.  Maintaining
+// two CSR lists doubles the CPU drift-check + cell-list cost.
+// Instead the kernel walks the wider 20 Å list and filters internally
+// with `r2 > pair_cutoff_sq`.  At a 10 Å pair cutoff the 20 Å list
+// is ~8× larger, but most extra entries reject after a single
+// distance compute — the inner-loop cost penalty is ~30 % at the
+// scales where the GPU is competitive in the first place.
 
 struct Params {
     n_atoms: u32,
-    cutoff_sq: f32,
+    cutoff_sq: f32,        // squared pair cutoff (10 Å)² in Å²
     /// Pre-multiplied (1/εsolute − 1/εwater) × 332.0637 × 4.184
     /// — positive value, in kJ·Å/mol/e².
     prefactor_kj: f32,
@@ -22,6 +34,9 @@ struct Params {
 @group(0) @binding(2) var<storage, read> charges: array<f32>;
 @group(0) @binding(3) var<storage, read> r_eff: array<f32>;
 @group(0) @binding(4) var<storage, read_write> forces: array<vec4<f32>>;
+@group(0) @binding(5) var<storage, read> nbr_count: array<u32>;   // per-atom neighbour count
+@group(0) @binding(6) var<storage, read> nbr_start: array<u32>;   // per-atom offset into nbr_indices
+@group(0) @binding(7) var<storage, read> nbr_indices: array<u32>; // flat neighbour-j array
 
 @compute @workgroup_size(64)
 fn gb_force(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -37,10 +52,10 @@ fn gb_force(@builtin(global_invocation_id) gid: vec3<u32>) {
         forces[i] = vec4<f32>(acc, 0.0);
         return;
     }
-    for (var j: u32 = 0u; j < params.n_atoms; j = j + 1u) {
-        if (j == i) {
-            continue;
-        }
+    let count = nbr_count[i];
+    let start = nbr_start[i];
+    for (var k: u32 = 0u; k < count; k = k + 1u) {
+        let j = nbr_indices[start + k];
         let qj = charges[j];
         if (qj == 0.0) {
             continue;

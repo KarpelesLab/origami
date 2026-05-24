@@ -1,13 +1,14 @@
-// Generalized-Born OBC II Born radii kernel.
-// One thread per atom i.  Each thread loops over all atoms j to
-// integrate the HCT pairwise descreening, then applies the OBC II
-// tanh transform to convert ψ → R_eff.
+// Generalized-Born OBC II Born radii kernel — Verlet-list variant.
+// One thread per atom i.  Each thread walks i's precomputed neighbour
+// list (built on the CPU at the 20-Å Born cutoff + skin), integrates
+// the HCT pairwise descreening, then applies the OBC II tanh
+// transform to convert ψ → R_eff.
 //
 // Output: per-atom effective Born radius (Å).
 
 struct Params {
     n_atoms: u32,
-    cutoff_sq: f32,     // squared cutoff in Å²
+    cutoff_sq: f32,     // squared Born cutoff in Å²
     _pad0: u32,
     _pad1: u32,
 }
@@ -18,13 +19,15 @@ struct Params {
 @group(0) @binding(3) var<storage, read> rho: array<f32>;         // intrinsic vdW radius
 @group(0) @binding(4) var<storage, read> scale: array<f32>;       // HCT scale per atom
 @group(0) @binding(5) var<storage, read_write> r_eff: array<f32>; // output Born radii
+@group(0) @binding(6) var<storage, read> nbr_count: array<u32>;   // per-atom neighbour count
+@group(0) @binding(7) var<storage, read> nbr_start: array<u32>;   // per-atom offset into nbr_indices
+@group(0) @binding(8) var<storage, read> nbr_indices: array<u32>; // flat neighbour-j array
 
 const OBC_ALPHA: f32 = 1.0;
 const OBC_BETA: f32 = 0.8;
 const OBC_GAMMA: f32 = 4.85;
 
 /// HCT pairwise descreening (matches CPU `gb::pairwise_descreening`).
-/// Returns the contribution from atom j to atom i's integral.
 fn pairwise_descreening(r: f32, rho_i_tilde: f32, s_rho_j_tilde: f32) -> f32 {
     if (r + s_rho_j_tilde <= rho_i_tilde) {
         return 0.0;
@@ -60,10 +63,10 @@ fn born_radii(@builtin(global_invocation_id) gid: vec3<u32>) {
     let rho_i_tilde = rho_tilde[i];
 
     var integral: f32 = 0.0;
-    for (var j: u32 = 0u; j < params.n_atoms; j = j + 1u) {
-        if (j == i) {
-            continue;
-        }
+    let count = nbr_count[i];
+    let start = nbr_start[i];
+    for (var k: u32 = 0u; k < count; k = k + 1u) {
+        let j = nbr_indices[start + k];
         let dx = positions[j].xyz - pi;
         let r2 = dot(dx, dx);
         if (r2 > params.cutoff_sq || r2 < 1e-18) {

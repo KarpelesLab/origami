@@ -11,7 +11,7 @@ use chem::{standard_ff, AminoAcid, Element};
 use energy::gb::{intrinsic_radius_pub, hct_scale_pub, OBC_OFFSET_PUB, BORN_RADIUS_CUTOFF_A_PUB};
 use energy::forces_gb::GB_DEFAULT_CUTOFF_A_PUB;
 use geom::{build_extended_chain, build_topology_graph, Vec3};
-use gpu::{GbPipeline, GbSetup, GpuContext};
+use gpu::{pair_list_to_csr, GbPipeline, GbSetup, GpuContext};
 
 #[test]
 fn gpu_gb_matches_cpu_on_ala_lys_glu() {
@@ -45,6 +45,24 @@ fn gpu_gb_matches_cpu_on_ala_lys_glu() {
         }
     }
 
+    // Build a brute-force neighbour list at the Born-radius cutoff —
+    // every i < j pair with |r| < 20 Å.  The GPU kernels walk this
+    // CSR list; the pair-force kernel filters by 10 Å internally.
+    let born_cutoff = BORN_RADIUS_CUTOFF_A_PUB;
+    let born_cutoff_sq = born_cutoff * born_cutoff;
+    let mut pairs: Vec<(u32, u32)> = Vec::new();
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let dx = positions[i][0] as f64 - positions[j][0] as f64;
+            let dy = positions[i][1] as f64 - positions[j][1] as f64;
+            let dz = positions[i][2] as f64 - positions[j][2] as f64;
+            if dx * dx + dy * dy + dz * dz <= born_cutoff_sq {
+                pairs.push((i as u32, j as u32));
+            }
+        }
+    }
+    let (counts, starts, indices) = pair_list_to_csr(n, &pairs);
+
     let mut pipe = GbPipeline::new(ctx, n, GbSetup {
         rho: &rho,
         rho_tilde: &rho_tilde,
@@ -52,7 +70,9 @@ fn gpu_gb_matches_cpu_on_ala_lys_glu() {
         charges: &charges,
         cutoff_a: BORN_RADIUS_CUTOFF_A_PUB as f32,
         pair_cutoff_a: GB_DEFAULT_CUTOFF_A_PUB as f32,
+        initial_indices_capacity: indices.len().max(64),
     });
+    pipe.update_neighbours(&counts, &starts, &indices);
     pipe.update_positions(&positions);
     let gpu_forces = pipe.compute_forces();
 

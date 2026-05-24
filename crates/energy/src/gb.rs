@@ -200,23 +200,22 @@ fn charge_for(ff: &ForceField, monomer: Monomer, atom_name: &str) -> f64 {
 /// Returns the number of atoms whose effective Born radius came out
 /// unphysical and was clamped, so callers can surface that to the
 /// breakdown.
-pub fn compute_born_radii_into_scratch(
-    structure: &Structure,
+/// Rebuild the Born-radius Verlet pair list on `scratch` if any atom
+/// has drifted more than `VERLET_SKIN / 2` since the last build (or
+/// if the list has never been built).  The list covers
+/// `born_cutoff_a + VERLET_SKIN`; the inner pair loop still applies
+/// `born_cutoff_a`.
+///
+/// Returns `true` if a rebuild happened — the GPU GB pipeline uses
+/// this signal to decide whether to re-upload the CSR neighbour list.
+///
+/// Pre-condition: `scratch.xs/ys/zs` are up to date — call
+/// [`crate::scratch::ForceScratch::sync_positions`] first.
+pub fn ensure_gb_verlet_list(
     scratch: &mut crate::scratch::ForceScratch,
-) -> usize {
-    use rayon::prelude::*;
+    born_cutoff_a: f64,
+) -> bool {
     let n = scratch.n;
-    debug_assert_eq!(structure.atom_count(), n, "scratch sized for a different structure");
-
-    // Sync positions into the scratch SoA arrays — the caller may or
-    // may not have done this already (the AoS path didn't), and the
-    // Verlet rebuild check reads from scratch.{x,y,z}s.
-    scratch.sync_positions(structure);
-
-    // Verlet cache (same pattern as the nonbonded SoA path): rebuild
-    // only when an atom has drifted more than skin/2 from the
-    // position at the last list build. The Born cutoff is 20 Å so
-    // the cached list covers `BORN_RADIUS_CUTOFF_A + skin`.
     let skin = crate::scratch::VERLET_SKIN_A;
     let half_skin_sq = (0.5 * skin) * (0.5 * skin);
     let need_rebuild = !scratch.gb_verlet_valid || {
@@ -232,23 +231,42 @@ pub fn compute_born_radii_into_scratch(
         }
         moved
     };
-
-    if need_rebuild {
-        let mut positions: Vec<Vec3> = Vec::with_capacity(n);
-        for i in 0..n {
-            positions.push(Vec3::new(scratch.xs[i], scratch.ys[i], scratch.zs[i]));
-        }
-        let list_cutoff = BORN_RADIUS_CUTOFF_A + skin;
-        let cl = CellList::build(&positions, list_cutoff);
-        scratch.gb_verlet_pairs.clear();
-        for (i, j, _r) in cl.iter_pairs_within(&positions, list_cutoff) {
-            scratch.gb_verlet_pairs.push((i as u32, j as u32));
-        }
-        scratch.gb_verlet_ref_x.copy_from_slice(&scratch.xs);
-        scratch.gb_verlet_ref_y.copy_from_slice(&scratch.ys);
-        scratch.gb_verlet_ref_z.copy_from_slice(&scratch.zs);
-        scratch.gb_verlet_valid = true;
+    if !need_rebuild {
+        return false;
     }
+    let mut positions: Vec<Vec3> = Vec::with_capacity(n);
+    for i in 0..n {
+        positions.push(Vec3::new(scratch.xs[i], scratch.ys[i], scratch.zs[i]));
+    }
+    let list_cutoff = born_cutoff_a + skin;
+    let cl = CellList::build(&positions, list_cutoff);
+    scratch.gb_verlet_pairs.clear();
+    for (i, j, _r) in cl.iter_pairs_within(&positions, list_cutoff) {
+        scratch.gb_verlet_pairs.push((i as u32, j as u32));
+    }
+    scratch.gb_verlet_ref_x.copy_from_slice(&scratch.xs);
+    scratch.gb_verlet_ref_y.copy_from_slice(&scratch.ys);
+    scratch.gb_verlet_ref_z.copy_from_slice(&scratch.zs);
+    scratch.gb_verlet_valid = true;
+    true
+}
+
+pub fn compute_born_radii_into_scratch(
+    structure: &Structure,
+    scratch: &mut crate::scratch::ForceScratch,
+) -> usize {
+    use rayon::prelude::*;
+    let n = scratch.n;
+    debug_assert_eq!(structure.atom_count(), n, "scratch sized for a different structure");
+
+    // Sync positions into the scratch SoA arrays — the caller may or
+    // may not have done this already (the AoS path didn't), and the
+    // Verlet rebuild check reads from scratch.{x,y,z}s.
+    scratch.sync_positions(structure);
+
+    // Verlet cache maintenance — extracted so the GPU GB pipeline
+    // can reuse the exact same drift detector + cell-list rebuild.
+    ensure_gb_verlet_list(scratch, BORN_RADIUS_CUTOFF_A);
 
     // Zero the accumulator buffer.
     scratch.gb_integral[..n].fill(0.0);

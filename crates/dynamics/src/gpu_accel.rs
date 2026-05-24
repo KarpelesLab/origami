@@ -29,7 +29,10 @@
 use chem::{classify_atom, AtomType, ForceField};
 use energy::scratch::{ForceScratch, ONE_FOUR_BIT, EXCLUDED_BIT};
 use energy::forces_nonbonded::ensure_verlet_list;
-use energy::gb::{intrinsic_radius_pub, hct_scale_pub, OBC_OFFSET_PUB, BORN_RADIUS_CUTOFF_A_PUB};
+use energy::gb::{
+    ensure_gb_verlet_list, hct_scale_pub, intrinsic_radius_pub, BORN_RADIUS_CUTOFF_A_PUB,
+    OBC_OFFSET_PUB,
+};
 use energy::forces_gb::GB_DEFAULT_CUTOFF_A_PUB;
 use geom::Structure;
 use gpu::{
@@ -49,10 +52,17 @@ pub struct GpuAccelerator {
     /// Cached position buffer reused between steps (avoids per-step
     /// Vec allocation).
     pos_buf: Vec<[f32; 3]>,
-    /// Cached neighbour-list CSR buffers (rebuilt on Verlet refresh).
-    counts: Vec<u32>,
-    starts: Vec<u32>,
-    indices: Vec<u32>,
+    /// Cached LJ+Coulomb neighbour-list CSR buffers (rebuilt on the
+    /// nonbonded Verlet refresh at 10 Å + skin).
+    nb_counts: Vec<u32>,
+    nb_starts: Vec<u32>,
+    nb_indices: Vec<u32>,
+    /// Cached GB neighbour-list CSR buffers (rebuilt on the GB Verlet
+    /// refresh at 20 Å + skin — a different list because the cutoff
+    /// is twice as wide).
+    gb_counts: Vec<u32>,
+    gb_starts: Vec<u32>,
+    gb_indices: Vec<u32>,
     /// LJ + Coulomb cutoff in Å (passed at construction; doesn't change
     /// during a trajectory).
     cutoff_a: f64,
@@ -153,6 +163,11 @@ impl GpuAccelerator {
                 initial_indices_capacity: initial_cap,
             },
         );
+        // GB neighbour list at 20 Å is ~8× wider than the 10 Å LJ
+        // list — but each atom in a dense globular protein still
+        // sees only ~3000-6000 neighbours.  Estimate generously so
+        // the first upload doesn't trigger the grow path.
+        let gb_initial_cap = (n * 5000).max(64);
         let gb = GbPipeline::new(
             ctx,
             n,
@@ -163,6 +178,7 @@ impl GpuAccelerator {
                 charges: &charges,
                 cutoff_a: BORN_RADIUS_CUTOFF_A_PUB as f32,
                 pair_cutoff_a: GB_DEFAULT_CUTOFF_A_PUB as f32,
+                initial_indices_capacity: gb_initial_cap,
             },
         );
         // Sanity: the kept exclusion + 1-4 bits agree with the masks
@@ -176,9 +192,12 @@ impl GpuAccelerator {
             nonbonded,
             gb,
             pos_buf: vec![[0.0; 3]; n],
-            counts: Vec::new(),
-            starts: Vec::new(),
-            indices: Vec::new(),
+            nb_counts: Vec::new(),
+            nb_starts: Vec::new(),
+            nb_indices: Vec::new(),
+            gb_counts: Vec::new(),
+            gb_starts: Vec::new(),
+            gb_indices: Vec::new(),
             cutoff_a,
         })
     }
@@ -197,20 +216,36 @@ impl GpuAccelerator {
     /// `scratch.accumulate_into`.
     pub fn add_nonbonded_and_gb(&mut self, scratch: &mut ForceScratch) {
         debug_assert_eq!(scratch.n, self.n_atoms);
-        // Refresh the Verlet list on the CPU side (the GPU just walks
-        // whatever's there).  This both detects drift and rebuilds via
-        // the existing CellList; returns whether the list changed.
-        let rebuilt = ensure_verlet_list(scratch, self.cutoff_a);
+        // Refresh both Verlet lists on the CPU side — one at 10 Å for
+        // LJ + Coulomb, one at 20 Å for GB.  Each `ensure_*` call
+        // returns whether it actually rebuilt, so we only re-upload
+        // the changed list(s) to the GPU.
+        let nb_rebuilt = ensure_verlet_list(scratch, self.cutoff_a);
+        let gb_rebuilt = ensure_gb_verlet_list(scratch, BORN_RADIUS_CUTOFF_A_PUB);
 
-        // If the list was rebuilt, convert to CSR and push to the GPU.
-        // Otherwise the previously-uploaded neighbour list still applies
-        // (the skin guarantees correctness until the next drift event).
-        if rebuilt || self.counts.is_empty() {
-            let (counts, starts, indices) = pair_list_to_csr(self.n_atoms, &scratch.verlet_pairs);
-            self.counts = counts;
-            self.starts = starts;
-            self.indices = indices;
-            self.nonbonded.update_neighbours(&self.counts, &self.starts, &self.indices);
+        if nb_rebuilt || self.nb_counts.is_empty() {
+            let (counts, starts, indices) =
+                pair_list_to_csr(self.n_atoms, &scratch.verlet_pairs);
+            self.nb_counts = counts;
+            self.nb_starts = starts;
+            self.nb_indices = indices;
+            self.nonbonded.update_neighbours(
+                &self.nb_counts,
+                &self.nb_starts,
+                &self.nb_indices,
+            );
+        }
+        if gb_rebuilt || self.gb_counts.is_empty() {
+            let (counts, starts, indices) =
+                pair_list_to_csr(self.n_atoms, &scratch.gb_verlet_pairs);
+            self.gb_counts = counts;
+            self.gb_starts = starts;
+            self.gb_indices = indices;
+            self.gb.update_neighbours(
+                &self.gb_counts,
+                &self.gb_starts,
+                &self.gb_indices,
+            );
         }
 
         // Pack f64 SoA → f32 AoS for the GPU upload.  This is the
