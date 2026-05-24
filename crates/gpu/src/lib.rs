@@ -35,3 +35,7 @@ pub use context::GpuContext;
 pub use gb::{GbPipeline, GbSetup};
 pub use nonbonded::{nonbonded_force_gpu, NonbondedPipeline, NonbondedSetup};
 pub use nonbonded_verlet::{pair_list_to_csr, VerletNonbondedPipeline, VerletNonbondedSetup};
+/// Re-export the wgpu crate so downstream consumers (e.g.
+/// `dynamics::GpuAccelerator`) can record into our pipelines'
+/// command encoders without needing a separate `wgpu` dependency.
+pub use wgpu;

@@ -259,14 +259,39 @@ impl GpuAccelerator {
             ];
         }
 
-        // Run the two pipelines.  Currently sequential (Verlet pass,
-        // then GB pass); they could run in parallel queues but on a
-        // single device the GPU schedules them sequentially anyway, so
-        // there's no win.
+        // Push positions to both pipelines.  These are separate
+        // `write_buffer` calls (each pipeline has its own positions
+        // buffer) — wgpu coalesces them into the next queue submit
+        // automatically.
         self.nonbonded.update_positions(&self.pos_buf);
-        let nb_f = self.nonbonded.compute();
         self.gb.update_positions(&self.pos_buf);
-        let gb_f = self.gb.compute_forces();
+
+        // Kernel fusion: record both pipelines' compute passes plus
+        // their readback copies into a single command encoder, submit
+        // once, map both readback buffers, then wait once for the GPU
+        // to drain.  This eliminates one of the two per-step
+        // submit + poll round-trips, which on Apple Silicon is the
+        // single largest fixed-cost item at scales where the GPU
+        // would otherwise win.
+        let ctx = GpuContext::get().expect("GPU context already established at constructor time");
+        let device = &ctx.device;
+        let queue = &ctx.queue;
+        let mut encoder = device.create_command_encoder(&gpu::wgpu::CommandEncoderDescriptor {
+            label: Some("gpu_accel_fused_encoder"),
+        });
+        self.nonbonded.record_compute(&mut encoder);
+        self.gb.record_compute(&mut encoder);
+        self.nonbonded.record_readback_copy(&mut encoder);
+        self.gb.record_readback_copy(&mut encoder);
+        queue.submit(Some(encoder.finish()));
+
+        let nb_rx = self.nonbonded.begin_readback();
+        let gb_rx = self.gb.begin_readback();
+        let _ = device.poll(gpu::wgpu::Maintain::Wait);
+        nb_rx.recv().expect("nb map_async sender dropped").expect("nb buffer map");
+        gb_rx.recv().expect("gb map_async sender dropped").expect("gb buffer map");
+        let nb_f = self.nonbonded.take_readback();
+        let gb_f = self.gb.take_readback();
 
         // Accumulate into scratch.  f32 → f64 widening — no precision
         // loss beyond what already happened during the GPU eval.

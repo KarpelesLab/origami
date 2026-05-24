@@ -352,6 +352,27 @@ impl GbPipeline {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("gb_encoder"),
         });
+        self.record_compute(&mut encoder);
+        self.record_readback_copy(&mut encoder);
+        queue.submit(Some(encoder.finish()));
+
+        let slice = self.readback_buf.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+        let _ = device.poll(wgpu::Maintain::Wait);
+        rx.recv().expect("map_async sender dropped").expect("buffer map");
+        let data = slice.get_mapped_range();
+        let padded: &[[f32; 4]] = bytemuck::cast_slice(&data);
+        let out: Vec<[f32; 3]> = padded.iter().map(|v| [v[0], v[1], v[2]]).collect();
+        drop(data);
+        self.readback_buf.unmap();
+        out
+    }
+
+    /// Record both compute passes (Born radii → pair force) into a
+    /// caller-owned encoder.  Used by `dynamics::GpuAccelerator` to
+    /// fuse with the nonbonded kernel into a single submit.
+    pub fn record_compute(&self, encoder: &mut wgpu::CommandEncoder) {
         let wg_count = self.n_atoms.div_ceil(64) as u32;
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -371,14 +392,25 @@ impl GbPipeline {
             pass.set_bind_group(0, &self.force_bind_group, &[]);
             pass.dispatch_workgroups(wg_count, 1, 1);
         }
-        encoder.copy_buffer_to_buffer(&self.forces_buf, 0, &self.readback_buf, 0, self.forces_size);
-        queue.submit(Some(encoder.finish()));
+    }
 
+    /// Append a copy from the device-local forces buffer to the
+    /// CPU-mappable readback buffer.
+    pub fn record_readback_copy(&self, encoder: &mut wgpu::CommandEncoder) {
+        encoder.copy_buffer_to_buffer(&self.forces_buf, 0, &self.readback_buf, 0, self.forces_size);
+    }
+
+    /// See [`VerletNonbondedPipeline::begin_readback`].
+    pub fn begin_readback(&self) -> std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>> {
         let slice = self.readback_buf.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
-        let _ = device.poll(wgpu::Maintain::Wait);
-        rx.recv().expect("map_async sender dropped").expect("buffer map");
+        rx
+    }
+
+    /// See [`VerletNonbondedPipeline::take_readback`].
+    pub fn take_readback(&self) -> Vec<[f32; 3]> {
+        let slice = self.readback_buf.slice(..);
         let data = slice.get_mapped_range();
         let padded: &[[f32; 4]] = bytemuck::cast_slice(&data);
         let out: Vec<[f32; 3]> = padded.iter().map(|v| [v[0], v[1], v[2]]).collect();
