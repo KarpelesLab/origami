@@ -464,5 +464,11 @@ pub fn pair_list_to_csr(n_atoms: usize, pairs: &[(u32, u32)]) -> (Vec<u32>, Vec<
         indices[(starts[jj] + cursor[jj]) as usize] = i;
         cursor[jj] += 1;
     }
+    // Sorting each atom's neighbour slice was tried and reverted —
+    // it improved cache locality in the kernel but the sort itself
+    // (O(N · avg_count · log avg_count) at every Verlet rebuild)
+    // cost more than the cache wins saved.  At 5840 atoms / 200
+    // nbrs the sort alone added ~40 ms/rebuild.  See bench note in
+    // commit PERF.gpu.18 if this gets revisited.
     (counts, starts, indices)
 }
