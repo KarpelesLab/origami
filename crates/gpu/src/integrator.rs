@@ -138,39 +138,59 @@ impl IntegratorPipeline {
         self.baoab.set_step_params(dt_fs, gamma_ps_inv, kbt_kj_mol);
     }
 
-    /// Run `n_steps` integrator iterations entirely on the GPU.
-    /// No CPU↔GPU sync per step.  The complete per-step recipe:
+    /// Run `n_steps` BAOAB iterations entirely on the GPU.  No CPU↔GPU
+    /// sync per step.
     ///
-    ///   1. zero forces buffer
-    ///   2. bonded kernels (bond → angle → dihedral → improper) — accumulate
-    ///   3. pair kernels (nonbonded + GB) — accumulate
-    ///   4. BAOAB first half (uses forces at r_n, advances to r_{n+1})
-    ///   5. zero forces buffer
-    ///   6. bonded kernels again at r_{n+1}
-    ///   7. pair kernels again at r_{n+1}
-    ///   8. BAOAB second half (B step using forces at r_{n+1})
+    /// **Folded BAOAB**.  A naive per-step recipe would be
     ///
-    /// Steps 5-8 produce the F(r_{n+1}) that the next iteration
-    /// reuses as its leading-B force.  The first iteration computes
-    /// F(r_0) at step 1 too.
+    ///   1. force eval at r_n   ← used by leading B
+    ///   2. B → A → O → A   (positions now at r_{n+1})
+    ///   3. force eval at r_{n+1}   ← used by trailing B
+    ///   4. B
     ///
-    /// All N steps are recorded into one command encoder and submitted
-    /// once.  This is the kernel-fusion win the user predicted: no
-    /// per-step sync, just GPU pipeline throughput.
+    /// — i.e. two force evals per step.  But the trailing B at step n
+    /// uses the same F(r_{n+1}) as the leading B at step n+1, so the
+    /// two force evals can be folded into one:
+    ///
+    ///   [initial: force eval at r_0, once]
+    ///   for step in 1..=n:
+    ///     B → A → O → A   (positions move to r_{n+1})
+    ///     force eval at r_{n+1}   ← serves trailing B *and* next step's leading B
+    ///     B
+    ///
+    /// One force eval per step.  Halves the per-step kernel work — the
+    /// 4 bonded passes + nonbonded + GB dominate per-step cost at
+    /// every scale where the GPU is competitive in the first place.
+    ///
+    /// The "initial force eval" is done unconditionally at the start
+    /// of every `step_n` call; it's one extra eval per batch (~4 % of
+    /// a 25-step batch's work) and removes the need to track whether
+    /// the persistent forces buffer is still in sync with the current
+    /// positions across multiple step_n invocations.
     pub fn step_n(&self, n_steps: usize) {
         let device = &self.ctx.device;
         let queue = &self.ctx.queue;
-        // Each integrator step records 17 compute dispatches (zero
-        // + 4 bonded + nb + gb, then first-half BAOAB, then the same
-        // pre-BAOAB force chain, then second-half BAOAB).  On Apple
+
+        // Initial force evaluation — populates the persistent forces
+        // buffer with F(r_0).  The first iteration's leading B will
+        // read from it (folded into the trailing B of the previous
+        // iteration … or, on this first iteration, just this initial
+        // eval).
+        {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("integ_initial_force_eval_encoder"),
+            });
+            self.record_force_eval(&mut encoder);
+            queue.submit(Some(encoder.finish()));
+        }
+
+        // Chunk the loop: each integrator step is now 9 dispatches
+        // (B-A-O-A + 7-pass force eval + B = 1 + 7 + 1).  On Apple
         // Silicon Metal, command buffers with hundreds of dispatches
-        // cause stalls (likely an internal GPU command-buffer size or
-        // pipeline-state limit — empirically OK up to ~200 dispatches
-        // per submit).  Chunk the loop and submit every CHUNK steps;
-        // we don't `poll(Wait)` between submits so the GPU keeps
-        // executing in parallel with the CPU recording the next
-        // chunk.
-        const CHUNK: usize = 8;
+        // stall, so we cap at CHUNK steps per encoder.  CHUNK = 16
+        // keeps each submit at ~144 dispatches — well within the
+        // working range and bigger than the pre-fold limit of 8.
+        const CHUNK: usize = 16;
         let mut remaining = n_steps;
         while remaining > 0 {
             let this_chunk = remaining.min(CHUNK);
@@ -178,27 +198,32 @@ impl IntegratorPipeline {
                 label: Some("integ_step_chunk_encoder"),
             });
             for _ in 0..this_chunk {
-                self.bonded.record_zero(&mut encoder);
-                self.bonded.record_bond(&mut encoder);
-                self.bonded.record_angle(&mut encoder);
-                self.bonded.record_dihedral(&mut encoder);
-                self.bonded.record_improper(&mut encoder);
-                self.nonbonded.record_compute(&mut encoder);
-                self.gb.record_compute(&mut encoder);
+                // BAOAB first half: B-A-O-A using forces at r_n.
                 self.baoab.record_first_half(&mut encoder);
-                self.bonded.record_zero(&mut encoder);
-                self.bonded.record_bond(&mut encoder);
-                self.bonded.record_angle(&mut encoder);
-                self.bonded.record_dihedral(&mut encoder);
-                self.bonded.record_improper(&mut encoder);
-                self.nonbonded.record_compute(&mut encoder);
-                self.gb.record_compute(&mut encoder);
+                // Force eval at the new positions r_{n+1}.  Serves
+                // both this step's trailing B and the next step's
+                // leading B.
+                self.record_force_eval(&mut encoder);
+                // BAOAB second half: B using forces at r_{n+1}.
                 self.baoab.record_second_half(&mut encoder);
             }
             queue.submit(Some(encoder.finish()));
             remaining -= this_chunk;
         }
         let _ = device.poll(wgpu::Maintain::Wait);
+    }
+
+    /// One full force evaluation: zero the buffer, then accumulate
+    /// bond + angle + dihedral + improper + nonbonded + GB.  Records
+    /// 7 compute passes.
+    fn record_force_eval(&self, encoder: &mut wgpu::CommandEncoder) {
+        self.bonded.record_zero(encoder);
+        self.bonded.record_bond(encoder);
+        self.bonded.record_angle(encoder);
+        self.bonded.record_dihedral(encoder);
+        self.bonded.record_improper(encoder);
+        self.nonbonded.record_compute(encoder);
+        self.gb.record_compute(encoder);
     }
 
     pub fn download_positions(&self) -> Vec<[f32; 3]> {
