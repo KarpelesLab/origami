@@ -223,6 +223,13 @@ enum Command {
         /// if no GPU adapter is available.
         #[arg(long)]
         with_gpu: bool,
+        /// Run the full BAOAB integrator on the GPU — bonded + pair
+        /// forces + integrator updates all on-device, no CPU↔GPU sync
+        /// between save frames.  Mutually exclusive with `--shake-h`,
+        /// `--with-sasa`, `--with-cmap` (none of those are ported to
+        /// the GPU integrator).  Best speedup at N ≥ 2000.
+        #[arg(long)]
+        with_gpu_integrator: bool,
     },
     /// Replica-exchange molecular dynamics. Runs N Langevin trajectories
     /// at different temperatures with periodic Metropolis swaps between
@@ -404,6 +411,7 @@ fn main() -> Result<()> {
             with_cmap,
             shake_h,
             with_gpu,
+            with_gpu_integrator,
         } => run_dynamics(
             &input,
             &output_trajectory,
@@ -418,6 +426,7 @@ fn main() -> Result<()> {
             with_cmap,
             shake_h,
             with_gpu,
+            with_gpu_integrator,
         ),
         Command::Remd {
             input,
@@ -693,6 +702,7 @@ fn run_dynamics(
     include_cmap: bool,
     shake_h: bool,
     use_gpu: bool,
+    use_gpu_integrator_flag: bool,
 ) -> Result<()> {
     let file = fs::File::open(input)
         .with_context(|| format!("opening {}", input.display()))?;
@@ -713,6 +723,7 @@ fn run_dynamics(
         include_cmap,
         constrain_h_bonds: shake_h,
         use_gpu,
+        use_gpu_integrator: use_gpu_integrator_flag,
     };
 
     eprintln!(
@@ -821,6 +832,7 @@ fn run_cotranslate_cmd(
         include_cmap: with_cmap,
         constrain_h_bonds: false,
         use_gpu: false,
+        use_gpu_integrator: false,
     };
 
     let tunnel = if with_tunnel {

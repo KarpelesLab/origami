@@ -91,6 +91,14 @@ pub struct LangevinOptions {
     /// Requires the `gpu` crate to find a usable adapter; falls back
     /// to CPU with a stderr warning if construction fails.
     pub use_gpu: bool,
+    /// Use the full GPU integrator (BAOAB + bonded + nonbonded + GB +
+    /// RNG all on device).  Positions / velocities live on the GPU
+    /// between save-frame boundaries; the CPU only re-syncs when the
+    /// callback fires.  Eliminates the per-step CPU↔GPU round-trip
+    /// that bounds the simpler `use_gpu` path.  Mutually exclusive
+    /// with `use_gpu` and `constrain_h_bonds` (SHAKE isn't ported to
+    /// GPU) and with SASA/CMAP (likewise).
+    pub use_gpu_integrator: bool,
 }
 
 impl Default for LangevinOptions {
@@ -107,6 +115,7 @@ impl Default for LangevinOptions {
             include_cmap: false,
             constrain_h_bonds: false,
             use_gpu: false,
+            use_gpu_integrator: false,
         }
     }
 }
@@ -152,6 +161,14 @@ pub fn run_langevin<F>(
 where
     F: FnMut(LangevinFrame<'_>),
 {
+    if opts.use_gpu_integrator {
+        // Erase the closure type via `&mut dyn FnMut(...)` so the
+        // helper doesn't add a new layer of `&mut F` to the run_langevin
+        // generic each fallback hop (would otherwise hit Rust's
+        // monomorphisation recursion limit).
+        let mut cb: &mut dyn FnMut(LangevinFrame<'_>) = &mut callback;
+        return run_langevin_gpu_integrator(structure, graph, ff, opts, &mut cb);
+    }
     let n = structure.atom_count();
     let masses = collect_masses(structure);
     let mut velocities = vec![Vec3::zeros(); n];
@@ -394,6 +411,123 @@ where
         atoms_count: n,
         diverged,
         shake_failures,
+    }
+}
+
+/// Run a Langevin trajectory entirely on the GPU using
+/// [`crate::full_gpu_integrator::FullGpuIntegrator`].  Bonded, pair,
+/// and integrator updates all execute on-device; the CPU only syncs
+/// at save-frame boundaries.  Falls through to the CPU integrator on
+/// GPU-unavailable.
+fn run_langevin_gpu_integrator(
+    structure: &mut Structure,
+    graph: &TopologyGraph,
+    ff: &ForceField,
+    opts: LangevinOptions,
+    callback: &mut &mut dyn FnMut(LangevinFrame<'_>),
+) -> LangevinSummary {
+    use crate::full_gpu_integrator::FullGpuIntegrator;
+    let n = structure.atom_count();
+    let masses = collect_masses(structure);
+    let mut velocities = vec![Vec3::zeros(); n];
+    let mut rng = Xoshiro256pp::from_seed(opts.seed);
+    if opts.randomise_initial_velocities {
+        initialise_maxwell_boltzmann(&mut velocities, &masses, opts.temperature_k, &mut rng);
+    }
+    // Try to construct the integrator; fall back to CPU if GPU init fails.
+    let mut full = match FullGpuIntegrator::new(
+        structure, graph, ff,
+        opts.dt_fs, opts.friction_ps_inv, opts.temperature_k, opts.seed,
+    ) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!(
+                "warning: GPU integrator requested but unavailable ({e}); using CPU"
+            );
+            let mut opts2 = opts;
+            opts2.use_gpu_integrator = false;
+            // Re-invoke run_langevin via a non-generic adapter so we
+            // don't trigger the monomorphisation recursion.
+            return run_langevin(structure, graph, ff, opts2, |frame| {
+                (**callback)(frame)
+            });
+        }
+    };
+    full.upload_initial_state(structure, &velocities);
+
+    let dof = (3 * n) as f64;
+    let mut sum_t = 0.0;
+    let mut sum_t2 = 0.0;
+    let mut samples = 0usize;
+
+    // Emit step-0 frame (matches CPU integrator behaviour).
+    let ke0 = kinetic_energy_kj_mol(&velocities, &masses);
+    let t0 = if dof > 0.0 {
+        2.0 * ke0 / (dof * BOLTZMANN_KJ_PER_MOL_K)
+    } else {
+        0.0
+    };
+    if opts.save_every > 0 {
+        callback(LangevinFrame {
+            step: 0,
+            time_fs: 0.0,
+            instantaneous_temperature_k: t0,
+            kinetic_energy_kj_mol: ke0,
+            structure,
+        });
+    }
+
+    let batch = if opts.save_every == 0 { opts.steps } else { opts.save_every };
+    let mut step_done = 0usize;
+    while step_done < opts.steps {
+        let this_batch = batch.min(opts.steps - step_done);
+        full.step_batch(this_batch);
+        step_done += this_batch;
+        // Sync positions back into `structure` for the callback.
+        full.download_positions_into(structure);
+        let v = full.download_velocities();
+        let ke = kinetic_energy_kj_mol(&v, &masses);
+        let t_inst = if dof > 0.0 {
+            2.0 * ke / (dof * BOLTZMANN_KJ_PER_MOL_K)
+        } else {
+            0.0
+        };
+        sum_t += t_inst;
+        sum_t2 += t_inst * t_inst;
+        samples += 1;
+        if opts.save_every > 0 {
+            callback(LangevinFrame {
+                step: step_done,
+                time_fs: step_done as f64 * opts.dt_fs,
+                instantaneous_temperature_k: t_inst,
+                kinetic_energy_kj_mol: ke,
+                structure,
+            });
+        }
+    }
+
+    let mean = if samples > 0 { sum_t / samples as f64 } else { 0.0 };
+    let var = if samples > 0 {
+        (sum_t2 / samples as f64 - mean * mean).max(0.0)
+    } else {
+        0.0
+    };
+    let velocities_final = full.download_velocities();
+    let ke_final = kinetic_energy_kj_mol(&velocities_final, &masses);
+    let equipartition_ratio = if dof > 0.0 && opts.temperature_k > 0.0 {
+        ke_final / (0.5 * dof * BOLTZMANN_KJ_PER_MOL_K * opts.temperature_k)
+    } else {
+        0.0
+    };
+    LangevinSummary {
+        steps_run: samples,
+        temperature_mean_k: mean,
+        temperature_stddev_k: var.sqrt(),
+        equipartition_ratio,
+        final_kinetic_energy_kj_mol: ke_final,
+        atoms_count: n,
+        diverged: !ke_final.is_finite(),
+        shake_failures: 0,
     }
 }
 

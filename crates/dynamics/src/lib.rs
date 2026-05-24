@@ -7,6 +7,7 @@
 
 pub mod cotranslate;
 pub mod energy_eval;
+pub mod full_gpu_integrator;
 pub mod gpu_accel;
 pub mod langevin;
 pub mod lbfgs;
@@ -17,6 +18,7 @@ pub mod rng;
 pub mod shake;
 pub mod steepest_descent;
 
+pub use full_gpu_integrator::FullGpuIntegrator;
 pub use gpu_accel::GpuAccelerator;
 
 pub use cotranslate::{

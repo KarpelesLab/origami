@@ -656,6 +656,7 @@ mod tests {
             include_cmap: false,
             constrain_h_bonds: false,
             use_gpu: false,
+            use_gpu_integrator: false,
         };
         let ff = standard_ff();
         let mut frames = 0usize;

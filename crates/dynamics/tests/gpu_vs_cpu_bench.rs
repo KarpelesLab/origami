@@ -74,6 +74,7 @@ fn bench_one(path: &str, label: &str, warmup: usize, timed: usize) {
         include_cmap: false,
         constrain_h_bonds: false,
         use_gpu: false,
+        use_gpu_integrator: false,
     };
 
     // CPU: do a short warmup run (lets the JIT / branch predictors
@@ -95,13 +96,12 @@ fn bench_one(path: &str, label: &str, warmup: usize, timed: usize) {
         cpu_secs, cpu_per_step_ms, sum_cpu.temperature_mean_k, sum_cpu.diverged
     );
 
-    // GPU.
+    // GPU — pair forces only.
     let mut s_gpu = s.clone();
     let mut gpu_opts = template;
     gpu_opts.use_gpu = true;
     gpu_opts.steps = warmup;
     run_langevin(&mut s_gpu, &g, ff, gpu_opts, |_| {});
-
     let mut s_gpu = s.clone();
     gpu_opts.steps = timed;
     let t0 = Instant::now();
@@ -109,16 +109,39 @@ fn bench_one(path: &str, label: &str, warmup: usize, timed: usize) {
     let gpu_secs = t0.elapsed().as_secs_f64();
     let gpu_per_step_ms = gpu_secs * 1000.0 / timed as f64;
     eprintln!(
-        "  GPU: {timed} steps in {:.2} s — {:.3} ms/step  (T_mean {:.1} K, diverged={})",
-        gpu_secs, gpu_per_step_ms, sum_gpu.temperature_mean_k, sum_gpu.diverged
+        "  GPU (pair only): {timed} steps in {:.2} s — {:.3} ms/step  (T_mean {:.1} K)",
+        gpu_secs, gpu_per_step_ms, sum_gpu.temperature_mean_k,
     );
 
-    let speedup = cpu_per_step_ms / gpu_per_step_ms;
-    if speedup >= 1.0 {
-        eprintln!("  GPU speedup: {:.2}× faster", speedup);
-    } else {
-        eprintln!("  GPU slowdown: {:.2}× slower", 1.0 / speedup);
-    }
+    // Full GPU integrator (bonded + pair + BAOAB all on device).
+    let mut s_gi = s.clone();
+    let mut gi_opts = template;
+    gi_opts.use_gpu = false;
+    gi_opts.use_gpu_integrator = true;
+    gi_opts.steps = warmup;
+    run_langevin(&mut s_gi, &g, ff, gi_opts, |_| {});
+    let mut s_gi = s.clone();
+    gi_opts.steps = timed;
+    // Save_every of 0 means no callback overhead — the integrator
+    // can run a full `timed` batch without intermediate sync.  Pick a
+    // realistic save cadence instead to see how the per-batch sync
+    // cost shapes per-step time.
+    gi_opts.save_every = (timed / 4).max(10);
+    let t0 = Instant::now();
+    let sum_gi = run_langevin(&mut s_gi, &g, ff, gi_opts, |_| {});
+    let gi_secs = t0.elapsed().as_secs_f64();
+    let gi_per_step_ms = gi_secs * 1000.0 / timed as f64;
+    eprintln!(
+        "  GPU (full integrator, save_every={}): {timed} steps in {:.2} s — {:.3} ms/step  (T_mean {:.1} K)",
+        gi_opts.save_every, gi_secs, gi_per_step_ms, sum_gi.temperature_mean_k,
+    );
+
+    let speedup_pair = cpu_per_step_ms / gpu_per_step_ms;
+    let speedup_full = cpu_per_step_ms / gi_per_step_ms;
+    eprintln!(
+        "  speedup vs CPU: pair-only {:.2}×, full-integrator {:.2}×",
+        speedup_pair, speedup_full
+    );
 }
 
 /// Variant of [`bench_one`] that works directly on a built (in-memory)
@@ -145,6 +168,7 @@ fn bench_built(mut s: geom::Structure, label: &str, warmup: usize, timed: usize)
         include_cmap: false,
         constrain_h_bonds: false,
         use_gpu: false,
+        use_gpu_integrator: false,
     };
     let mut s_cpu = s.clone();
     let mut cpu_opts = template;
@@ -173,16 +197,35 @@ fn bench_built(mut s: geom::Structure, label: &str, warmup: usize, timed: usize)
     let gpu_secs = t0.elapsed().as_secs_f64();
     let gpu_ms = gpu_secs * 1000.0 / timed as f64;
     eprintln!(
-        "  GPU: {timed} steps in {:.2} s — {:.3} ms/step  (T_mean {:.1} K)",
+        "  GPU (pair only): {timed} steps in {:.2} s — {:.3} ms/step  (T_mean {:.1} K)",
         gpu_secs, gpu_ms, sum_gpu.temperature_mean_k
     );
 
-    let ratio = cpu_ms / gpu_ms;
-    if ratio >= 1.0 {
-        eprintln!("  GPU speedup: {:.2}× faster", ratio);
-    } else {
-        eprintln!("  GPU slowdown: {:.2}× slower", 1.0 / ratio);
-    }
+    // Full GPU integrator (bonded + pair + BAOAB on device).
+    let mut s_gi = s.clone();
+    let mut gi_opts = template;
+    gi_opts.use_gpu = false;
+    gi_opts.use_gpu_integrator = true;
+    gi_opts.steps = warmup;
+    run_langevin(&mut s_gi, &g, ff, gi_opts, |_| {});
+    let mut s_gi = s.clone();
+    gi_opts.steps = timed;
+    gi_opts.save_every = (timed / 4).max(10);
+    let t0 = Instant::now();
+    let sum_gi = run_langevin(&mut s_gi, &g, ff, gi_opts, |_| {});
+    let gi_secs = t0.elapsed().as_secs_f64();
+    let gi_ms = gi_secs * 1000.0 / timed as f64;
+    eprintln!(
+        "  GPU (full integrator, save_every={}): {timed} steps in {:.2} s — {:.3} ms/step  (T_mean {:.1} K)",
+        gi_opts.save_every, gi_secs, gi_ms, sum_gi.temperature_mean_k,
+    );
+
+    let speedup_pair = cpu_ms / gpu_ms;
+    let speedup_full = cpu_ms / gi_ms;
+    eprintln!(
+        "  speedup vs CPU: pair-only {:.2}×, full-integrator {:.2}×",
+        speedup_pair, speedup_full
+    );
 }
 
 #[test]
@@ -245,6 +288,7 @@ fn bench_villin_diagnostic() {
         include_cmap: false,
         constrain_h_bonds: false,
         use_gpu: true,
+        use_gpu_integrator: false,
     };
     let t0 = Instant::now();
     run_langevin(&mut s_gpu, &g, ff, opts, |frame| {

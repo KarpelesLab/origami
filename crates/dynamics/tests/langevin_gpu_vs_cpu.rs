@@ -42,6 +42,7 @@ fn ala_lys_glu_gpu_run_tracks_cpu() {
         include_cmap: false,
         constrain_h_bonds: false,
         use_gpu: false,
+        use_gpu_integrator: false,
     };
 
     // CPU baseline.

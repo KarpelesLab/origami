@@ -257,6 +257,13 @@ impl GpuAccelerator {
         self.nonbonded.update_positions(&self.pos_buf);
         self.gb.update_positions(&self.pos_buf);
 
+        // Pipeline kernels accumulate into the forces buffers (so
+        // bonded kernels can compose with them in the integrator
+        // path).  In this standalone API the caller expects fresh
+        // forces — zero both buffers first.
+        self.nonbonded.clear_forces();
+        self.gb.clear_forces();
+
         // Kernel fusion: record both pipelines' compute passes plus
         // their readback copies into a single command encoder, submit
         // once, map both readback buffers, then wait once for the GPU
