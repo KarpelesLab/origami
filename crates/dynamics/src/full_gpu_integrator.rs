@@ -40,8 +40,9 @@ use energy::units::{deg_to_rad, kcal_to_kj};
 use energy::DEFAULT_CUTOFF_A;
 use geom::{Structure, TopologyGraph, Vec3};
 use gpu::{
-    pair_list_to_csr, AngleTerm, BondTerm, BondedSetup, DihedralTerm, GbSetup, GpuContext,
-    ImproperTerm, IntegratorPipeline, PerXShakeData, PeriodicTerm, VerletNonbondedSetup,
+    morton_permutation, pair_list_to_csr, AngleTerm, BondTerm, BondedSetup, DihedralTerm, GbSetup,
+    GpuContext, ImproperTerm, IntegratorPipeline, PerXShakeData, PeriodicTerm,
+    VerletNonbondedSetup,
 };
 
 const KCAL_TO_KJ: f32 = 4.184;
@@ -64,6 +65,18 @@ pub struct FullGpuIntegrator {
     /// Per-atom positions scratch for upload/download.
     pos_buf: Vec<[f32; 3]>,
     vel_buf: Vec<[f32; 3]>,
+    // ---- Spatial reindexing ----
+    //
+    // The GPU sees atoms in Morton (Z-order) order: atoms that are
+    // spatially close get adjacent GPU indices, so consecutive
+    // workgroups process atoms with heavily-overlapping Verlet
+    // neighbour sets.  The CPU's `structure` keeps original order;
+    // we translate at the upload / download boundaries.
+    //   - `cpu_to_gpu[cpu_idx] = gpu_idx`
+    //   - `gpu_to_cpu[gpu_idx] = cpu_idx`
+    cpu_to_gpu: Vec<u32>,
+    #[allow(dead_code)]
+    gpu_to_cpu: Vec<u32>,
 }
 
 impl FullGpuIntegrator {
@@ -78,23 +91,31 @@ impl FullGpuIntegrator {
     ) -> Result<Self, gpu::context::GpuInitError> {
         let ctx = GpuContext::get()?;
         let n = structure.atom_count();
-        let atom_types = build_atom_types(structure);
-        let mut masses_f32: Vec<f32> = Vec::with_capacity(n);
-        let mut charges: Vec<f32> = Vec::with_capacity(n);
-        let mut rho: Vec<f32> = Vec::with_capacity(n);
-        let mut rho_tilde: Vec<f32> = Vec::with_capacity(n);
-        let mut scale: Vec<f32> = Vec::with_capacity(n);
+        let atom_types = build_atom_types(structure);  // CPU-indexed
+        // First pass: gather per-atom data + initial positions in CPU
+        // order — the same order `structure.residues` walks.
+        let mut masses_cpu: Vec<f32> = Vec::with_capacity(n);
+        let mut charges_cpu: Vec<f32> = Vec::with_capacity(n);
+        let mut rho_cpu: Vec<f32> = Vec::with_capacity(n);
+        let mut rho_tilde_cpu: Vec<f32> = Vec::with_capacity(n);
+        let mut scale_cpu: Vec<f32> = Vec::with_capacity(n);
+        let mut positions_cpu: Vec<[f32; 3]> = Vec::with_capacity(n);
         for r in &structure.residues {
             for a in &r.atoms {
-                masses_f32.push(a.element.mass_da() as f32);
-                charges.push(ff.partial_charge_for(r.monomer, a.name).unwrap_or(0.0) as f32);
+                masses_cpu.push(a.element.mass_da() as f32);
+                charges_cpu.push(ff.partial_charge_for(r.monomer, a.name).unwrap_or(0.0) as f32);
                 let r0 = intrinsic_radius_pub(a.element);
-                rho.push(r0 as f32);
-                rho_tilde.push((r0 - OBC_OFFSET_PUB) as f32);
-                scale.push(hct_scale_pub(a.element) as f32);
+                rho_cpu.push(r0 as f32);
+                rho_tilde_cpu.push((r0 - OBC_OFFSET_PUB) as f32);
+                scale_cpu.push(hct_scale_pub(a.element) as f32);
+                positions_cpu.push([
+                    a.position.x as f32,
+                    a.position.y as f32,
+                    a.position.z as f32,
+                ]);
             }
         }
-        let atom_lj_data: Vec<[f32; 4]> = atom_types
+        let atom_lj_data_cpu: Vec<[f32; 4]> = atom_types
             .iter()
             .map(|t| {
                 let p = ff.nonbonded(*t).unwrap_or_else(|| {
@@ -110,14 +131,35 @@ impl FullGpuIntegrator {
                 ]
             })
             .collect();
-        // Build the exclusion + 1-4 bitmaps by walking the graph's
-        // sparse bond/angle/dihedral lists instead of doing the naive
-        // O(N²) (i, j) → graph-lookup scan.  At 5840 atoms the naive
-        // path takes ~1.7 s of CPU (34 M pair tests × ~50 ns per
-        // is_one_four lookup which itself walks O(degree²) bonded_to
-        // neighbours).  Sparse traversal is O(N · avg_degree) and
-        // takes ~1 ms.  Identical bit pattern at the end: each pair
-        // that's 1-2, 1-3, or 1-4 gets its corresponding flag set.
+
+        // ---- Morton spatial sort ----
+        //
+        // Reorder the per-atom GPU buffers so spatially-close atoms
+        // get adjacent indices.  After this every per-atom buffer
+        // sent to the GPU (positions, velocities, masses, charges,
+        // LJ params, GB params, RNG seeds, bonded CSR atom indices,
+        // exclusion bitmap) is in GPU order.  The CPU `structure`
+        // stays in original order — we translate at the upload /
+        // download boundaries.
+        let (gpu_to_cpu, cpu_to_gpu) = morton_permutation(&positions_cpu);
+        let permute = |src: &[f32]| -> Vec<f32> {
+            (0..n).map(|g| src[gpu_to_cpu[g] as usize]).collect()
+        };
+        let permute_vec4 = |src: &[[f32; 4]]| -> Vec<[f32; 4]> {
+            (0..n).map(|g| src[gpu_to_cpu[g] as usize]).collect()
+        };
+        let masses_f32 = permute(&masses_cpu);
+        let charges = permute(&charges_cpu);
+        let rho = permute(&rho_cpu);
+        let rho_tilde = permute(&rho_tilde_cpu);
+        let scale = permute(&scale_cpu);
+        let atom_lj_data = permute_vec4(&atom_lj_data_cpu);
+
+        // Build the exclusion + 1-4 bitmaps in *GPU* index space —
+        // walk the graph's sparse lists in CPU index space, translate
+        // each pair, set bits in the GPU-indexed bitmap.  Same
+        // sparse-vs-O(N²) win as before; just an extra
+        // `cpu_to_gpu[...]` per pair to translate.
         let n_words = (n * n).div_ceil(32);
         let mut exclusions = vec![0u32; n_words];
         let mut one_four = vec![0u32; n_words];
@@ -128,30 +170,31 @@ impl FullGpuIntegrator {
             buf[bit / 32] |= 1u32 << (bit % 32);
         };
         for b in &graph.bonds {
-            set_bit(&mut exclusions, b.a, b.b);
+            set_bit(&mut exclusions,
+                cpu_to_gpu[b.a] as usize, cpu_to_gpu[b.b] as usize);
         }
         for a in &graph.angles {
-            // The angle (a, b, c) implies the 1-3 pair (a, c).  b is
-            // the central atom; we already handled the 1-2 a-b and
-            // b-c via the bond list above.
-            set_bit(&mut exclusions, a.a, a.c);
+            set_bit(&mut exclusions,
+                cpu_to_gpu[a.a] as usize, cpu_to_gpu[a.c] as usize);
         }
         for d in &graph.dihedrals {
-            // Dihedral (a, b, c, d) gives the 1-4 pair (a, d).
-            // If that pair is *also* 1-2 or 1-3 (e.g. a 4-membered
-            // ring), the exclusion bit is already set above and the
-            // 1-4 bit here is harmless — the kernel's exclusion check
-            // takes precedence.
-            set_bit(&mut one_four, d.a, d.d);
+            set_bit(&mut one_four,
+                cpu_to_gpu[d.a] as usize, cpu_to_gpu[d.d] as usize);
         }
 
-        // Bonded term tables + per-atom CSR.
-        let (bond_terms, ab_count, ab_start, ab_index) = build_bonds(graph, ff, &atom_types, n);
-        let (angle_terms, aa_count, aa_start, aa_index) = build_angles(graph, ff, &atom_types, n);
+        // Bonded term tables + per-atom CSR — built in GPU index
+        // space so the kernel's `forces[i]` accumulator lands in the
+        // right GPU slot.  The builders look up FF params by atom
+        // *type* (which is index-position independent), then store
+        // GPU-translated atom indices in each term struct.
+        let (bond_terms, ab_count, ab_start, ab_index) =
+            build_bonds(graph, ff, &atom_types, &cpu_to_gpu, n);
+        let (angle_terms, aa_count, aa_start, aa_index) =
+            build_angles(graph, ff, &atom_types, &cpu_to_gpu, n);
         let (dihedral_terms, ad_count, ad_start, ad_index) =
-            build_dihedrals(graph, ff, &atom_types, n);
+            build_dihedrals(graph, ff, &atom_types, &cpu_to_gpu, n);
         let (improper_terms, ai_count, ai_start, ai_index) =
-            build_impropers(graph, ff, &atom_types, n);
+            build_impropers(graph, ff, &atom_types, &cpu_to_gpu, n);
 
         let nb_setup = VerletNonbondedSetup {
             atom_lj_data: &atom_lj_data,
@@ -211,23 +254,29 @@ impl FullGpuIntegrator {
             gb_indices: Vec::new(),
             pos_buf: vec![[0.0; 3]; n],
             vel_buf: vec![[0.0; 3]; n],
+            cpu_to_gpu,
+            gpu_to_cpu,
         })
     }
 
     pub fn upload_initial_state(&mut self, structure: &Structure, velocities: &[Vec3]) {
-        let mut idx = 0;
+        // CPU `structure` is in CPU index order; GPU expects Morton
+        // (GPU) order.  Translate via `cpu_to_gpu`.
+        let mut cpu_idx = 0;
         for r in &structure.residues {
             for a in &r.atoms {
-                self.pos_buf[idx] = [
+                let g = self.cpu_to_gpu[cpu_idx] as usize;
+                self.pos_buf[g] = [
                     a.position.x as f32,
                     a.position.y as f32,
                     a.position.z as f32,
                 ];
-                idx += 1;
+                cpu_idx += 1;
             }
         }
-        for (i, v) in velocities.iter().enumerate() {
-            self.vel_buf[i] = [v.x as f32, v.y as f32, v.z as f32];
+        for (cpu_idx, v) in velocities.iter().enumerate() {
+            let g = self.cpu_to_gpu[cpu_idx] as usize;
+            self.vel_buf[g] = [v.x as f32, v.y as f32, v.z as f32];
         }
         self.integ.upload_positions(&self.pos_buf);
         self.integ.upload_velocities(&self.vel_buf);
@@ -250,8 +299,15 @@ impl FullGpuIntegrator {
 
     /// Enable SHAKE on the underlying integrator pipeline.  After
     /// this, [`step_batch_shake`] is callable.
+    ///
+    /// **Important**: the caller passes `shake_data` constructed from
+    /// CPU-indexed atom indices (typical usage:
+    /// `build_h_bond_constraints` + `build_per_x_shake_data` from
+    /// `dynamics::shake`).  This method translates the per-atom
+    /// tables into GPU (Morton) index space before forwarding.
     pub fn enable_shake(&mut self, shake_data: &PerXShakeData, max_iters: u32, tol_sq: f32) {
-        self.integ.enable_shake(shake_data, max_iters, tol_sq);
+        let translated = translate_shake_data_to_gpu(shake_data, &self.cpu_to_gpu);
+        self.integ.enable_shake(&translated, max_iters, tol_sq);
     }
 
     /// SHAKE-mode batched step.  Same drift-check + neighbour refresh
@@ -263,24 +319,36 @@ impl FullGpuIntegrator {
     }
 
     fn refresh_neighbour_lists(&mut self) {
-        let positions = self.integ.download_positions();
-        // Sync into scratch positions for the drift detector.
-        for i in 0..self.n_atoms {
-            self.scratch.xs[i] = positions[i][0] as f64;
-            self.scratch.ys[i] = positions[i][1] as f64;
-            self.scratch.zs[i] = positions[i][2] as f64;
+        let positions_gpu_order = self.integ.download_positions();
+        // Translate GPU-ordered positions back into CPU-ordered
+        // scratch.xs/ys/zs — the Verlet drift detector + cell list
+        // both work in CPU index space (`scratch` was built with
+        // ForceScratch::new(structure, ...) which uses CPU order).
+        for cpu_idx in 0..self.n_atoms {
+            let g = self.cpu_to_gpu[cpu_idx] as usize;
+            self.scratch.xs[cpu_idx] = positions_gpu_order[g][0] as f64;
+            self.scratch.ys[cpu_idx] = positions_gpu_order[g][1] as f64;
+            self.scratch.zs[cpu_idx] = positions_gpu_order[g][2] as f64;
         }
         let nb_rebuilt = ensure_verlet_list(&mut self.scratch, DEFAULT_CUTOFF_A);
         let gb_rebuilt = ensure_gb_verlet_list(&mut self.scratch, BORN_RADIUS_CUTOFF_A_PUB);
         if nb_rebuilt || self.nb_counts.is_empty() {
-            let (c, s, i) = pair_list_to_csr(self.n_atoms, &self.scratch.verlet_pairs);
+            // Translate Verlet pairs from CPU index space to GPU
+            // index space before CSR conversion.
+            let gpu_pairs: Vec<(u32, u32)> = self.scratch.verlet_pairs.iter()
+                .map(|&(a, b)| (self.cpu_to_gpu[a as usize], self.cpu_to_gpu[b as usize]))
+                .collect();
+            let (c, s, i) = pair_list_to_csr(self.n_atoms, &gpu_pairs);
             self.nb_counts = c;
             self.nb_starts = s;
             self.nb_indices = i;
             self.integ.update_nb_neighbours(&self.nb_counts, &self.nb_starts, &self.nb_indices);
         }
         if gb_rebuilt || self.gb_counts.is_empty() {
-            let (c, s, i) = pair_list_to_csr(self.n_atoms, &self.scratch.gb_verlet_pairs);
+            let gpu_pairs: Vec<(u32, u32)> = self.scratch.gb_verlet_pairs.iter()
+                .map(|&(a, b)| (self.cpu_to_gpu[a as usize], self.cpu_to_gpu[b as usize]))
+                .collect();
+            let (c, s, i) = pair_list_to_csr(self.n_atoms, &gpu_pairs);
             self.gb_counts = c;
             self.gb_starts = s;
             self.gb_indices = i;
@@ -289,28 +357,78 @@ impl FullGpuIntegrator {
     }
 
     /// Pull current positions from the GPU and write them back into
-    /// `structure`.
+    /// `structure`.  Translates from GPU index space (Morton order)
+    /// back to CPU order via `cpu_to_gpu`.
     pub fn download_positions_into(&self, structure: &mut Structure) {
-        let positions = self.integ.download_positions();
-        let mut idx = 0;
+        let positions_gpu_order = self.integ.download_positions();
+        let mut cpu_idx = 0;
         for r in &mut structure.residues {
             for a in &mut r.atoms {
-                a.position.x = positions[idx][0] as f64;
-                a.position.y = positions[idx][1] as f64;
-                a.position.z = positions[idx][2] as f64;
-                idx += 1;
+                let g = self.cpu_to_gpu[cpu_idx] as usize;
+                a.position.x = positions_gpu_order[g][0] as f64;
+                a.position.y = positions_gpu_order[g][1] as f64;
+                a.position.z = positions_gpu_order[g][2] as f64;
+                cpu_idx += 1;
             }
         }
     }
 
+    /// Returns velocities in CPU index order — translated from the
+    /// GPU's Morton order via `cpu_to_gpu`.
     pub fn download_velocities(&self) -> Vec<Vec3> {
-        let v = self.integ.download_velocities();
-        v.into_iter()
-            .map(|vv| Vec3::new(vv[0] as f64, vv[1] as f64, vv[2] as f64))
-            .collect()
+        let v_gpu_order = self.integ.download_velocities();
+        let mut out = Vec::with_capacity(self.n_atoms);
+        for cpu_idx in 0..self.n_atoms {
+            let g = self.cpu_to_gpu[cpu_idx] as usize;
+            let vv = v_gpu_order[g];
+            out.push(Vec3::new(vv[0] as f64, vv[1] as f64, vv[2] as f64));
+        }
+        out
     }
 
     pub fn n_atoms(&self) -> usize { self.n_atoms }
+}
+
+/// Translate a `PerXShakeData` built in CPU index space into a
+/// fresh `PerXShakeData` in GPU (Morton) index space, using the
+/// given permutation.  The shape (`MAX_H_PER_X` × N) is preserved;
+/// only the atom indices and the row indexing change.
+fn translate_shake_data_to_gpu(
+    cpu_data: &gpu::PerXShakeData,
+    cpu_to_gpu: &[u32],
+) -> gpu::PerXShakeData {
+    use gpu::MAX_H_PER_X;
+    let n = cpu_data.h_count.len();
+    assert_eq!(n, cpu_to_gpu.len());
+    let mut h_count = vec![0u32; n];
+    let mut per_atom_h_atoms = vec![0u32; n * MAX_H_PER_X];
+    let mut per_atom_h_d_sq = vec![0.0f32; n * MAX_H_PER_X];
+    let mut inv_mass = vec![0.0f32; n];
+    for cpu_idx in 0..n {
+        let g = cpu_to_gpu[cpu_idx] as usize;
+        // inv_mass is per-atom — permute.
+        inv_mass[g] = cpu_data.inv_mass[cpu_idx];
+        // h_count is per-atom — permute.
+        h_count[g] = cpu_data.h_count[cpu_idx];
+        // The CSR rows: each H listed in cpu_idx's slot needs to
+        // become an H listed in g's slot, with the H index itself
+        // translated CPU→GPU.
+        let count = cpu_data.h_count[cpu_idx] as usize;
+        let cpu_base = cpu_idx * MAX_H_PER_X;
+        let gpu_base = g * MAX_H_PER_X;
+        for k in 0..count {
+            let h_cpu = cpu_data.per_atom_h_atoms[cpu_base + k] as usize;
+            let h_gpu = cpu_to_gpu[h_cpu];
+            per_atom_h_atoms[gpu_base + k] = h_gpu;
+            per_atom_h_d_sq[gpu_base + k] = cpu_data.per_atom_h_d_sq[cpu_base + k];
+        }
+    }
+    gpu::PerXShakeData {
+        h_count,
+        per_atom_h_atoms,
+        per_atom_h_d_sq,
+        inv_mass,
+    }
 }
 
 // ---- Builder helpers (move into a shared util if other code needs them too) ----
@@ -331,26 +449,33 @@ fn build_atom_types(s: &Structure) -> Vec<AtomType> {
 
 fn _silence_element(_: Element) {}
 
-fn build_bonds(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType], n: usize)
+fn build_bonds(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType],
+               cpu_to_gpu: &[u32], n: usize)
     -> (Vec<BondTerm>, Vec<u32>, Vec<u32>, Vec<u32>)
 {
     let mut terms: Vec<BondTerm> = Vec::new();
     let mut per_atom: Vec<Vec<u32>> = vec![Vec::new(); n];
     for b in &g.bonds {
+        // FF lookup uses CPU index (atom_types[] is CPU-ordered).
         let Some(p) = ff.bond(atom_types[b.a], atom_types[b.b]) else { continue };
         let idx = terms.len() as u32;
+        // Store GPU-translated atom indices so the kernel finds them
+        // in the right slot of the reordered positions buffer.
+        let ga = cpu_to_gpu[b.a];
+        let gb = cpu_to_gpu[b.b];
         terms.push(BondTerm {
-            a: b.a as u32, b: b.b as u32,
+            a: ga, b: gb,
             k_kj: kcal_to_kj(p.k) as f32, r0_a: p.r0 as f32,
         });
-        per_atom[b.a].push(idx);
-        per_atom[b.b].push(idx);
+        per_atom[ga as usize].push(idx);
+        per_atom[gb as usize].push(idx);
     }
     let (c, s, i) = flatten_csr(per_atom, n);
     (terms, c, s, i)
 }
 
-fn build_angles(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType], n: usize)
+fn build_angles(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType],
+                cpu_to_gpu: &[u32], n: usize)
     -> (Vec<AngleTerm>, Vec<u32>, Vec<u32>, Vec<u32>)
 {
     let mut terms: Vec<AngleTerm> = Vec::new();
@@ -358,20 +483,24 @@ fn build_angles(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType], n: 
     for a in &g.angles {
         let Some(p) = ff.angle(atom_types[a.a], atom_types[a.b], atom_types[a.c]) else { continue };
         let idx = terms.len() as u32;
+        let ga = cpu_to_gpu[a.a];
+        let gb = cpu_to_gpu[a.b];
+        let gc = cpu_to_gpu[a.c];
         terms.push(AngleTerm {
-            a: a.a as u32, b: a.b as u32, c: a.c as u32, _pad: 0,
+            a: ga, b: gb, c: gc, _pad: 0,
             k_kj: kcal_to_kj(p.k) as f32, theta0_rad: deg_to_rad(p.theta0_deg) as f32,
             _pad2: 0.0, _pad3: 0.0,
         });
-        per_atom[a.a].push(idx);
-        per_atom[a.b].push(idx);
-        per_atom[a.c].push(idx);
+        per_atom[ga as usize].push(idx);
+        per_atom[gb as usize].push(idx);
+        per_atom[gc as usize].push(idx);
     }
     let (c, s, i) = flatten_csr(per_atom, n);
     (terms, c, s, i)
 }
 
-fn build_dihedrals(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType], n: usize)
+fn build_dihedrals(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType],
+                   cpu_to_gpu: &[u32], n: usize)
     -> (Vec<DihedralTerm>, Vec<u32>, Vec<u32>, Vec<u32>)
 {
     let mut terms: Vec<DihedralTerm> = Vec::new();
@@ -380,8 +509,12 @@ fn build_dihedrals(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType], 
         let Some(pterms) = ff.dihedral(
             atom_types[d.a], atom_types[d.b], atom_types[d.c], atom_types[d.d],
         ) else { continue };
+        let ga = cpu_to_gpu[d.a];
+        let gb = cpu_to_gpu[d.b];
+        let gc = cpu_to_gpu[d.c];
+        let gd = cpu_to_gpu[d.d];
         let mut packed = DihedralTerm {
-            a: d.a as u32, b: d.b as u32, c: d.c as u32, d: d.d as u32,
+            a: ga, b: gb, c: gc, d: gd,
             n_terms: pterms.len().min(4) as u32,
             _pad0: 0, _pad1: 0, _pad2: 0,
             term0: zero_term(), term1: zero_term(), term2: zero_term(), term3: zero_term(),
@@ -396,16 +529,17 @@ fn build_dihedrals(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType], 
         }
         let idx = terms.len() as u32;
         terms.push(packed);
-        per_atom[d.a].push(idx);
-        per_atom[d.b].push(idx);
-        per_atom[d.c].push(idx);
-        per_atom[d.d].push(idx);
+        per_atom[ga as usize].push(idx);
+        per_atom[gb as usize].push(idx);
+        per_atom[gc as usize].push(idx);
+        per_atom[gd as usize].push(idx);
     }
     let (c, s, i) = flatten_csr(per_atom, n);
     (terms, c, s, i)
 }
 
-fn build_impropers(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType], n: usize)
+fn build_impropers(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType],
+                   cpu_to_gpu: &[u32], n: usize)
     -> (Vec<ImproperTerm>, Vec<u32>, Vec<u32>, Vec<u32>)
 {
     let mut terms: Vec<ImproperTerm> = Vec::new();
@@ -415,15 +549,19 @@ fn build_impropers(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType], 
             atom_types[imp.a], atom_types[imp.b], atom_types[imp.c], atom_types[imp.d],
         ) else { continue };
         let idx = terms.len() as u32;
+        let ga = cpu_to_gpu[imp.a];
+        let gb = cpu_to_gpu[imp.b];
+        let gc = cpu_to_gpu[imp.c];
+        let gd = cpu_to_gpu[imp.d];
         terms.push(ImproperTerm {
-            a: imp.a as u32, b: imp.b as u32, c: imp.c as u32, d: imp.d as u32,
+            a: ga, b: gb, c: gc, d: gd,
             k_kj: kcal_to_kj(p.k) as f32, omega0_rad: deg_to_rad(p.psi0_deg) as f32,
             _pad0: 0.0, _pad1: 0.0,
         });
-        per_atom[imp.a].push(idx);
-        per_atom[imp.b].push(idx);
-        per_atom[imp.c].push(idx);
-        per_atom[imp.d].push(idx);
+        per_atom[ga as usize].push(idx);
+        per_atom[gb as usize].push(idx);
+        per_atom[gc as usize].push(idx);
+        per_atom[gd as usize].push(idx);
     }
     let (c, s, i) = flatten_csr(per_atom, n);
     (terms, c, s, i)

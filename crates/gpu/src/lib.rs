@@ -34,6 +34,7 @@ pub mod lj;
 pub mod nonbonded;
 pub mod nonbonded_verlet;
 pub mod shake;
+pub mod spatial_sort;
 
 pub use baoab::{make_rng_state, BaoabPipeline};
 pub use bonded::{
@@ -45,6 +46,7 @@ pub use integrator::IntegratorPipeline;
 pub use nonbonded::{nonbonded_force_gpu, NonbondedPipeline, NonbondedSetup};
 pub use nonbonded_verlet::{pair_list_to_csr, VerletNonbondedPipeline, VerletNonbondedSetup};
 pub use shake::{build_per_x_shake_data, PerXShakeData, ShakeConstraint, ShakePipeline, MAX_H_PER_X};
+pub use spatial_sort::{morton_code, morton_permutation};
 /// Re-export the wgpu crate so downstream consumers (e.g.
 /// `dynamics::GpuAccelerator`) can record into our pipelines'
 /// command encoders without needing a separate `wgpu` dependency.
