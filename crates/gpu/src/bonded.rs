@@ -121,6 +121,9 @@ pub struct BondedPipeline {
     angle_pipeline: wgpu::ComputePipeline,
     dihedral_pipeline: wgpu::ComputePipeline,
     improper_pipeline: wgpu::ComputePipeline,
+    /// Fused bond+angle+dihedral+improper kernel — one dispatch
+    /// replaces all four when the caller doesn't need to split.
+    all_pipeline: wgpu::ComputePipeline,
     bind_group: wgpu::BindGroup,
     /// We keep references to the shader buffers in the struct so they
     /// outlive the bind group.  Most are read-only and never touched
@@ -294,6 +297,7 @@ impl BondedPipeline {
         let angle_pipeline = make_pipeline("bonded_angle_pipeline", "angle_force");
         let dihedral_pipeline = make_pipeline("bonded_dihedral_pipeline", "dihedral_force");
         let improper_pipeline = make_pipeline("bonded_improper_pipeline", "improper_force");
+        let all_pipeline = make_pipeline("bonded_all_pipeline", "all_bonded_force");
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bonded_bind_group"),
             layout: &bind_group_layout,
@@ -327,6 +331,7 @@ impl BondedPipeline {
             angle_pipeline,
             dihedral_pipeline,
             improper_pipeline,
+            all_pipeline,
             bind_group,
             keep_alive: KeepAlive {
                 globals_buf,
@@ -380,8 +385,21 @@ impl BondedPipeline {
         self.record_pass(encoder, &self.improper_pipeline, "bonded_improper_pass");
     }
 
-    /// Record all bonded passes in order (zero → bond → angle →
-    /// dihedral → improper).  Convenience for the integrator path.
+    /// Record the fused bond+angle+dihedral+improper pass.  One
+    /// dispatch instead of four; same numerical result.  Use this in
+    /// performance-sensitive paths (the integrator).  The split
+    /// `record_bond` / `record_angle` / ... methods remain for
+    /// validation tests that need to compare per-term forces against
+    /// CPU references.
+    pub fn record_all_bonded(&self, encoder: &mut wgpu::CommandEncoder) {
+        self.record_pass(encoder, &self.all_pipeline, "bonded_all_pass");
+    }
+
+    /// Record all bonded passes split term-by-term (zero → bond →
+    /// angle → dihedral → improper).  Used by the validation test
+    /// path that asserts each term matches CPU individually.  For
+    /// the integrator hot path, prefer
+    /// [`record_zero`](Self::record_zero) + [`record_all_bonded`](Self::record_all_bonded).
     pub fn record_all(&self, encoder: &mut wgpu::CommandEncoder) {
         self.record_zero(encoder);
         self.record_bond(encoder);

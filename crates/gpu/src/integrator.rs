@@ -214,14 +214,12 @@ impl IntegratorPipeline {
     }
 
     /// One full force evaluation: zero the buffer, then accumulate
-    /// bond + angle + dihedral + improper + nonbonded + GB.  Records
-    /// 7 compute passes.
+    /// all-bonded (fused bond+angle+dihedral+improper) + nonbonded
+    /// + GB.  Records 4 compute passes (down from 7 pre-fusion —
+    /// see `PERF.gpu.14`).
     fn record_force_eval(&self, encoder: &mut wgpu::CommandEncoder) {
         self.bonded.record_zero(encoder);
-        self.bonded.record_bond(encoder);
-        self.bonded.record_angle(encoder);
-        self.bonded.record_dihedral(encoder);
-        self.bonded.record_improper(encoder);
+        self.bonded.record_all_bonded(encoder);
         self.nonbonded.record_compute(encoder);
         self.gb.record_compute(encoder);
     }

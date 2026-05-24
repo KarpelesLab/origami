@@ -321,3 +321,138 @@ fn zero_forces(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     forces[i] = vec4<f32>(0.0, 0.0, 0.0, 0.0);
 }
+
+// ---- Fused kernel: bond + angle + dihedral + improper in one pass ----
+//
+// Single thread per atom, single accumulator, single forces[i] write.
+// Replaces four separate dispatches in the integrator-on-GPU step_n
+// loop with one — three fewer kernel launches per step, ~300 µs
+// saved on Apple Silicon where each launch costs ~100 µs.
+//
+// Trade-off: this is a longer kernel and uses more registers than any
+// of the four constituents, which may reduce GPU occupancy.  Empirically
+// it's a net win at every scale measured (Trp-cage 300 atoms to
+// 5840-atom built chains) — see `PERF.gpu.14` commit message.
+@compute @workgroup_size(64)
+fn all_bonded_force(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= globals.n_atoms) {
+        return;
+    }
+    let pi = positions[i].xyz;
+    var acc = vec3<f32>(0.0, 0.0, 0.0);
+
+    // ---- Bond ----
+    let bond_count = atom_bond_count[i];
+    let bond_start = atom_bond_start[i];
+    for (var k: u32 = 0u; k < bond_count; k = k + 1u) {
+        let term = bond_terms[atom_bond_index[bond_start + k]];
+        let partner = select(term.b, term.a, i == term.b);
+        let d = positions[partner].xyz - pi;
+        let r2 = dot(d, d);
+        if (r2 < 1e-18) { continue; }
+        let r = sqrt(r2);
+        let dr = r - term.r0_a;
+        let mag = 2.0 * term.k_kj * dr;
+        acc = acc + d * (mag / r);
+    }
+
+    // ---- Angle ----
+    let angle_count = atom_angle_count[i];
+    let angle_start = atom_angle_start[i];
+    for (var k: u32 = 0u; k < angle_count; k = k + 1u) {
+        let term = angle_terms[atom_angle_index[angle_start + k]];
+        let pa = positions[term.a].xyz;
+        let pb = positions[term.b].xyz;
+        let pc = positions[term.c].xyz;
+        let u = pa - pb;
+        let v = pc - pb;
+        let u_norm_sq = dot(u, u);
+        let v_norm_sq = dot(v, v);
+        if (u_norm_sq < 1e-18 || v_norm_sq < 1e-18) { continue; }
+        let u_norm = sqrt(u_norm_sq);
+        let v_norm = sqrt(v_norm_sq);
+        let u_hat = u / u_norm;
+        let v_hat = v / v_norm;
+        let cos_theta = clamp(dot(u_hat, v_hat), -1.0, 1.0);
+        let sin_sq = 1.0 - cos_theta * cos_theta;
+        if (sin_sq < 1e-18) { continue; }
+        let sin_theta = sqrt(sin_sq);
+        let theta = acos(cos_theta);
+        let dvdtheta = 2.0 * term.k_kj * (theta - term.theta0_rad);
+        let coeff = dvdtheta / sin_theta;
+        let f_a = (v_hat - u_hat * cos_theta) * (coeff / u_norm);
+        let f_c = (u_hat - v_hat * cos_theta) * (coeff / v_norm);
+        let f_b = -(f_a + f_c);
+        if (i == term.a) {
+            acc = acc + f_a;
+        } else if (i == term.b) {
+            acc = acc + f_b;
+        } else {
+            acc = acc + f_c;
+        }
+    }
+
+    // ---- Dihedral ----
+    let dihedral_count = atom_dihedral_count[i];
+    let dihedral_start = atom_dihedral_start[i];
+    for (var k: u32 = 0u; k < dihedral_count; k = k + 1u) {
+        let term = dihedral_terms[atom_dihedral_index[dihedral_start + k]];
+        let pa = positions[term.a].xyz;
+        let pb = positions[term.b].xyz;
+        let pc = positions[term.c].xyz;
+        let pd = positions[term.d].xyz;
+        let g = dihedral_gradient(pa, pb, pc, pd);
+        if (g.valid == 0u) { continue; }
+        var dvdphi: f32 = 0.0;
+        if (term.n_terms > 0u) {
+            let arg = term.term0.n * g.phi - term.term0.delta_rad;
+            dvdphi = dvdphi - term.term0.k_kj * term.term0.n * sin(arg);
+        }
+        if (term.n_terms > 1u) {
+            let arg = term.term1.n * g.phi - term.term1.delta_rad;
+            dvdphi = dvdphi - term.term1.k_kj * term.term1.n * sin(arg);
+        }
+        if (term.n_terms > 2u) {
+            let arg = term.term2.n * g.phi - term.term2.delta_rad;
+            dvdphi = dvdphi - term.term2.k_kj * term.term2.n * sin(arg);
+        }
+        if (term.n_terms > 3u) {
+            let arg = term.term3.n * g.phi - term.term3.delta_rad;
+            dvdphi = dvdphi - term.term3.k_kj * term.term3.n * sin(arg);
+        }
+        var grad: vec3<f32>;
+        if (i == term.a) { grad = g.dphi_da; }
+        else if (i == term.b) { grad = g.dphi_db; }
+        else if (i == term.c) { grad = g.dphi_dc; }
+        else { grad = g.dphi_dd; }
+        acc = acc - grad * dvdphi;
+    }
+
+    // ---- Improper ----
+    let improper_count = atom_improper_count[i];
+    let improper_start = atom_improper_start[i];
+    let pi_two_imp = 6.283185307;
+    let pi_one_imp = 3.141592653;
+    let inv_pi_two_imp = 1.0 / pi_two_imp;
+    for (var k: u32 = 0u; k < improper_count; k = k + 1u) {
+        let term = improper_terms[atom_improper_index[improper_start + k]];
+        let pa = positions[term.a].xyz;
+        let pb = positions[term.b].xyz;
+        let pc = positions[term.c].xyz;
+        let pd = positions[term.d].xyz;
+        let g = dihedral_gradient(pa, pb, pc, pd);
+        if (g.valid == 0u) { continue; }
+        var domega = g.phi - term.omega0_rad;
+        domega = domega - pi_two_imp * floor((domega + pi_one_imp) * inv_pi_two_imp);
+        let dvdomega = 2.0 * term.k_kj * domega;
+        var grad: vec3<f32>;
+        if (i == term.a) { grad = g.dphi_da; }
+        else if (i == term.b) { grad = g.dphi_db; }
+        else if (i == term.c) { grad = g.dphi_dc; }
+        else { grad = g.dphi_dd; }
+        acc = acc - grad * dvdomega;
+    }
+
+    forces[i] = forces[i] + vec4<f32>(acc, 0.0);
+}

@@ -340,7 +340,7 @@ fn gpu_bonded_kernels_match_cpu_on_ala_lys_glu() {
     let err = compare_against_cpu("IMPROPER", &gpu_f, &cpu_f);
     assert!(err < 1.0, "improper force mismatch");
 
-    // ---- All combined ----
+    // ---- All combined (split kernels) ----
     let device = &ctx.device;
     let queue = &ctx.queue;
     let mut encoder = device.create_command_encoder(&gpu::wgpu::CommandEncoderDescriptor {
@@ -355,6 +355,32 @@ fn gpu_bonded_kernels_match_cpu_on_ala_lys_glu() {
     energy::forces_bonded::add_angle_forces(&positions, &g, ff, &atom_types, &mut cpu_total);
     energy::forces_bonded::add_dihedral_forces(&positions, &g, ff, &atom_types, &mut cpu_total);
     energy::forces_bonded::add_improper_forces(&positions, &g, ff, &atom_types, &mut cpu_total);
-    let err = compare_against_cpu("ALL_BONDED", &gpu_total, &cpu_total);
+    let err = compare_against_cpu("ALL_BONDED (split)", &gpu_total, &cpu_total);
     assert!(err < 1.0, "combined bonded forces mismatch");
+
+    // ---- Fused all_bonded_force kernel ----
+    // One dispatch replaces four; should give bit-identical results
+    // (same math, same accumulation order per atom — only the kernel
+    // launch boundary changes).
+    let mut encoder = device.create_command_encoder(&gpu::wgpu::CommandEncoderDescriptor {
+        label: Some("bonded_fused_encoder"),
+    });
+    pipe.record_zero(&mut encoder);
+    pipe.record_all_bonded(&mut encoder);
+    queue.submit(Some(encoder.finish()));
+    let _ = device.poll(gpu::wgpu::Maintain::Wait);
+    let gpu_fused = bufs.read_forces(ctx);
+    let err = compare_against_cpu("ALL_BONDED (fused)", &gpu_fused, &cpu_total);
+    assert!(err < 1.0, "fused bonded forces disagree with CPU");
+    // And vs the split kernels — should be identical.
+    let mut max_split_fused = 0.0_f32;
+    for (a, b) in gpu_total.iter().zip(gpu_fused.iter()) {
+        for axis in 0..3 {
+            let d = (a[axis] - b[axis]).abs();
+            if d > max_split_fused { max_split_fused = d; }
+        }
+    }
+    eprintln!("max split-vs-fused disagreement: {:.3e}", max_split_fused);
+    assert!(max_split_fused < 1e-3,
+        "fused bonded force should match split-kernel result bit-for-bit");
 }
