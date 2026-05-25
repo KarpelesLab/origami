@@ -40,9 +40,9 @@ use energy::units::{deg_to_rad, kcal_to_kj};
 use energy::DEFAULT_CUTOFF_A;
 use geom::{Structure, TopologyGraph, Vec3};
 use gpu::{
-    morton_permutation, pair_list_to_csr, AngleTerm, BondTerm, BondedSetup, DihedralTerm, GbSetup,
-    GpuContext, ImproperTerm, IntegratorPipeline, PerXShakeData, PeriodicTerm,
-    VerletNonbondedSetup,
+    build_tile_interaction_list, morton_permutation, pair_list_to_csr, AngleTerm, BondTerm,
+    BondedSetup, DihedralTerm, GbSetup, GpuContext, ImproperTerm, IntegratorPipeline,
+    PerXShakeData, PeriodicTerm, TileNonbondedSetup, VerletNonbondedSetup,
 };
 
 const KCAL_TO_KJ: f32 = 4.184;
@@ -77,6 +77,22 @@ pub struct FullGpuIntegrator {
     cpu_to_gpu: Vec<u32>,
     #[allow(dead_code)]
     gpu_to_cpu: Vec<u32>,
+    /// When `true`, the integrator dispatches the tile-based
+    /// nonbonded kernel (workgroup shared memory j-data cache) and
+    /// the per-batch refresh builds the tile interaction list.
+    /// When `false` (default), the legacy Verlet-list kernel is
+    /// used.  Enable via [`enable_tile_nb_mode`].
+    tile_nb_mode: bool,
+    /// Cached tile-list bookkeeping, only populated when
+    /// `tile_nb_mode` is true.  Re-uploaded only when the underlying
+    /// Verlet list rebuilds.
+    tile_count: Vec<u32>,
+    tile_start: Vec<u32>,
+    tile_indices: Vec<u32>,
+    /// Per-atom params cached for tile-list construction (the tile
+    /// list builder needs Morton-sorted positions, which we get
+    /// from the GPU each refresh, plus the LJ + Coulomb cutoff).
+    nb_cutoff_a: f32,
 }
 
 impl FullGpuIntegrator {
@@ -242,6 +258,9 @@ impl FullGpuIntegrator {
         integ.set_step_params(dt_fs as f32, gamma_ps_inv as f32, kbt);
 
         let scratch = ForceScratch::new(structure, graph, ff);
+        // Save the per-atom data needed if the caller later enables
+        // tile mode — these are CPU-ordered.
+        let _ = (&atom_lj_data, &charges, &exclusions, &one_four);
         Ok(Self {
             n_atoms: n,
             integ,
@@ -256,7 +275,90 @@ impl FullGpuIntegrator {
             vel_buf: vec![[0.0; 3]; n],
             cpu_to_gpu,
             gpu_to_cpu,
+            tile_nb_mode: false,
+            tile_count: Vec::new(),
+            tile_start: Vec::new(),
+            tile_indices: Vec::new(),
+            nb_cutoff_a: DEFAULT_CUTOFF_A as f32,
         })
+    }
+
+    /// Enable the tile-based nonbonded kernel.  Must be called
+    /// before the first `step_batch` / `step_batch_shake`.
+    ///
+    /// The integrator forwards the LJ + Coulomb parameters it
+    /// already built at construction (in Morton/GPU order) into a
+    /// fresh `TileNonbondedPipeline`, then routes subsequent force
+    /// evaluations through it instead of the Verlet kernel.
+    ///
+    /// Tile interaction lists are rebuilt at every Verlet refresh
+    /// from the current GPU positions.
+    pub fn enable_tile_nb_mode(
+        &mut self,
+        structure: &Structure,
+        graph: &geom::TopologyGraph,
+        ff: &ForceField,
+    ) {
+        // Reconstruct the per-atom buffers in GPU/Morton order.  We
+        // already paid this cost at construction; redoing it here
+        // keeps the integrator's external API additive instead of
+        // requiring `new_with_tile_nb`.
+        let n = self.n_atoms;
+        let atom_types = build_atom_types(structure);
+        let mut charges_cpu: Vec<f32> = Vec::with_capacity(n);
+        for r in &structure.residues {
+            for a in &r.atoms {
+                charges_cpu.push(ff.partial_charge_for(r.monomer, a.name).unwrap_or(0.0) as f32);
+            }
+        }
+        let atom_lj_data_cpu: Vec<[f32; 4]> = atom_types.iter().map(|t| {
+            let p = ff.nonbonded(*t).unwrap();
+            let eps_14 = p.epsilon_14.unwrap_or(p.epsilon);
+            let rmin_half_14 = p.rmin_half_14.unwrap_or(p.rmin_half);
+            [
+                (p.epsilon as f32) * KCAL_TO_KJ,
+                p.rmin_half as f32,
+                (eps_14 as f32) * KCAL_TO_KJ,
+                rmin_half_14 as f32,
+            ]
+        }).collect();
+        let charges: Vec<f32> = (0..n).map(|g| charges_cpu[self.gpu_to_cpu[g] as usize]).collect();
+        let atom_lj_data: Vec<[f32; 4]> = (0..n)
+            .map(|g| atom_lj_data_cpu[self.gpu_to_cpu[g] as usize]).collect();
+        let n_words = (n * n).div_ceil(32);
+        let mut exclusions = vec![0u32; n_words];
+        let mut one_four = vec![0u32; n_words];
+        let set_bit = |buf: &mut [u32], a: usize, b: usize| {
+            let bit = a * n + b;
+            buf[bit / 32] |= 1u32 << (bit % 32);
+            let bit = b * n + a;
+            buf[bit / 32] |= 1u32 << (bit % 32);
+        };
+        for b in &graph.bonds {
+            set_bit(&mut exclusions,
+                self.cpu_to_gpu[b.a] as usize, self.cpu_to_gpu[b.b] as usize);
+        }
+        for a in &graph.angles {
+            set_bit(&mut exclusions,
+                self.cpu_to_gpu[a.a] as usize, self.cpu_to_gpu[a.c] as usize);
+        }
+        for d in &graph.dihedrals {
+            set_bit(&mut one_four,
+                self.cpu_to_gpu[d.a] as usize, self.cpu_to_gpu[d.d] as usize);
+        }
+        self.integ.enable_tile_nb(TileNonbondedSetup {
+            atom_lj_data: &atom_lj_data,
+            charges: &charges,
+            exclusions: &exclusions,
+            one_four_mask: &one_four,
+            cutoff_a: self.nb_cutoff_a,
+            initial_tile_indices_capacity: (n * 16).max(64),
+        });
+        self.tile_nb_mode = true;
+        // Force a rebuild on the next refresh.
+        self.tile_count.clear();
+        self.tile_start.clear();
+        self.tile_indices.clear();
     }
 
     pub fn upload_initial_state(&mut self, structure: &Structure, velocities: &[Vec3]) {
@@ -333,16 +435,31 @@ impl FullGpuIntegrator {
         let nb_rebuilt = ensure_verlet_list(&mut self.scratch, DEFAULT_CUTOFF_A);
         let gb_rebuilt = ensure_gb_verlet_list(&mut self.scratch, BORN_RADIUS_CUTOFF_A_PUB);
         if nb_rebuilt || self.nb_counts.is_empty() {
-            // Translate Verlet pairs from CPU index space to GPU
-            // index space before CSR conversion.
-            let gpu_pairs: Vec<(u32, u32)> = self.scratch.verlet_pairs.iter()
-                .map(|&(a, b)| (self.cpu_to_gpu[a as usize], self.cpu_to_gpu[b as usize]))
-                .collect();
-            let (c, s, i) = pair_list_to_csr(self.n_atoms, &gpu_pairs);
-            self.nb_counts = c;
-            self.nb_starts = s;
-            self.nb_indices = i;
-            self.integ.update_nb_neighbours(&self.nb_counts, &self.nb_starts, &self.nb_indices);
+            if self.tile_nb_mode {
+                // Tile mode: build the tile interaction list directly
+                // from GPU-ordered positions.  The Verlet-list rebuild
+                // above is unused in this branch, but the drift
+                // detector still ran (which is what triggered us).
+                let skin_a = energy::scratch::VERLET_SKIN_A as f32;
+                let tile_cutoff = self.nb_cutoff_a + skin_a;
+                let list = build_tile_interaction_list(&positions_gpu_order, tile_cutoff);
+                self.tile_count = list.tile_count;
+                self.tile_start = list.tile_start;
+                self.tile_indices = list.tile_indices;
+                self.integ.update_tile_nb_list(
+                    &self.tile_count, &self.tile_start, &self.tile_indices,
+                );
+            } else {
+                // Verlet mode: translate pairs CPU→GPU then upload CSR.
+                let gpu_pairs: Vec<(u32, u32)> = self.scratch.verlet_pairs.iter()
+                    .map(|&(a, b)| (self.cpu_to_gpu[a as usize], self.cpu_to_gpu[b as usize]))
+                    .collect();
+                let (c, s, i) = pair_list_to_csr(self.n_atoms, &gpu_pairs);
+                self.nb_counts = c;
+                self.nb_starts = s;
+                self.nb_indices = i;
+                self.integ.update_nb_neighbours(&self.nb_counts, &self.nb_starts, &self.nb_indices);
+            }
         }
         if gb_rebuilt || self.gb_counts.is_empty() {
             let gpu_pairs: Vec<(u32, u32)> = self.scratch.gb_verlet_pairs.iter()

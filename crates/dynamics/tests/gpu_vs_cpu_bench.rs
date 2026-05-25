@@ -149,6 +149,42 @@ fn bench_one(path: &str, label: &str, warmup: usize, timed: usize) {
     // ms/simulated-fs (= ms/step / 2), which is what matters for
     // trajectories of fixed simulated length.
     bench_shake_arm(&s, &g, ff, label, warmup, timed, cpu_per_step_ms);
+    bench_tile_arm(&s, &g, ff, label, warmup, timed, cpu_per_step_ms);
+}
+
+fn bench_tile_arm(
+    s: &geom::Structure,
+    g: &geom::TopologyGraph,
+    ff: &chem::ForceField,
+    _label: &str,
+    warmup: usize,
+    timed: usize,
+    cpu_ms: f64,
+) {
+    let n = s.atom_count();
+    let mut tile = match FullGpuIntegrator::new(s, g, ff, 1.0, 2.0, 310.0, 1) {
+        Ok(f) => f,
+        Err(e) => { eprintln!("  TILE arm: GPU unavailable ({e})"); return; }
+    };
+    tile.enable_tile_nb_mode(s, g, ff);
+    let velocities = vec![Vec3::zeros(); n];
+    tile.upload_initial_state(s, &velocities);
+    tile.step_batch(warmup);
+    let t0 = Instant::now();
+    tile.step_batch(timed);
+    let secs = t0.elapsed().as_secs_f64();
+    let ms_per_step = secs * 1000.0 / timed as f64;
+    eprintln!(
+        "  GPU (TILE nb, dt=1 fs, bare step_batch): {timed} steps in {:.2} s — {:.3} ms/step  (vs Verlet GPU full: {:.2}×, vs CPU: {:.2}×)",
+        secs, ms_per_step,
+        // The earlier "GPU full integrator" line ran the Verlet path
+        // through run_langevin — different overheads.  The tile is a
+        // bare step_batch, so the comparable baseline is the bare
+        // step_batch we ran in bench_shake_arm above (no SHAKE).  We
+        // don't have it inline here — just report ms vs CPU.
+        cpu_ms / ms_per_step,
+        cpu_ms / ms_per_step,
+    );
 }
 
 fn bench_shake_arm(
@@ -309,6 +345,7 @@ fn bench_built(mut s: geom::Structure, label: &str, warmup: usize, timed: usize)
         speedup_pair, speedup_full
     );
     bench_shake_arm(&s, &g, ff, label, warmup, timed, cpu_ms);
+    bench_tile_arm(&s, &g, ff, label, warmup, timed, cpu_ms);
 }
 
 #[test]

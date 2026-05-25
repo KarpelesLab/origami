@@ -23,6 +23,12 @@
 //! ordering should construct a new FullGpuIntegrator from the
 //! current configuration.
 
+/// Workgroup size of the GPU kernels and the spatial-tile size of
+/// the tiled nonbonded kernel.  Must match the `@workgroup_size(64)`
+/// declarations in every WGSL kernel — changing it requires updating
+/// both this constant and the shader source.
+pub const TILE_SIZE: usize = 64;
+
 /// Spread the low 10 bits of `x` across the low 30 bits of the
 /// result with 2 bits of zeros between each input bit.  Standard
 /// Morton-code primitive.

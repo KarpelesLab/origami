@@ -25,11 +25,15 @@ use crate::context::GpuContext;
 use crate::gb::{GbPipeline, GbSetup};
 use crate::nonbonded_verlet::{VerletNonbondedPipeline, VerletNonbondedSetup};
 use crate::shake::{PerXShakeData, ShakePipeline};
+use crate::tile_nonbonded::{TileNonbondedPipeline, TileNonbondedSetup};
 
 pub struct IntegratorPipeline {
     n_atoms: usize,
     bonded: BondedPipeline,
     nonbonded: VerletNonbondedPipeline,
+    /// When `Some`, the tile kernel replaces the Verlet kernel in
+    /// `step_n` / `step_n_shake`.  Enabled via [`enable_tile_nb`].
+    tile_nb: Option<TileNonbondedPipeline>,
     gb: GbPipeline,
     baoab: BaoabPipeline,
     /// Set via [`enable_shake`].  When `Some`, [`step_n_shake`] becomes
@@ -127,11 +131,45 @@ impl IntegratorPipeline {
         );
 
         Self {
-            n_atoms, bonded, nonbonded, gb, baoab,
+            n_atoms, bonded, nonbonded,
+            tile_nb: None,
+            gb, baoab,
             shake: None,
             ref_positions_buf: None,
             ctx,
         }
+    }
+
+    /// Enable the tile-based nonbonded kernel — replaces the Verlet
+    /// kernel in subsequent `step_n` / `step_n_shake` calls.  After
+    /// this, the caller uses [`update_tile_nb_list`] instead of
+    /// `update_nb_neighbours`.
+    ///
+    /// Constructs a fresh `TileNonbondedPipeline` bound to the same
+    /// shared positions + forces buffers as the integrator's other
+    /// pipelines.  Cheap (one shader compile, a few small buffer
+    /// allocations).
+    pub fn enable_tile_nb(&mut self, setup: TileNonbondedSetup) {
+        let tile = TileNonbondedPipeline::new_with_external_buffers(
+            self.ctx, self.n_atoms, setup,
+            self.baoab.positions_buffer_arc(),
+            Some(self.baoab.forces_buffer_arc()),
+        );
+        self.tile_nb = Some(tile);
+    }
+
+    /// Upload a fresh tile interaction list — must be called whenever
+    /// the Verlet skin rebuild fires.
+    pub fn update_tile_nb_list(
+        &mut self,
+        tile_count: &[u32],
+        tile_start: &[u32],
+        tile_indices: &[u32],
+    ) {
+        self.tile_nb
+            .as_mut()
+            .expect("call enable_tile_nb first")
+            .update_tile_list(tile_count, tile_start, tile_indices);
     }
 
     /// Enable the SHAKE-mode integrator path.  Compiles the SHAKE
@@ -317,11 +355,17 @@ impl IntegratorPipeline {
     /// One full force evaluation: zero the buffer, then accumulate
     /// all-bonded (fused bond+angle+dihedral+improper) + nonbonded
     /// + GB.  Records 4 compute passes (down from 7 pre-fusion —
-    /// see `PERF.gpu.14`).
+    /// see `PERF.gpu.14`).  If tile-mode has been enabled via
+    /// [`enable_tile_nb`], the tile kernel is dispatched instead of
+    /// the Verlet kernel.
     fn record_force_eval(&self, encoder: &mut wgpu::CommandEncoder) {
         self.bonded.record_zero(encoder);
         self.bonded.record_all_bonded(encoder);
-        self.nonbonded.record_compute(encoder);
+        if let Some(tile) = self.tile_nb.as_ref() {
+            tile.record_compute(encoder);
+        } else {
+            self.nonbonded.record_compute(encoder);
+        }
         self.gb.record_compute(encoder);
     }
 
