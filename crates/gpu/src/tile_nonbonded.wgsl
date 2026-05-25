@@ -107,15 +107,23 @@ fn tile_force(
 
         if (i_in_range) {
             // Walk the 64 j's in this tile from shared memory.
+            //
+            // Check order matters here: cutoff distance is the
+            // cheapest filter (one dot product), exclusion lookup
+            // is the most expensive (random read from the n²/8-bit
+            // bitmap).  At Morton-sorted spatial-tile granularity
+            // most pairs are out of cutoff (typically ≥85 %), so
+            // doing the distance test first avoids the exclusion
+            // read for the vast majority of pairs.
             for (var k: u32 = 0u; k < TILE_SIZE; k = k + 1u) {
                 let j = j_tile * TILE_SIZE + k;
                 if (j >= params.n_atoms) { continue; }
                 if (i == j) { continue; }
-                if (is_excluded(i, j)) { continue; }
 
                 let dx = shared_j_pos[k].xyz - pi;
                 let r2 = dot(dx, dx);
                 if (r2 > params.cutoff_sq || r2 < 1e-6) { continue; }
+                if (is_excluded(i, j)) { continue; }
 
                 let r = sqrt(r2);
                 let inv_r2 = 1.0 / r2;
