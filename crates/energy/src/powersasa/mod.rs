@@ -42,13 +42,45 @@ pub(crate) fn vdw_radius(e: Element) -> f64 {
     }
 }
 
-pub(crate) fn surface_tension_kcal(e: Element) -> f64 {
-    // Same parameters as the Shrake-Rupley implementation: ~5 cal/mol/Å²
-    // for apolar atoms (C, S), 0 for polar.
+/// Per-element default surface tension in kcal/mol/Å².  Apolar atoms
+/// (C, S) get 5 cal/mol/Å² ≈ 0.005 kcal/mol/Å²; polar atoms get 0.
+///
+/// This is the default `γ_i` used by both
+/// [`powersasa_energy`] and the SASA force kernels.  Callers wanting
+/// per-atom-type tuning (e.g. ABSINTH-style γ values, or experiments
+/// that shift carbonyl vs aliphatic C differently) should use
+/// [`default_sasa_gammas`] as a starting vector and pass into the
+/// `*_with_gammas` SASA force entry points.
+pub fn surface_tension_kcal(e: Element) -> f64 {
     match e {
         Element::C | Element::S => 0.005,
         _ => 0.0,
     }
+}
+
+/// Build the default per-atom γ vector for the given structure, in
+/// kJ/mol/Å² (already unit-converted, ready to feed into the SASA
+/// force kernels).  Honors the `ORIGAMI_SASA_GAMMA_SCALE` env-var
+/// for uniform scaling across all atoms — see `FOLD.3` for the γ
+/// sweep that motivated this knob.
+///
+/// Callers wanting per-atom-type tuning can clone this vector, mutate
+/// specific entries (e.g. by walking `structure.residues` and looking
+/// up atom names / monomer / etc.), then pass into
+/// [`crate::powersasa::analytical::add_sasa_forces_analytical_with_gammas`].
+pub fn default_sasa_gammas(structure: &Structure) -> Vec<f64> {
+    let gamma_scale = std::env::var("ORIGAMI_SASA_GAMMA_SCALE")
+        .ok()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(1.0);
+    let n = structure.atom_count();
+    let mut out = Vec::with_capacity(n);
+    for r in &structure.residues {
+        for a in &r.atoms {
+            out.push(crate::units::kcal_to_kj(surface_tension_kcal(a.element)) * gamma_scale);
+        }
+    }
+    out
 }
 
 /// Compute exact analytical SASA for every atom in the structure.

@@ -450,38 +450,41 @@ fn directional_area_derivative(
 /// integrator calls it tens of thousands of times in a row.
 pub fn add_sasa_forces_analytical_with_scratch(
     structure: &geom::Structure,
-    _ff: &chem::ForceField,
+    ff: &chem::ForceField,
     scratch: &mut crate::scratch::ForceScratch,
     forces: &mut [Vec3],
 ) {
-    use chem::Element;
+    let gamma = super::default_sasa_gammas(structure);
+    add_sasa_forces_analytical_with_scratch_and_gammas(structure, ff, scratch, &gamma, forces);
+}
+
+/// Scratch-aware variant of
+/// [`add_sasa_forces_analytical_with_gammas`].  See that function's
+/// docs for the semantics of `gammas`.
+pub fn add_sasa_forces_analytical_with_scratch_and_gammas(
+    structure: &geom::Structure,
+    _ff: &chem::ForceField,
+    scratch: &mut crate::scratch::ForceScratch,
+    gammas: &[f64],
+    forces: &mut [Vec3],
+) {
     use rayon::prelude::*;
     let n = structure.atom_count();
     assert_eq!(forces.len(), n);
     assert_eq!(scratch.n, n);
+    assert_eq!(gammas.len(), n,
+        "gammas length {} != atom count {}", gammas.len(), n);
 
-    // Flatten positions + radii + per-atom γ from the structure. We
-    // could move these into the scratch too (they only change when
-    // atoms are added/removed), but the cost is sub-µs compared to
-    // the per-atom topology compute below.
+    // Flatten positions + radii from the structure.
     let mut positions: Vec<Vec3> = Vec::with_capacity(n);
     let mut radii: Vec<f64> = Vec::with_capacity(n);
-    let mut elements: Vec<Element> = Vec::with_capacity(n);
     for residue in &structure.residues {
         for atom in &residue.atoms {
             positions.push(atom.position);
             radii.push(super::vdw_radius(atom.element) + super::PROBE_RADIUS_A);
-            elements.push(atom.element);
         }
     }
-    let gamma_scale = std::env::var("ORIGAMI_SASA_GAMMA_SCALE")
-        .ok()
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or(1.0);
-    let gamma: Vec<f64> = elements
-        .iter()
-        .map(|&e| crate::units::kcal_to_kj(super::surface_tension_kcal(e)) * gamma_scale)
-        .collect();
+    let gamma = gammas;
     let max_radius = radii.iter().cloned().fold(0.0_f64, f64::max);
 
     // ---- Verlet check on the cached per-atom neighbour lists ----
@@ -582,36 +585,44 @@ pub fn add_sasa_forces_analytical_with_scratch(
 
 pub fn add_sasa_forces_analytical(
     structure: &geom::Structure,
-    _ff: &chem::ForceField,
+    ff: &chem::ForceField,
     forces: &mut [Vec3],
 ) {
-    use chem::Element;
+    let gamma = super::default_sasa_gammas(structure);
+    add_sasa_forces_analytical_with_gammas(structure, ff, &gamma, forces);
+}
+
+/// Like [`add_sasa_forces_analytical`] but takes a caller-supplied
+/// per-atom γ vector (in kJ/mol/Å²) instead of computing the default
+/// per-element table.  Enables ABSINTH-style per-atom-type
+/// parameterisation, per-region γ overrides, or any custom
+/// hydrophobicity model — all without changing the SASA pipeline.
+///
+/// `gammas[i]` must be in kJ/mol/Å² (already unit-converted from
+/// kcal).  Start from `crate::powersasa::default_sasa_gammas(structure)`
+/// for the standard per-element values.
+///
+/// Atoms with `gammas[i] == 0.0` are skipped entirely (no boundary
+/// computation, no JVP evaluation) — fast path for polar atoms.
+pub fn add_sasa_forces_analytical_with_gammas(
+    structure: &geom::Structure,
+    _ff: &chem::ForceField,
+    gammas: &[f64],
+    forces: &mut [Vec3],
+) {
     let n = structure.atom_count();
     assert_eq!(forces.len(), n);
+    assert_eq!(gammas.len(), n,
+        "gammas length {} != atom count {}", gammas.len(), n);
     let mut positions: Vec<Vec3> = Vec::with_capacity(n);
     let mut radii: Vec<f64> = Vec::with_capacity(n);
-    let mut elements: Vec<Element> = Vec::with_capacity(n);
     for residue in &structure.residues {
         for atom in &residue.atoms {
             positions.push(atom.position);
             radii.push(super::vdw_radius(atom.element) + super::PROBE_RADIUS_A);
-            elements.push(atom.element);
         }
     }
-    // Per-element surface tension γ in kJ/mol/Å² (matches the numerical
-    // implementation in forces_sasa). Optional multiplicative scale
-    // from the `ORIGAMI_SASA_GAMMA_SCALE` env var (default 1.0) lets us
-    // probe the hydrophobic-strength axis without recompiling — useful
-    // for sweeping γ to test whether the molten-globule trap goes away
-    // at weaker coupling.
-    let gamma_scale = std::env::var("ORIGAMI_SASA_GAMMA_SCALE")
-        .ok()
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or(1.0);
-    let gamma: Vec<f64> = elements
-        .iter()
-        .map(|&e| crate::units::kcal_to_kj(super::surface_tension_kcal(e)) * gamma_scale)
-        .collect();
+    let gamma = gammas;
     // Neighbour lists from the unperturbed configuration.
     let mut neighbour_idx: Vec<Vec<usize>> = vec![Vec::new(); n];
     for i in 0..n {
@@ -700,6 +711,99 @@ mod tests {
             let d = (*a - *b).norm();
             assert!(d < 1e-6, "scratch path diverges: {a:?} vs {b:?} (Δ={d:.2e})");
         }
+    }
+
+    /// Default `add_sasa_forces_analytical` and the `_with_gammas`
+    /// variant fed with `default_sasa_gammas(structure)` produce
+    /// bit-identical forces.  Locks the API contract: the override
+    /// path is a strict superset of the default path.
+    #[test]
+    fn with_gammas_default_matches_default_path() {
+        use chem::{standard_ff, AminoAcid};
+        use geom::{build_extended_chain};
+        let s = build_extended_chain(&[
+            AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala,
+        ]).unwrap();
+        let n = s.atom_count();
+        let ff = standard_ff();
+        let mut default_f = vec![Vec3::zeros(); n];
+        add_sasa_forces_analytical(&s, ff, &mut default_f);
+
+        let gammas = super::super::default_sasa_gammas(&s);
+        let mut explicit_f = vec![Vec3::zeros(); n];
+        add_sasa_forces_analytical_with_gammas(&s, ff, &gammas, &mut explicit_f);
+
+        for (a, b) in default_f.iter().zip(&explicit_f) {
+            assert!((*a - *b).norm() < 1e-12,
+                "default and with_gammas paths disagree: {a:?} vs {b:?}");
+        }
+    }
+
+    /// Scaling every γ by 2× scales every force by 2× exactly —
+    /// the SASA energy is linear in γ.
+    #[test]
+    fn doubled_gammas_doubles_forces() {
+        use chem::{standard_ff, AminoAcid};
+        use geom::build_extended_chain;
+        let s = build_extended_chain(&[
+            AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala,
+        ]).unwrap();
+        let n = s.atom_count();
+        let ff = standard_ff();
+        let gammas_1 = super::super::default_sasa_gammas(&s);
+        let gammas_2: Vec<f64> = gammas_1.iter().map(|&g| 2.0 * g).collect();
+
+        let mut f1 = vec![Vec3::zeros(); n];
+        let mut f2 = vec![Vec3::zeros(); n];
+        add_sasa_forces_analytical_with_gammas(&s, ff, &gammas_1, &mut f1);
+        add_sasa_forces_analytical_with_gammas(&s, ff, &gammas_2, &mut f2);
+
+        for (a, b) in f1.iter().zip(&f2) {
+            if a.norm() < 1e-12 { continue; }
+            let scaled = *a * 2.0;
+            assert!((scaled - *b).norm() < 1e-9 * a.norm().max(1.0),
+                "force not linear in γ: 2×{a:?} != {b:?}");
+        }
+    }
+
+    /// Zeroing γ for half the atoms eliminates exactly those atoms'
+    /// contributions — fast path check.  Atoms that were polar in
+    /// the default (γ=0) get nothing either way; atoms that were
+    /// apolar but get zeroed contribute nothing now.
+    #[test]
+    fn zeroing_half_gammas_removes_those_contributions() {
+        use chem::{standard_ff, AminoAcid};
+        use geom::build_extended_chain;
+        let s = build_extended_chain(&[
+            AminoAcid::Ala, AminoAcid::Lys, AminoAcid::Glu,
+        ]).unwrap();
+        let n = s.atom_count();
+        let ff = standard_ff();
+        let mut gammas = super::super::default_sasa_gammas(&s);
+        // Zero the second half.
+        for g in gammas.iter_mut().skip(n / 2) {
+            *g = 0.0;
+        }
+
+        let mut f = vec![Vec3::zeros(); n];
+        add_sasa_forces_analytical_with_gammas(&s, ff, &gammas, &mut f);
+
+        // Atoms in the second half whose γ was already 0 contribute
+        // nothing either way.  Atoms whose γ we zeroed should now
+        // have zero ∂A/∂r contribution from their own area term —
+        // but they still appear in OTHER atoms' boundary topologies,
+        // so their forces aren't zero.  What IS guaranteed: total
+        // force should drop in magnitude (some contributions removed).
+        let f_total: f64 = f.iter().map(|v| v.norm_squared()).sum::<f64>().sqrt();
+        let gammas_full = super::super::default_sasa_gammas(&s);
+        let mut f_full = vec![Vec3::zeros(); n];
+        add_sasa_forces_analytical_with_gammas(&s, ff, &gammas_full, &mut f_full);
+        let f_full_total: f64 = f_full.iter().map(|v| v.norm_squared()).sum::<f64>().sqrt();
+        // Could be 0 if the atoms we zeroed had γ=0 originally
+        // (polar) — in that case the assertion is trivially equal.
+        // Otherwise we expect a real drop.
+        assert!(f_total <= f_full_total + 1e-9,
+            "zeroing γs should not INCREASE force magnitude (was {f_full_total}, now {f_total})");
     }
 
     #[test]

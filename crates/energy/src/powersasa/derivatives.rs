@@ -42,16 +42,33 @@
 //!     ε = atan2(V · (t_in × t_out), t_in · t_out)
 //!   Depends on r_i, r_k, r_l (via V and the two cone axes). (TODO.)
 //!
-//! # Implementation status
+//! # Implementation status — all shipped (see commits `66903ea`, `e9374a4`)
 //!
-//! - [x] `cos_alpha_grad`: ∂cos α / ∂r_i, ∂cos α / ∂r_k closed form
-//! - [ ] `theta_grad`: ∂θ_arc / ∂r_{i,k,l,m}
-//! - [ ] `epsilon_grad`: ∂ε / ∂r_{i,k,l}
-//! - [ ] full `add_sasa_forces_analytical` replacing the numerical version
+//! - [x] `cos_alpha_grad` / `cos_alpha_directional`: ∂cos α / ∂r_{i,k}
+//! - [x] `vertex_point_jvp`: ∂V / ∂r_{i,k,l} via the
+//!   `intersect_circles` parameterisation
+//! - [x] `arc_theta_jvp`: ∂θ_arc / ∂r_{i,k,l,m} — the three motion
+//!   modes (cap, V_s, V_e) folded into one JVP
+//! - [x] `vertex_epsilon_jvp`: ∂ε / ∂r_{i,k,l}
+//! - [x] `analytical::add_sasa_forces_analytical` replacing the
+//!   central-difference scheme — wired into
+//!   `energy::forces_sasa::add_sasa_forces` as the production
+//!   default; numerical version stays around as the cross-validation
+//!   reference (`add_sasa_forces_numerical`).
 //!
-//! Each is staged with its own finite-difference acceptance test (see
-//! `tests` module) so the work can land incrementally and we never trust
-//! an analytical derivative we haven't cross-checked against ε-perturbation.
+//! All four primitives have finite-difference acceptance tests in
+//! the `tests` module below; the end-to-end
+//! `analytical_gradient_matches_finite_difference_ala3` (in
+//! `analytical.rs`) locks the whole pipeline against central
+//! differences on a real chain.
+//!
+//! Implementation note: instead of explicit closed-form gradients
+//! (∂/∂r returning a 3-vector per output), we use **Jacobian-Vector
+//! Products** — given an input perturbation direction `dr` for one
+//! atom, return the directional derivative `dy/dε along dr`.  Building
+//! the full gradient per output is then three JVP evaluations (one
+//! per basis direction).  The JVP form drops a lot of redundant
+//! algebra and made the symbolic derivations tractable.
 
 use geom::Vec3;
 

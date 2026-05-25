@@ -30,6 +30,9 @@ pub use scratch::ForceScratch;
 pub use gb::{gb_energy, GbBreakdown};
 pub use nonbonded::{nonbonded_energy, NonbondedBreakdown, DEFAULT_CUTOFF_A};
 pub use sasa::{sasa_energy, sasa_energy_with_dots, SasaBreakdown};
+pub use powersasa::{
+    default_sasa_gammas, powersasa_energy, surface_tension_kcal, PowerSasaResult,
+};
 
 /// Convenience aggregator returned by the bonded-energy entry point.
 #[derive(Debug, Default, Clone, Copy)]
