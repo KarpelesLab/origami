@@ -773,26 +773,40 @@ fn build_dihedrals(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType],
         let gb = cpu_to_gpu[d.b];
         let gc = cpu_to_gpu[d.c];
         let gd = cpu_to_gpu[d.d];
-        let mut packed = DihedralTerm {
-            a: ga, b: gb, c: gc, d: gd,
-            n_terms: pterms.len().min(4) as u32,
-            _pad0: 0, _pad1: 0, _pad2: 0,
-            term0: zero_term(), term1: zero_term(), term2: zero_term(), term3: zero_term(),
-        };
-        for (i, t) in pterms.iter().take(4).enumerate() {
-            let pt = PeriodicTerm {
-                k_kj: kcal_to_kj(t.k) as f32,
-                n: t.n as f32,
-                delta_rad: deg_to_rad(t.delta_deg) as f32, _pad: 0.0,
+        // CHARMM27 nucleic-acid dihedrals around the phosphodiester
+        // backbone (e.g. CN7-CN7-ON2-Pn at the α/ζ torsion) carry up
+        // to 5 periodic terms — and CHARMM36 protein params can in
+        // principle exceed 4 too.  The GPU kernel packs a fixed 4 terms
+        // per `DihedralTerm`, so split a >4-term dihedral into multiple
+        // GPU records on the same atom 4-tuple; the kernel sums the
+        // contributions just like multiple independent dihedrals.
+        for chunk in pterms.chunks(4) {
+            let mut packed = DihedralTerm {
+                a: ga, b: gb, c: gc, d: gd,
+                n_terms: chunk.len() as u32,
+                _pad0: 0, _pad1: 0, _pad2: 0,
+                term0: zero_term(), term1: zero_term(), term2: zero_term(), term3: zero_term(),
             };
-            match i { 0 => packed.term0 = pt, 1 => packed.term1 = pt, 2 => packed.term2 = pt, _ => packed.term3 = pt }
+            for (i, t) in chunk.iter().enumerate() {
+                let pt = PeriodicTerm {
+                    k_kj: kcal_to_kj(t.k) as f32,
+                    n: t.n as f32,
+                    delta_rad: deg_to_rad(t.delta_deg) as f32, _pad: 0.0,
+                };
+                match i {
+                    0 => packed.term0 = pt,
+                    1 => packed.term1 = pt,
+                    2 => packed.term2 = pt,
+                    _ => packed.term3 = pt,
+                }
+            }
+            let idx = terms.len() as u32;
+            terms.push(packed);
+            per_atom[ga as usize].push(idx);
+            per_atom[gb as usize].push(idx);
+            per_atom[gc as usize].push(idx);
+            per_atom[gd as usize].push(idx);
         }
-        let idx = terms.len() as u32;
-        terms.push(packed);
-        per_atom[ga as usize].push(idx);
-        per_atom[gb as usize].push(idx);
-        per_atom[gc as usize].push(idx);
-        per_atom[gd as usize].push(idx);
     }
     let (c, s, i) = flatten_csr(per_atom, n);
     (terms, c, s, i)
