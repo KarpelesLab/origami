@@ -230,7 +230,7 @@ fn lookup(
 // equilibrium, meant to be relaxed by minimisation / dynamics.
 
 /// Idealised RNA backbone + ribose internal coordinates (Å / radians).
-mod rna_ic {
+pub mod rna_ic {
     use std::f64::consts::PI;
     const fn deg(d: f64) -> f64 {
         d * PI / 180.0
@@ -263,37 +263,137 @@ mod rna_ic {
     pub const C3_C2_C1: f64 = deg(101.5);
     pub const C3_C2_O2: f64 = deg(110.7);
     pub const C2_C1_N: f64 = deg(108.2);
-    // Torsions. The main backbone path uses "extended" values; the
-    // ribose-branch torsions are tuned (see the ring-closure test) so
-    // the C1'-O4' separation lands near the 1.41 Å bond length.
-    // Backbone torsions: γ = 180° (trans) gives a properly extended
-    // single-strand chain with bases spaced apart, instead of the
-    // 54° (A-form gauche) value which placed consecutive bases on
-    // top of each other (~10⁹ kJ/mol LJ clash, see the FIX.rna-bond-r0
-    // commit message).  Other torsions kept at canonical RNA values.
-    pub const ALPHA: f64 = deg(-68.0); // O3'p-P-O5'-C5'
-    pub const BETA: f64 = deg(178.0); //  P-O5'-C5'-C4'
-    pub const GAMMA: f64 = deg(180.0); // O5'-C5'-C4'-C3' (trans, extended)
-    pub const DELTA: f64 = deg(82.0); //  C5'-C4'-C3'-O3'
-    pub const EPSILON: f64 = deg(-153.0); // C4'-C3'-O3'-P(next)
-    pub const ZETA: f64 = deg(-71.0); // C3'-O3'-P-O5'
-    // Ribose-branch torsions solved via grid search (see
-    // crates/geom/tests/rna_ribose_search.rs) for the γ=180° backbone
-    // + the CHARMM-r₀ bond lengths above.  Closes the implicit
-    // C1'-O4' ring-closure bond at 1.414 Å within search resolution.
-    pub const O4_TORS: f64 = deg(111.0); // O5'-C5'-C4'-O4'
-    pub const C2_TORS: f64 = deg(-159.0); // C5'-C4'-C3'-C2'
-    pub const C1_TORS: f64 = deg(24.0); // C4'-C3'-C2'-C1'
-    // O2_TORS retuned for the new C1' position so the 2'-hydroxyl
-    // doesn't clash with C1' (was 0.61 Å with the old O2_TORS=48°).
-    pub const O2_TORS: f64 = deg(-156.0); // C4'-C3'-C2'-O2'
-    pub const CHI: f64 = deg(-160.0); //   C3'-C2'-C1'-N (anti)
-    // Phosphate non-bridging O placements — rotated to keep them
-    // clear of the previous residue's H3' (~3.9 Å apart vs ~1.2 Å
-    // at the prior 120°/−120° symmetric placement, see the
-    // `grid_search_op_torsions_for_no_h3_op_clash` ignored test).
-    pub const OP1_TORS: f64 = deg(-170.0);
-    pub const OP2_TORS: f64 = deg(125.0);
+    // ---- Per-conformation torsion sets ----
+    //
+    // The builder factors out backbone + ribose-branch + phosphate
+    // dihedrals into a `RnaTorsionSet` so it can switch between
+    // "extended" (γ = 180°, trans) and "A-form" (γ = 54°, gauche+)
+    // starting geometries.  Sugar pucker (δ = 82°, C3'-endo) and
+    // glycosidic χ (anti) are the same in both — only the backbone
+    // C5'-C4'-C3' rotation differs.
+
+    /// Per-conformation set of dihedrals for the RNA builder.  All
+    /// angles in radians.  Convenience constructors below build the
+    /// "extended" and "A-form" defaults.
+    #[derive(Clone, Copy, Debug)]
+    pub struct RnaTorsionSet {
+        pub alpha: f64,    // O3'(i-1)-P-O5'-C5'
+        pub beta: f64,     // P-O5'-C5'-C4'
+        pub gamma: f64,    // O5'-C5'-C4'-C3'
+        pub delta: f64,    // C5'-C4'-C3'-O3'
+        pub epsilon: f64,  // C4'-C3'-O3'-P(next)
+        pub zeta: f64,     // C3'-O3'-P-O5'(next)
+        pub chi: f64,      // C3'-C2'-C1'-N (internal frame)
+        pub o4_tors: f64,  // O5'-C5'-C4'-O4'  (ribose ring closure)
+        pub c2_tors: f64,  // C5'-C4'-C3'-C2'  (ribose ring closure)
+        pub c1_tors: f64,  // C4'-C3'-C2'-C1'  (ribose ring closure)
+        pub o2_tors: f64,  // C4'-C3'-C2'-O2'  (2'-OH placement)
+        pub op1_tors: f64, // C5'-O5'-P-OP1
+        pub op2_tors: f64, // C5'-O5'-P-OP2
+        /// Internal dihedral C2'-C1'-N9-C4 anchoring the purine base
+        /// ring onto the ribose.  Combined with `chi`, this controls
+        /// the canonical glycosidic torsion χ = O4'-C1'-N9-C4.
+        pub purine_chi_c4: f64,
+        /// Pyrimidine analogue: C2'-C1'-N1-C2 anchoring the
+        /// pyrimidine ring.  Canonical χ = O4'-C1'-N1-C2.
+        pub pyrimidine_chi_c2: f64,
+    }
+
+    impl RnaTorsionSet {
+        /// Extended single-strand RNA chain.  γ = 180° (trans) opens
+        /// the chain into a near-linear shape, separating consecutive
+        /// bases enough that the starting geometry has no LJ clashes.
+        /// Ribose-branch torsions solved via `tests/rna_ribose_search.rs`
+        /// for this γ; phosphate OP torsions chosen so OP* atoms clear
+        /// the previous residue's H3'.  See the `FIX.rna-builder-*`
+        /// commits for the search history.
+        pub const fn extended() -> Self {
+            Self {
+                alpha: deg(-68.0),
+                beta: deg(178.0),
+                gamma: deg(180.0),
+                delta: deg(82.0),
+                epsilon: deg(-153.0),
+                zeta: deg(-71.0),
+                chi: deg(-160.0),
+                o4_tors: deg(111.0),
+                c2_tors: deg(-159.0),
+                c1_tors: deg(24.0),
+                o2_tors: deg(-156.0),
+                op1_tors: deg(-170.0),
+                op2_tors: deg(125.0),
+                // Pre-existing values from before RnaTorsionSet existed.
+                // Combined with `chi = -160°` they produce a canonical
+                // χ (= O4'-C1'-N-C4/C2) of ~+10° — mildly syn rather
+                // than anti.  Preserved here so existing CHARMM27
+                // acceptance baselines (rna_native_vs_extended,
+                // rna_clash_audit, …) stay reproducible; the A-form
+                // builder uses the correct anti values below.
+                purine_chi_c4: deg(-120.0),
+                pyrimidine_chi_c2: deg(-120.0),
+            }
+        }
+
+        /// Canonical right-handed A-form RNA helix (Olson et al. 2009
+        /// mean torsions).  γ = 54° (gauche+) is the backbone change
+        /// from `extended()`.
+        ///
+        /// Ribose-branch torsions: O4_TORS lives on the C5'-C4' bond
+        /// (same axis as γ), so when γ rotates by Δ the ring rotates
+        /// with it — O4_TORS shifts by the same Δ.  C2_TORS / C1_TORS
+        /// live on the C4'-C3' bond, so they're invariant under γ
+        /// changes.  Extended values are (111°, -159°, 24°, -156°) for
+        /// (O4, C2, C1, O2); Δγ = 54-180 = -126°, so A-form uses
+        /// (111-126, -159, 24, -156) = (-15°, -159°, 24°, -156°).
+        ///
+        /// (An unconstrained grid search at γ=54° also finds a
+        /// ring-closure solution at (123°, 159°, -24°), but that's the
+        /// mirror-image ribose — O3' ends up on top of O4' at 1.44 Å
+        /// inside the same residue.  The Δγ-rotation rule above picks
+        /// the correct chirality.)
+        pub const fn a_form() -> Self {
+            Self {
+                alpha: deg(-68.0),
+                beta: deg(178.0),
+                gamma: deg(54.0),
+                delta: deg(82.0),
+                epsilon: deg(-153.0),
+                zeta: deg(-71.0),
+                chi: deg(-160.0),
+                // Extended O4_TORS = 111° rotated by Δγ = -126°.
+                o4_tors: deg(111.0 - 126.0),
+                c2_tors: deg(-159.0),
+                c1_tors: deg(24.0),
+                o2_tors: deg(-156.0),
+                op1_tors: deg(-170.0),
+                op2_tors: deg(125.0),
+                // Anti glycosidic χ ≈ -160°: from the canonical-χ
+                // probe in `tests/rna_a_form_probe.rs`, the extended
+                // builder produced χ = +10° with C4 at -120°.  Shift
+                // C4 by -170° (= -120° + (-160° - 10°)) so canonical
+                // χ lands near -160° (anti).  Same offset for the
+                // pyrimidine C2 anchor.
+                purine_chi_c4: deg(-120.0 - 170.0),
+                pyrimidine_chi_c2: deg(-120.0 - 170.0),
+            }
+        }
+    }
+
+    // Legacy per-constant exports kept for the tests in this file.
+    // Prefer reading from `RnaTorsionSet` in new code.
+    pub const ALPHA: f64 = RnaTorsionSet::extended().alpha;
+    pub const BETA: f64 = RnaTorsionSet::extended().beta;
+    pub const GAMMA: f64 = RnaTorsionSet::extended().gamma;
+    pub const DELTA: f64 = RnaTorsionSet::extended().delta;
+    pub const EPSILON: f64 = RnaTorsionSet::extended().epsilon;
+    pub const ZETA: f64 = RnaTorsionSet::extended().zeta;
+    pub const O4_TORS: f64 = RnaTorsionSet::extended().o4_tors;
+    pub const C2_TORS: f64 = RnaTorsionSet::extended().c2_tors;
+    pub const C1_TORS: f64 = RnaTorsionSet::extended().c1_tors;
+    pub const O2_TORS: f64 = RnaTorsionSet::extended().o2_tors;
+    pub const CHI: f64 = RnaTorsionSet::extended().chi;
+    pub const OP1_TORS: f64 = RnaTorsionSet::extended().op1_tors;
+    pub const OP2_TORS: f64 = RnaTorsionSet::extended().op2_tors;
 
     // ---- Base ring geometry (canonical idealised bases) ----
     // Bond lengths and angles taken from standard nucleobase
@@ -329,8 +429,11 @@ mod rna_ic {
     pub const ANG_C5_C6_N1_PUR: f64 = deg(117.7);
     pub const ANG_C6_N1_C2_PUR: f64 = deg(117.8);
     pub const ANG_N1_C2_N3_PUR: f64 = deg(128.0);
-    // Purine χ (anti) — sets the base orientation around C1'-N9.
-    // Anchored as the dihedral C2'-C1'-N9-C4 used to NeRF-place C4.
+    // Purine glycosidic anchor — superseded by
+    // `RnaTorsionSet::purine_chi_c4`.  Pre-existing value preserved as
+    // the conformation-agnostic default used by tests that don't go
+    // through a torsion-set builder.
+    #[allow(dead_code)]
     pub const PURINE_CHI_C4: f64 = deg(-120.0);
     // C1'-N9-C4 sp² angle = 360° - 105.8° (interior) - 126.4° = 127.8°
     // for symmetric placement (we use the 126.4° value which gives
@@ -360,7 +463,9 @@ mod rna_ic {
     pub const ANG_C4_C5_C6_PYR: f64 = deg(117.4);
     pub const ANG_C5_C6_N1_PYR: f64 = deg(120.5);
     #[allow(dead_code)] pub const ANG_C2_N1_C6_PYR: f64 = deg(120.3); // closure
-    // Pyrimidine χ (anti) — dihedral C2'-C1'-N1-C2 anchoring C2.
+    // Pyrimidine glycosidic anchor — superseded by
+    // `RnaTorsionSet::pyrimidine_chi_c2`.
+    #[allow(dead_code)]
     pub const PYRIMIDINE_CHI_C2: f64 = deg(-120.0);
     pub const ANG_C1P_N1_C2: f64 = deg(120.0);
 
@@ -482,6 +587,7 @@ fn place_purine_base(
     c2p: Vec3,
     c1p: Vec3,
     n9: Vec3,
+    chi_c4: f64,
 ) {
     use chem::Nucleotide;
     // Per-nucleotide bond r₀ lookups (CHARMM27 r₀ for the actual
@@ -491,7 +597,7 @@ fn place_purine_base(
     // Walk the fused 5-/6-ring with all dihedrals in the ring plane.
     // C4 anchors the base orientation; C8 closes the 5-ring; C6/N1/
     // C2/N3 trace the 6-ring back to its closure at C4.
-    let c4 = place_atom(c2p, c1p, n9, r("N9", "C4", rna_ic::N9_C4_PUR), rna_ic::ANG_C1P_N9_C4, rna_ic::PURINE_CHI_C4);
+    let c4 = place_atom(c2p, c1p, n9, r("N9", "C4", rna_ic::N9_C4_PUR), rna_ic::ANG_C1P_N9_C4, chi_c4);
     let c5 = place_atom(c1p, n9, c4, r("C5", "C4", rna_ic::C5_C4_BASE), rna_ic::ANG_C5_C4_N9, PI);
     let n7 = place_atom(n9, c4, c5, r("N7", "C5", rna_ic::N7_C5_BASE), rna_ic::ANG_N7_C5_C4, 0.0);
     let c8 = place_atom(c4, c5, n7, r("C8", "N7", rna_ic::C8_N7_BASE), rna_ic::ANG_C8_N7_C5, 0.0);
@@ -593,13 +699,14 @@ fn place_pyrimidine_base(
     c2p: Vec3,
     c1p: Vec3,
     n1: Vec3,
+    chi_c2: f64,
 ) {
     use chem::Nucleotide;
     let r = |a: &str, b: &str, fb: f64| base_r0(ff, nt, a, b, fb);
     // 6-ring walk anchored on N1 (the glycosidic atom for pyrimidines).
     let c2 = place_atom(
         c2p, c1p, n1,
-        r("N1", "C2", rna_ic::N1_C2_PYR), rna_ic::ANG_C1P_N1_C2, rna_ic::PYRIMIDINE_CHI_C2,
+        r("N1", "C2", rna_ic::N1_C2_PYR), rna_ic::ANG_C1P_N1_C2, chi_c2,
     );
     let n3 = place_atom(c1p, n1, c2, r("C2", "N3", rna_ic::C2_N3_PYR), rna_ic::ANG_N1_C2_N3_PYR, PI);
     let c4 = place_atom(n1, c2, n3, r("N3", "C4", rna_ic::N3_C4_PYR), rna_ic::ANG_C2_N3_C4_PYR, 0.0);
@@ -673,8 +780,39 @@ fn deg_from_120_sp2(ring_angle_rad: f64) -> f64 {
 /// Build an extended RNA chain (sugar-phosphate backbone + ribose ring
 /// + glycosidic nitrogen + base ring + all hydrogens) from a
 /// nucleotide sequence. Every residue is a `Monomer::Rna`.
+///
+/// "Extended" here means γ = 180° (trans) — a near-linear single-strand
+/// chain with bases well separated.  For a canonical helical starting
+/// geometry use [`build_a_form_rna_chain`] instead.
 pub fn build_extended_rna_chain(
     sequence: &[chem::Nucleotide],
+) -> Result<Structure, BuildError> {
+    build_rna_chain_with_torsions(sequence, rna_ic::RnaTorsionSet::extended())
+}
+
+/// Build an A-form RNA helix (right-handed, ~2.8 Å rise/nt, ~32° twist/nt)
+/// from a nucleotide sequence.  Uses canonical A-form backbone torsions
+/// — γ = 54° (gauche+), δ = 82° (C3'-endo pucker), χ = -160° (anti
+/// glycosidic) — so the starting geometry sits near the A-form energy
+/// minimum and minimisation only has to polish the structure rather
+/// than fold it.
+///
+/// Same atom roster as [`build_extended_rna_chain`]; only the per-atom
+/// internal-coordinate placement differs.
+pub fn build_a_form_rna_chain(
+    sequence: &[chem::Nucleotide],
+) -> Result<Structure, BuildError> {
+    build_rna_chain_with_torsions(sequence, rna_ic::RnaTorsionSet::a_form())
+}
+
+/// Build an RNA chain given an arbitrary torsion set.  Shared between
+/// the extended and A-form public builders so that future
+/// conformations (B-like, Z-like, single-stranded tetraloops, …) can
+/// reuse the same atom-placement machinery without duplicating the
+/// 100-line residue body.
+pub fn build_rna_chain_with_torsions(
+    sequence: &[chem::Nucleotide],
+    tors: rna_ic::RnaTorsionSet,
 ) -> Result<Structure, BuildError> {
     use chem::Nucleotide;
     use crate::structure::Monomer;
@@ -711,9 +849,9 @@ pub fn build_extended_rna_chain(
             let pc3 = prev.position("C3'").unwrap();
             let po3 = prev.position("O3'").unwrap();
             // P bonded to prev O3'; O5' then C5' continue the chain.
-            let p = place_atom(pc4, pc3, po3, rna_ic::O3_P, rna_ic::C3_O3_P, rna_ic::EPSILON);
-            let o5 = place_atom(pc3, po3, p, rna_ic::P_O5, rna_ic::O3_P_O5, rna_ic::ZETA);
-            let c5 = place_atom(po3, p, o5, rna_ic::O5_C5, rna_ic::P_O5_C5, rna_ic::ALPHA);
+            let p = place_atom(pc4, pc3, po3, rna_ic::O3_P, rna_ic::C3_O3_P, tors.epsilon);
+            let o5 = place_atom(pc3, po3, p, rna_ic::P_O5, rna_ic::O3_P_O5, tors.zeta);
+            let c5 = place_atom(po3, p, o5, rna_ic::O5_C5, rna_ic::P_O5_C5, tors.alpha);
             let _ = pc5;
             (p, o5, c5)
         };
@@ -722,22 +860,22 @@ pub fn build_extended_rna_chain(
         push(&mut atoms, "C5'", Element::C, c5);
 
         // ---- Backbone main path C4' → C3' → O3' ----
-        let c4 = place_atom(p, o5, c5, rna_ic::C5_C4, rna_ic::O5_C5_C4, rna_ic::BETA);
-        let c3 = place_atom(o5, c5, c4, rna_ic::C4_C3, rna_ic::C5_C4_C3, rna_ic::GAMMA);
-        let o3 = place_atom(c5, c4, c3, rna_ic::C3_O3, rna_ic::C4_C3_O3, rna_ic::DELTA);
+        let c4 = place_atom(p, o5, c5, rna_ic::C5_C4, rna_ic::O5_C5_C4, tors.beta);
+        let c3 = place_atom(o5, c5, c4, rna_ic::C4_C3, rna_ic::C5_C4_C3, tors.gamma);
+        let o3 = place_atom(c5, c4, c3, rna_ic::C3_O3, rna_ic::C4_C3_O3, tors.delta);
         push(&mut atoms, "C4'", Element::C, c4);
 
         // ---- Non-bridging phosphate oxygens ----
-        let op1 = place_atom(c5, o5, p, rna_ic::P_OP, rna_ic::O5_P_OP, rna_ic::OP1_TORS);
-        let op2 = place_atom(c5, o5, p, rna_ic::P_OP, rna_ic::O5_P_OP, rna_ic::OP2_TORS);
+        let op1 = place_atom(c5, o5, p, rna_ic::P_OP, rna_ic::O5_P_OP, tors.op1_tors);
+        let op2 = place_atom(c5, o5, p, rna_ic::P_OP, rna_ic::O5_P_OP, tors.op2_tors);
         push(&mut atoms, "OP1", Element::O, op1);
         push(&mut atoms, "OP2", Element::O, op2);
 
         // ---- Ribose ring branch atoms ----
-        let o4 = place_atom(o5, c5, c4, rna_ic::C4_O4, rna_ic::C5_C4_O4, rna_ic::O4_TORS);
-        let c2 = place_atom(c5, c4, c3, rna_ic::C3_C2, rna_ic::C4_C3_C2, rna_ic::C2_TORS);
-        let c1 = place_atom(c4, c3, c2, rna_ic::C2_C1, rna_ic::C3_C2_C1, rna_ic::C1_TORS);
-        let o2 = place_atom(c4, c3, c2, rna_ic::C2_O2, rna_ic::C3_C2_O2, rna_ic::O2_TORS);
+        let o4 = place_atom(o5, c5, c4, rna_ic::C4_O4, rna_ic::C5_C4_O4, tors.o4_tors);
+        let c2 = place_atom(c5, c4, c3, rna_ic::C3_C2, rna_ic::C4_C3_C2, tors.c2_tors);
+        let c1 = place_atom(c4, c3, c2, rna_ic::C2_C1, rna_ic::C3_C2_C1, tors.c1_tors);
+        let o2 = place_atom(c4, c3, c2, rna_ic::C2_O2, rna_ic::C3_C2_O2, tors.o2_tors);
         push(&mut atoms, "O4'", Element::O, o4);
         push(&mut atoms, "C3'", Element::C, c3);
         push(&mut atoms, "O3'", Element::O, o3);
@@ -746,7 +884,7 @@ pub fn build_extended_rna_chain(
         push(&mut atoms, "C1'", Element::C, c1);
 
         // ---- Glycosidic nitrogen (purine N9 / pyrimidine N1) ----
-        let n = place_atom(c3, c2, c1, rna_ic::C1_N, rna_ic::C2_C1_N, rna_ic::CHI);
+        let n = place_atom(c3, c2, c1, rna_ic::C1_N, rna_ic::C2_C1_N, tors.chi);
 
         // ---- Backbone hydrogens ----
         place_rna_backbone_hydrogens(&mut atoms, o5, c5, c4, o4, c3, o3, c2, o2, c1, n);
@@ -759,12 +897,12 @@ pub fn build_extended_rna_chain(
                 // N9 is the first base-heavy atom in canonical order;
                 // push it before calling the purine ring walker.
                 push(&mut atoms, "N9", Element::N, n);
-                place_purine_base(&mut atoms, nt, ff, c2, c1, n);
+                place_purine_base(&mut atoms, nt, ff, c2, c1, n, tors.purine_chi_c4);
             }
             Nucleotide::Cytosine | Nucleotide::Uracil => {
                 // For pyrimidines the helper pushes N1 itself as part
                 // of the canonical-order push, so we don't push it here.
-                place_pyrimidine_base(&mut atoms, nt, ff, c2, c1, n);
+                place_pyrimidine_base(&mut atoms, nt, ff, c2, c1, n, tors.pyrimidine_chi_c2);
             }
         }
 

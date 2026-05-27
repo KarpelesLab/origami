@@ -69,6 +69,14 @@ enum Command {
         #[arg(long)]
         rna: bool,
 
+        /// With `--rna`: start from a canonical right-handed A-form
+        /// helix (γ = 54° gauche+, C3'-endo pucker, anti glycosidic χ)
+        /// instead of an extended single-strand chain.  Lower-energy
+        /// starting geometry — closer to the FF minimum, so dynamics
+        /// only has to polish rather than fold.
+        #[arg(long, requires = "rna")]
+        a_form: bool,
+
         /// Output PDB path. Defaults to stdout.
         #[arg(long, short)]
         output: Option<PathBuf>,
@@ -354,8 +362,8 @@ fn main() -> Result<()> {
         Command::Translate { input, orfs, min_aa, three_letter } => {
             run_translate(&input, orfs, min_aa, three_letter)
         }
-        Command::Build { seq, from_fasta, rna, output } => {
-            run_build(seq.as_deref(), from_fasta.as_deref(), rna, output.as_deref())
+        Command::Build { seq, from_fasta, rna, a_form, output } => {
+            run_build(seq.as_deref(), from_fasta.as_deref(), rna, a_form, output.as_deref())
         }
         Command::Energy { input, skip_sasa } => run_energy(&input, skip_sasa),
         Command::Minimize { input, output, algorithm, max_steps, tol, max_step, with_sasa, with_cmap } => {
@@ -1090,6 +1098,7 @@ fn run_build(
     seq: Option<&str>,
     from_fasta: Option<&str>,
     rna: bool,
+    a_form: bool,
     output: Option<&std::path::Path>,
 ) -> Result<()> {
     let title;
@@ -1100,9 +1109,14 @@ fn run_build(
         }
         let s = seq.ok_or_else(|| anyhow!("--rna requires --seq with A/U/G/C letters"))?;
         let nucleotides = parse_rna_seq(s)?;
-        title = format!("rna_seq={s}");
-        build_extended_rna_chain(&nucleotides)
-            .map_err(|e| anyhow!("RNA chain build failed: {e}"))?
+        title = format!("rna_seq={s}{}", if a_form { ",a-form" } else { "" });
+        if a_form {
+            geom::build_a_form_rna_chain(&nucleotides)
+                .map_err(|e| anyhow!("A-form RNA chain build failed: {e}"))?
+        } else {
+            build_extended_rna_chain(&nucleotides)
+                .map_err(|e| anyhow!("RNA chain build failed: {e}"))?
+        }
     } else {
         let (sequence, hdr) = if let Some(s) = seq {
             (parse_aa_seq(s)?, format!("seq={s}"))
