@@ -42,7 +42,8 @@ use geom::{Structure, TopologyGraph, Vec3};
 use gpu::{
     build_tile_interaction_list, morton_permutation, pair_list_to_csr, AngleTerm, BondTerm,
     BondedSetup, DihedralTerm, GbSetup, GpuContext, ImproperTerm, IntegratorPipeline,
-    PerXShakeData, PeriodicTerm, TileNonbondedSetup, VerletNonbondedSetup,
+    PerXShakeData, PeriodicTerm, SasaSmoothSetup, TileNonbondedSetup, VerletNonbondedSetup,
+    SASA_SMOOTH_DEFAULT_SIGMA_A,
 };
 
 const KCAL_TO_KJ: f32 = 4.184;
@@ -93,6 +94,23 @@ pub struct FullGpuIntegrator {
     /// list builder needs Morton-sorted positions, which we get
     /// from the GPU each refresh, plus the LJ + Coulomb cutoff).
     nb_cutoff_a: f32,
+    /// SASA mode: when true, `refresh_neighbour_lists` also
+    /// rebuilds the SASA CSR and uploads it.  Enabled via
+    /// `enable_sasa_mode`.
+    sasa_mode: bool,
+    /// Per-atom expanded SASA radii in CPU index order (vdW + probe).
+    sasa_radii_cpu_order: Vec<f64>,
+    /// Cached SASA CSR — refreshed when the underlying SASA Verlet
+    /// list rebuilds.
+    sasa_counts: Vec<u32>,
+    sasa_starts: Vec<u32>,
+    sasa_indices: Vec<u32>,
+    /// Drift-detection reference for SASA neighbour-list refresh,
+    /// in CPU index order.
+    sasa_ref_x: Vec<f64>,
+    sasa_ref_y: Vec<f64>,
+    sasa_ref_z: Vec<f64>,
+    sasa_valid: bool,
 }
 
 impl FullGpuIntegrator {
@@ -280,7 +298,61 @@ impl FullGpuIntegrator {
             tile_start: Vec::new(),
             tile_indices: Vec::new(),
             nb_cutoff_a: DEFAULT_CUTOFF_A as f32,
+            sasa_mode: false,
+            sasa_radii_cpu_order: Vec::new(),
+            sasa_counts: Vec::new(),
+            sasa_starts: Vec::new(),
+            sasa_indices: Vec::new(),
+            sasa_ref_x: Vec::new(),
+            sasa_ref_y: Vec::new(),
+            sasa_ref_z: Vec::new(),
+            sasa_valid: false,
         })
+    }
+
+    /// Enable smooth-coverage SASA forces.  The integrator will
+    /// dispatch the GPU SASA force kernel after the GB pass in
+    /// every force-eval, and `refresh_neighbour_lists` will rebuild
+    /// the SASA Verlet list whenever atoms drift past the skin.
+    ///
+    /// `gammas_cpu_order` is in kJ/mol/Å² in CPU index order (use
+    /// `energy::powersasa::default_sasa_gammas(structure)`).
+    /// Internally translated to GPU/Morton order.
+    pub fn enable_sasa_mode(
+        &mut self,
+        structure: &Structure,
+        gammas_cpu_order: &[f64],
+    ) {
+        let n = self.n_atoms;
+        assert_eq!(gammas_cpu_order.len(), n);
+        // Per-atom radii (vdW + probe) in CPU order.
+        const PROBE_RADIUS_A: f64 = 1.4;
+        let mut radii_cpu: Vec<f64> = Vec::with_capacity(n);
+        for r in &structure.residues {
+            for a in &r.atoms {
+                let vdw = energy::powersasa::vdw_radius(a.element);
+                radii_cpu.push(vdw + PROBE_RADIUS_A);
+            }
+        }
+        // Translate to GPU order for the kernel buffers.
+        let radii_gpu: Vec<f32> = (0..n)
+            .map(|g| radii_cpu[self.gpu_to_cpu[g] as usize] as f32)
+            .collect();
+        let gammas_gpu: Vec<f32> = (0..n)
+            .map(|g| gammas_cpu_order[self.gpu_to_cpu[g] as usize] as f32)
+            .collect();
+        self.integ.enable_sasa(SasaSmoothSetup {
+            radii: &radii_gpu,
+            gammas: &gammas_gpu,
+            sigma_a: SASA_SMOOTH_DEFAULT_SIGMA_A,
+            initial_indices_capacity: (n * 60).max(64),
+        });
+        self.sasa_mode = true;
+        self.sasa_radii_cpu_order = radii_cpu;
+        self.sasa_ref_x = vec![0.0; n];
+        self.sasa_ref_y = vec![0.0; n];
+        self.sasa_ref_z = vec![0.0; n];
+        self.sasa_valid = false;
     }
 
     /// Enable the tile-based nonbonded kernel.  Must be called
@@ -470,6 +542,77 @@ impl FullGpuIntegrator {
             self.gb_starts = s;
             self.gb_indices = i;
             self.integ.update_gb_neighbours(&self.gb_counts, &self.gb_starts, &self.gb_indices);
+        }
+        // ---- SASA neighbour list ----
+        //
+        // SASA cutoff is per-pair `r_i + r_j + skin` where r is the
+        // expanded vdW + probe radius (~3-6 Å total).  Much tighter
+        // than the LJ (10 Å) or GB (20 Å) lists.  Use a 1 Å skin —
+        // larger than the LJ skin since the SASA boundary itself is
+        // sub-Å sharp.
+        if self.sasa_mode {
+            const SASA_SKIN_A: f64 = 1.0;
+            let half_skin_sq = (0.5 * SASA_SKIN_A) * (0.5 * SASA_SKIN_A);
+            let sasa_rebuilt = !self.sasa_valid || {
+                let mut moved = false;
+                for i in 0..self.n_atoms {
+                    let dx = self.scratch.xs[i] - self.sasa_ref_x[i];
+                    let dy = self.scratch.ys[i] - self.sasa_ref_y[i];
+                    let dz = self.scratch.zs[i] - self.sasa_ref_z[i];
+                    if dx * dx + dy * dy + dz * dz > half_skin_sq {
+                        moved = true;
+                        break;
+                    }
+                }
+                moved
+            };
+            if sasa_rebuilt {
+                // Direct O(N²) pair build — at SASA cutoffs each atom
+                // has only ~10-30 neighbours, and the per-rebuild
+                // wall time is small relative to the per-step force
+                // eval.  Could switch to a cell list if profile
+                // shows this dominating.
+                let n = self.n_atoms;
+                let mut per_atom_nbrs: Vec<Vec<u32>> = vec![Vec::new(); n];
+                for cpu_i in 0..n {
+                    let ri = self.sasa_radii_cpu_order[cpu_i];
+                    for cpu_j in 0..n {
+                        if cpu_i == cpu_j { continue; }
+                        let dx = self.scratch.xs[cpu_i] - self.scratch.xs[cpu_j];
+                        let dy = self.scratch.ys[cpu_i] - self.scratch.ys[cpu_j];
+                        let dz = self.scratch.zs[cpu_i] - self.scratch.zs[cpu_j];
+                        let r_sum = ri + self.sasa_radii_cpu_order[cpu_j] + SASA_SKIN_A;
+                        if dx * dx + dy * dy + dz * dz <= r_sum * r_sum {
+                            // Add the GPU-translated index — the SASA
+                            // kernel walks neighbour lists in GPU
+                            // space, same as nb / GB.
+                            per_atom_nbrs[self.cpu_to_gpu[cpu_i] as usize]
+                                .push(self.cpu_to_gpu[cpu_j] as u32);
+                        }
+                    }
+                }
+                // Flatten into CSR (keyed on GPU atom index).
+                self.sasa_counts = vec![0u32; n];
+                self.sasa_starts = vec![0u32; n];
+                let mut total = 0u32;
+                for i in 0..n {
+                    self.sasa_starts[i] = total;
+                    self.sasa_counts[i] = per_atom_nbrs[i].len() as u32;
+                    total += self.sasa_counts[i];
+                }
+                self.sasa_indices = Vec::with_capacity(total as usize);
+                for list in &per_atom_nbrs {
+                    self.sasa_indices.extend_from_slice(list);
+                }
+                self.integ.update_sasa_neighbours(
+                    &self.sasa_counts, &self.sasa_starts, &self.sasa_indices,
+                );
+                // Snapshot drift ref.
+                self.sasa_ref_x.copy_from_slice(&self.scratch.xs);
+                self.sasa_ref_y.copy_from_slice(&self.scratch.ys);
+                self.sasa_ref_z.copy_from_slice(&self.scratch.zs);
+                self.sasa_valid = true;
+            }
         }
     }
 

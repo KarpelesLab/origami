@@ -24,6 +24,7 @@ use crate::bonded::{BondedPipeline, BondedSetup};
 use crate::context::GpuContext;
 use crate::gb::{GbPipeline, GbSetup};
 use crate::nonbonded_verlet::{VerletNonbondedPipeline, VerletNonbondedSetup};
+use crate::sasa_smooth::{SasaSmoothPipeline, SasaSmoothSetup};
 use crate::shake::{PerXShakeData, ShakePipeline};
 use crate::tile_nonbonded::{TileNonbondedPipeline, TileNonbondedSetup};
 
@@ -39,6 +40,11 @@ pub struct IntegratorPipeline {
     /// Set via [`enable_shake`].  When `Some`, [`step_n_shake`] becomes
     /// callable and the BAOAB granular kernels are active.
     shake: Option<ShakePipeline>,
+    /// Optional smooth-coverage SASA pipeline (set via
+    /// [`enable_sasa`]).  When present, its force kernel runs as
+    /// part of the per-step force-eval, accumulating into the
+    /// shared `forces` buffer.
+    sasa: Option<SasaSmoothPipeline>,
     /// The ref_positions buffer SHAKE reads — shared between
     /// `BaoabPipeline::save_ref_and_a` (writes) and the SHAKE kernel
     /// (reads).  Owned here for lifetime management.
@@ -135,9 +141,36 @@ impl IntegratorPipeline {
             tile_nb: None,
             gb, baoab,
             shake: None,
+            sasa: None,
             ref_positions_buf: None,
             ctx,
         }
+    }
+
+    /// Enable smooth-coverage SASA forces.  After construction the
+    /// caller uploads tile-list neighbour data via
+    /// [`update_sasa_neighbours`]; from then on every
+    /// `step_n` / `step_n_shake` includes the SASA force kernel in
+    /// its per-step force evaluation.
+    pub fn enable_sasa(&mut self, setup: SasaSmoothSetup) {
+        let sasa = SasaSmoothPipeline::new_with_external_buffers(
+            self.ctx, self.n_atoms, setup,
+            self.baoab.positions_buffer_arc(),
+            Some(self.baoab.forces_buffer_arc()),
+        );
+        self.sasa = Some(sasa);
+    }
+
+    pub fn update_sasa_neighbours(
+        &mut self,
+        counts: &[u32],
+        starts: &[u32],
+        indices: &[u32],
+    ) {
+        self.sasa
+            .as_mut()
+            .expect("call enable_sasa first")
+            .update_neighbours(counts, starts, indices);
     }
 
     /// Enable the tile-based nonbonded kernel — replaces the Verlet
@@ -367,6 +400,12 @@ impl IntegratorPipeline {
             self.nonbonded.record_compute(encoder);
         }
         self.gb.record_compute(encoder);
+        // SASA (smooth-coverage) — accumulates into the shared
+        // forces buffer.  Skipped when `enable_sasa` hasn't been
+        // called (no SASA pipeline allocated).
+        if let Some(sasa) = self.sasa.as_ref() {
+            sasa.record_forces_into(encoder);
+        }
     }
 
     pub fn download_positions(&self) -> Vec<[f32; 3]> {
