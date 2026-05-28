@@ -1,20 +1,27 @@
-//! RNA force-field acceptance: native UUCG hairpin scores below extended.
+//! RNA force-field acceptance: native fold scores below extended.
 //!
 //! The protein-side analogue is `m7_native_vs_extended` (chignolin 30 k,
-//! Trp-cage 49 k, villin 30 k kJ/mol native-favourable gaps).  This test
-//! is the equivalent for the CHARMM27 nucleic acid force field shipped
-//! in `FEAT.rna-ff`.
+//! Trp-cage 49 k, villin 30 k kJ/mol native-favourable gaps).  This is
+//! the equivalent for the CHARMM27 nucleic acid force field — covering
+//! two of the three canonical small-RNA reference motifs:
 //!
-//! Fixture: 2KOC (Nozinovic et al. 2010, NMR solution structure of a
-//! 14-mer hairpin RNA with the UUCG tetraloop, GGCACUUCGGUGCC, 5 bp
-//! stem + UUCG loop).  Single-chain pure-RNA NMR ensemble, model 1
-//! extracted.
+//! - **UUCG tetraloop** (PDB 2KOC, NMR): 14-nt hairpin
+//!   GGCACUUCGGUGCC with the canonical UUCG closing loop.
+//! - **GNRA tetraloop** (PDB 1ZIH, NMR): 12-nt hairpin GGGCGCAAGCCU
+//!   with the GCAA closing loop — a GNRA-class tetraloop where N = C
+//!   and R = A.
 //!
-//! Both the native (loaded from PDB) and the extended chain (built
-//! from sequence) carry the same atom set, so all bonded + LJ +
-//! Coulomb + GB terms are directly comparable.  We minimise both
-//! briefly to discount NMR / NeRF starting-point clashes — same
-//! convention as the villin protein test.
+//! The third standard reference, the **sarcin/ricin loop** (PDB 483D
+//! E. coli, PDB 430D rat), is X-ray crystallography with no
+//! hydrogens.  Adding hydrogens to a heavy-atom-only RNA skeleton is
+//! infrastructure we don't have yet (the protein 2F4K villin fixture
+//! comes pre-hydrogenated), so SRL acceptance lands when that lands.
+//!
+//! Both native (loaded from PDB) and extended (built from sequence)
+//! carry the same atom set, so all bonded + LJ + Coulomb + GB terms
+//! are directly comparable.  We minimise both briefly to discount
+//! NMR / NeRF starting-point clashes — same convention as the villin
+//! protein test.
 
 use chem::{standard_ff, Nucleotide};
 use energy::bonded::bonded_energy;
@@ -109,5 +116,50 @@ fn uucg_hairpin_native_beats_extended() {
     assert!(
         gap > 1500.0,
         "UUCG hairpin: native should score ≥1500 kJ/mol below extended, got {gap}"
+    );
+}
+
+#[test]
+fn gnra_hairpin_native_beats_extended() {
+    // ---- Load native structure (PDB 1ZIH model 1, NMR) ----
+    // 12-nt RNA hairpin GGGCGCAAGCCU — 4 bp stem + GCAA tetraloop (a
+    // GNRA-class loop where N = C, R = A).  The fixture has the
+    // canonical NMR atom set including all hydrogens.
+    let pdb = std::fs::read_to_string("tests/fixtures/1ZIH_gnra_tetraloop.pdb")
+        .expect("read 1ZIH fixture");
+    let mut native = read_pdb(pdb.as_bytes()).expect("parse 1ZIH");
+
+    assert_eq!(native.residues.len(), 12, "expected 12 residues");
+    let seq: String = native
+        .residues
+        .iter()
+        .filter_map(|r| r.monomer.as_nucleotide().map(|n| n.one_letter()))
+        .collect();
+    assert_eq!(seq, "GGGCGCAAGCCU", "1ZIH sequence mismatch");
+
+    // ---- Build extended chain from the same sequence ----
+    let nts: Vec<Nucleotide> = seq.chars()
+        .map(|c| Nucleotide::from_one_letter(c).unwrap()).collect();
+    let mut extended = build_extended_rna_chain(&nts).expect("build extended");
+
+    brief_minimise(&mut native, 100);
+    brief_minimise(&mut extended, 200);
+
+    let e_native = total_energy_no_sasa(&native);
+    let e_extended = total_energy_no_sasa(&extended);
+    let gap = e_extended - e_native;
+
+    eprintln!(
+        "GNRA hairpin (1ZIH): native = {e_native:.1} kJ/mol  \
+         extended = {e_extended:.1} kJ/mol  gap = {gap:.1} kJ/mol"
+    );
+
+    // GNRA hairpin is smaller (12 nt vs 14 nt) and has only 4 bp of
+    // stem (vs 5 bp on UUCG), so the native-favourable gap is
+    // somewhat smaller.  1 000 kJ/mol is a defensible floor for "the
+    // FF prefers the fold" given those constraints.
+    assert!(
+        gap > 1000.0,
+        "GNRA hairpin: native should score ≥1000 kJ/mol below extended, got {gap}"
     );
 }

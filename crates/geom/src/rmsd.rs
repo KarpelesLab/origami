@@ -28,14 +28,47 @@ use nalgebra::Matrix3;
 /// Returns `None` if the two structures have different residue counts
 /// or any residue is missing its Cα.
 pub fn rmsd_ca(a: &Structure, b: &Structure) -> Option<f64> {
+    rmsd_by_atom_name(a, b, "CA")
+}
+
+/// Backbone-phosphorus RMSD for RNA structures.  Picks the "P" atom
+/// from each residue (skipping any leading residue without a phosphate
+/// — the 5'-terminal residue of an isolated chain, or any custom
+/// build that omits the leading P).
+///
+/// This is the RNA analogue of [`rmsd_ca`]: P is the canonical anchor
+/// for nucleic-acid backbone alignment, the same way Cα is for
+/// proteins.  Both structures must have matching residue sequences and
+/// matching P-presence patterns; otherwise returns `None`.
+pub fn rmsd_p(a: &Structure, b: &Structure) -> Option<f64> {
+    if a.residues.len() != b.residues.len() || a.residues.is_empty() {
+        return None;
+    }
+    let mut p: Vec<Vec3> = Vec::new();
+    let mut q: Vec<Vec3> = Vec::new();
+    for (ra, rb) in a.residues.iter().zip(b.residues.iter()) {
+        match (ra.position("P"), rb.position("P")) {
+            (Some(pa), Some(pb)) => { p.push(pa); q.push(pb); }
+            (None, None) => continue,
+            _ => return None, // one side has P, the other doesn't — abort
+        }
+    }
+    if p.is_empty() { return None; }
+    Some(rmsd_points(&p, &q))
+}
+
+/// Generic helper: pick one atom by name per residue and RMS-align.
+/// Returns `None` if residue counts differ or any residue lacks the
+/// named atom.
+pub fn rmsd_by_atom_name(a: &Structure, b: &Structure, atom: &str) -> Option<f64> {
     if a.residues.len() != b.residues.len() || a.residues.is_empty() {
         return None;
     }
     let mut p: Vec<Vec3> = Vec::with_capacity(a.residues.len());
     let mut q: Vec<Vec3> = Vec::with_capacity(b.residues.len());
     for (ra, rb) in a.residues.iter().zip(b.residues.iter()) {
-        p.push(ra.position("CA")?);
-        q.push(rb.position("CA")?);
+        p.push(ra.position(atom)?);
+        q.push(rb.position(atom)?);
     }
     Some(rmsd_points(&p, &q))
 }
