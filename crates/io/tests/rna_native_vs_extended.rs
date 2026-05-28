@@ -3,19 +3,18 @@
 //! The protein-side analogue is `m7_native_vs_extended` (chignolin 30 k,
 //! Trp-cage 49 k, villin 30 k kJ/mol native-favourable gaps).  This is
 //! the equivalent for the CHARMM27 nucleic acid force field — covering
-//! two of the three canonical small-RNA reference motifs:
+//! all three canonical small-RNA reference motifs:
 //!
 //! - **UUCG tetraloop** (PDB 2KOC, NMR): 14-nt hairpin
 //!   GGCACUUCGGUGCC with the canonical UUCG closing loop.
 //! - **GNRA tetraloop** (PDB 1ZIH, NMR): 12-nt hairpin GGGCGCAAGCCU
 //!   with the GCAA closing loop — a GNRA-class tetraloop where N = C
 //!   and R = A.
-//!
-//! The third standard reference, the **sarcin/ricin loop** (PDB 483D
-//! E. coli, PDB 430D rat), is X-ray crystallography with no
-//! hydrogens.  Adding hydrogens to a heavy-atom-only RNA skeleton is
-//! infrastructure we don't have yet (the protein 2F4K villin fixture
-//! comes pre-hydrogenated), so SRL acceptance lands when that lands.
+//! - **Sarcin/ricin loop** (PDB 483D, X-ray 1.5 Å): 27-nt SRL from
+//!   E. coli 23S rRNA, sequence UGCUCCUAGUACGAGAGGACCGGAGUG.
+//!   The X-ray fixture is heavy-atom-only — hydrogens get added on
+//!   the fly via `geom::add_rna_hydrogens` before scoring, using the
+//!   same sp²/sp³ placement helpers the chain builder uses.
 //!
 //! Both native (loaded from PDB) and extended (built from sequence)
 //! carry the same atom set, so all bonded + LJ + Coulomb + GB terms
@@ -161,5 +160,61 @@ fn gnra_hairpin_native_beats_extended() {
     assert!(
         gap > 1000.0,
         "GNRA hairpin: native should score ≥1000 kJ/mol below extended, got {gap}"
+    );
+}
+
+#[test]
+fn sarcin_ricin_loop_native_beats_extended() {
+    // ---- Load native structure (PDB 483D, X-ray 1.5 Å) ----
+    // 27-nt sarcin/ricin loop from E. coli 23S rRNA.  X-ray with no
+    // hydrogens — we add them with `add_rna_hydrogens` before
+    // scoring.
+    let pdb = std::fs::read_to_string("tests/fixtures/483D_sarcin_ricin.pdb")
+        .expect("read 483D fixture");
+    let mut native = read_pdb(pdb.as_bytes()).expect("parse 483D");
+
+    assert_eq!(native.residues.len(), 27, "expected 27 residues");
+    let seq: String = native
+        .residues
+        .iter()
+        .filter_map(|r| r.monomer.as_nucleotide().map(|n| n.one_letter()))
+        .collect();
+    assert_eq!(seq, "UGCUCCUAGUACGAGAGGACCGGAGUG", "483D sequence mismatch");
+
+    // Hydrogenate.  All 27 residues should grow ~9 H atoms each
+    // (backbone 7 H + base 2-4 H).
+    let h_summary = geom::add_rna_hydrogens(&mut native);
+    eprintln!("SRL H-addition: {h_summary:?}");
+    assert!(h_summary.h_added >= 200,
+        "expected ~250 H atoms added on 27-nt SRL, got {}", h_summary.h_added);
+
+    // ---- Build extended chain from the same sequence ----
+    let nts: Vec<Nucleotide> = seq.chars()
+        .map(|c| Nucleotide::from_one_letter(c).unwrap()).collect();
+    let mut extended = build_extended_rna_chain(&nts).expect("build extended");
+
+    // X-ray bond lengths can drift ~0.05 Å from CHARMM r₀; minimise
+    // both fairly hard to get the bond term back to physical values
+    // (villin's protein analogue uses 30 L-BFGS, but the SRL is
+    // longer and the X-ray vs CHARMM gap is larger).
+    brief_minimise(&mut native, 200);
+    brief_minimise(&mut extended, 300);
+
+    let e_native = total_energy_no_sasa(&native);
+    let e_extended = total_energy_no_sasa(&extended);
+    let gap = e_extended - e_native;
+
+    eprintln!(
+        "Sarcin/ricin (483D): native = {e_native:.1} kJ/mol  \
+         extended = {e_extended:.1} kJ/mol  gap = {gap:.1} kJ/mol"
+    );
+
+    // SRL is 27 nt with extensive non-canonical pairing (the GAGA
+    // tetraloop on top of the bulged-G motif).  Roughly 2× the
+    // structural content of the 14-nt UUCG hairpin, so the floor
+    // can be set proportionally higher.
+    assert!(
+        gap > 3000.0,
+        "Sarcin/ricin: native should score ≥3000 kJ/mol below extended, got {gap}"
     );
 }

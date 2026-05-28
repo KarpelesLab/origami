@@ -777,6 +777,229 @@ fn deg_from_120_sp2(ring_angle_rad: f64) -> f64 {
     (2.0 * PI - ring_angle_rad) / 2.0
 }
 
+/// Add the canonical RNA hydrogen atoms to every nucleotide residue
+/// in `structure` that's missing them.  Placement uses the same
+/// sp²/sp³ geometry helpers the chain builder uses, so the added
+/// hydrogens land in the same canonical positions as the
+/// extended/A-form NeRF builds.
+///
+/// **Use case**: X-ray crystal RNA structures (e.g. PDB 483D
+/// sarcin/ricin loop, 1Q9A) come with heavy atoms only.  CHARMM27
+/// energy / force evaluation requires explicit hydrogens; this
+/// function fills them in so X-ray fixtures can flow into the
+/// `native_vs_extended` / `native_stability` acceptance tests.
+///
+/// Per-residue behaviour:
+/// - Only residues with `Monomer::Rna(_)` are touched.
+/// - For each canonical H expected by [`chem::Nucleotide::all_atoms`]:
+///   if it's already in the residue (by name), it's left alone.  If
+///   it's missing, it gets placed and appended.
+/// - If the heavy atoms needed to anchor a particular H aren't all
+///   present, that H is silently skipped (best-effort; the
+///   `n_missing_anchors` accumulator counts these for the caller).
+///
+/// Returns `HydrogenAddSummary` with how many H atoms were added vs
+/// already present vs skipped for lack of anchors.
+pub fn add_rna_hydrogens(structure: &mut Structure) -> HydrogenAddSummary {
+    use crate::structure::Monomer;
+    let mut s = HydrogenAddSummary::default();
+    for res in &mut structure.residues {
+        let Monomer::Rna(nt) = res.monomer else { continue };
+        s.residues_touched += 1;
+        add_rna_residue_hydrogens(res, nt, &mut s);
+    }
+    s
+}
+
+/// Summary returned by [`add_rna_hydrogens`].
+#[derive(Debug, Default, Clone, Copy)]
+pub struct HydrogenAddSummary {
+    pub residues_touched: usize,
+    pub h_added: usize,
+    pub h_already_present: usize,
+    pub h_skipped_missing_anchors: usize,
+}
+
+fn add_rna_residue_hydrogens(
+    res: &mut PlacedResidue,
+    nt: chem::Nucleotide,
+    s: &mut HydrogenAddSummary,
+) {
+    use chem::Nucleotide;
+
+    let pos = |name: &str| res.atoms.iter().find(|a| a.name == name).map(|a| a.position);
+    let has_h = |name: &str| res.atoms.iter().any(|a| a.name == name);
+
+    // Reusable per-H emit helper: skip if already there, place via
+    // closure if anchors resolve, otherwise count as skipped.
+    let mut to_add: Vec<(&'static str, Vec3)> = Vec::new();
+    let mut emit = |name: &'static str, position: Option<Vec3>| {
+        if has_h(name) {
+            s.h_already_present += 1;
+        } else if let Some(p) = position {
+            to_add.push((name, p));
+            s.h_added += 1;
+        } else {
+            s.h_skipped_missing_anchors += 1;
+        }
+    };
+
+    // ---- Backbone hydrogens (shared by all four nucleotides) ----
+    let o5 = pos("O5'"); let c5 = pos("C5'"); let c4 = pos("C4'");
+    let o4 = pos("O4'"); let c3 = pos("C3'"); let o3 = pos("O3'");
+    let c2 = pos("C2'"); let o2 = pos("O2'"); let c1 = pos("C1'");
+    let n_glyc = match nt {
+        Nucleotide::Adenine | Nucleotide::Guanine => pos("N9"),
+        Nucleotide::Cytosine | Nucleotide::Uracil => pos("N1"),
+    };
+
+    // H5' / H5'' on the C5' -CH₂- (only the two non-H neighbours
+    // are O5' and C4').
+    let h5_pair = match (c5, o5, c4) {
+        (Some(c), Some(o), Some(c4v)) => {
+            let (h5p, h5pp) = place_sp3_two_h(c, o, c4v, rna_ic::C_H_ALIPH);
+            Some((h5p, h5pp))
+        }
+        _ => None,
+    };
+    emit("H5'", h5_pair.map(|(a, _)| a));
+    emit("H5''", h5_pair.map(|(_, b)| b));
+    // H4', H3', H2', H1' — each is the unique tetrahedral 4th
+    // substituent at an sp³ centre with three placed neighbours.
+    emit("H4'", match (c4, c5, o4, c3) {
+        (Some(c), Some(a), Some(b), Some(d)) => Some(place_sp3_one_h(c, [a, b, d], rna_ic::C_H_ALIPH)),
+        _ => None,
+    });
+    emit("H3'", match (c3, c4, o3, c2) {
+        (Some(c), Some(a), Some(b), Some(d)) => Some(place_sp3_one_h(c, [a, b, d], rna_ic::C_H_ALIPH)),
+        _ => None,
+    });
+    emit("H2'", match (c2, c3, o2, c1) {
+        (Some(c), Some(a), Some(b), Some(d)) => Some(place_sp3_one_h(c, [a, b, d], rna_ic::C_H_ALIPH)),
+        _ => None,
+    });
+    emit("H1'", match (c1, c2, o4, n_glyc) {
+        (Some(c), Some(a), Some(b), Some(d)) => Some(place_sp3_one_h(c, [a, b, d], rna_ic::C_H_ALIPH)),
+        _ => None,
+    });
+    // HO2' — anti to C1' across C2'-O2' (gauche to C3'), matching
+    // the same dihedral the chain builder uses.
+    emit("HO2'", match (c1, c2, o2) {
+        (Some(a), Some(b), Some(c)) => Some(place_atom(a, b, c, rna_ic::O_H, rna_ic::ANG_C_O_H, PI)),
+        _ => None,
+    });
+
+    // ---- Base hydrogens (per nucleotide) ----
+    let push_base_purines = |emit: &mut dyn FnMut(&'static str, Option<Vec3>)| {
+        let n9 = pos("N9"); let c8 = pos("C8"); let n7 = pos("N7");
+        let c5b = pos("C5"); let c6 = pos("C6"); let n1 = pos("N1");
+        let c2b = pos("C2"); let n3 = pos("N3");
+        // H8 on C8, sp² in plane anti to N9 across N7-C8.
+        emit("H8", match (n9, n7, c8) {
+            (Some(a), Some(b), Some(c)) => Some(place_atom(
+                a, b, c, rna_ic::C_H_AROM,
+                deg_from_120_sp2(rna_ic::ANG_N9_C8_N7), PI)),
+            _ => None,
+        });
+        match nt {
+            Nucleotide::Adenine => {
+                // H2 on C2 (sp², between N1 and N3).
+                emit("H2", match (c6, n1, c2b) {
+                    (Some(a), Some(b), Some(c)) => Some(place_atom(
+                        a, b, c, rna_ic::C_H_AROM,
+                        deg_from_120_sp2(rna_ic::ANG_N1_C2_N3_PUR), PI)),
+                    _ => None,
+                });
+                let n6 = pos("N6");
+                emit("H61", match (c5b, c6, n6) {
+                    (Some(a), Some(b), Some(c)) => Some(place_atom(
+                        a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, 0.0)),
+                    _ => None,
+                });
+                emit("H62", match (c5b, c6, n6) {
+                    (Some(a), Some(b), Some(c)) => Some(place_atom(
+                        a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI)),
+                    _ => None,
+                });
+            }
+            Nucleotide::Guanine => {
+                // N1-H amide.
+                emit("H1", match (c5b, c6, n1) {
+                    (Some(a), Some(b), Some(c)) => Some(place_atom(
+                        a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI)),
+                    _ => None,
+                });
+                let n2 = pos("N2");
+                emit("H21", match (n1, c2b, n2) {
+                    (Some(a), Some(b), Some(c)) => Some(place_atom(
+                        a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, 0.0)),
+                    _ => None,
+                });
+                emit("H22", match (n1, c2b, n2) {
+                    (Some(a), Some(b), Some(c)) => Some(place_atom(
+                        a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI)),
+                    _ => None,
+                });
+                let _ = n3;
+            }
+            _ => {}
+        }
+    };
+
+    let push_base_pyrimidines = |emit: &mut dyn FnMut(&'static str, Option<Vec3>)| {
+        let n1 = pos("N1"); let _c2b = pos("C2"); let n3 = pos("N3");
+        let c4b = pos("C4"); let c5b = pos("C5"); let c6 = pos("C6");
+        // H5 on C5, sp² in plane.
+        emit("H5", match (n3, c4b, c5b) {
+            (Some(a), Some(b), Some(c)) => Some(place_atom(
+                a, b, c, rna_ic::C_H_AROM,
+                deg_from_120_sp2(rna_ic::ANG_C4_C5_C6_PYR), PI)),
+            _ => None,
+        });
+        // H6 on C6, sp² in plane.
+        emit("H6", match (c4b, c5b, c6) {
+            (Some(a), Some(b), Some(c)) => Some(place_atom(
+                a, b, c, rna_ic::C_H_AROM,
+                deg_from_120_sp2(rna_ic::ANG_C5_C6_N1_PYR), PI)),
+            _ => None,
+        });
+        match nt {
+            Nucleotide::Cytosine => {
+                let n4 = pos("N4");
+                emit("H41", match (c5b, c4b, n4) {
+                    (Some(a), Some(b), Some(c)) => Some(place_atom(
+                        a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, 0.0)),
+                    _ => None,
+                });
+                emit("H42", match (c5b, c4b, n4) {
+                    (Some(a), Some(b), Some(c)) => Some(place_atom(
+                        a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI)),
+                    _ => None,
+                });
+            }
+            Nucleotide::Uracil => {
+                // N3-H amide.
+                emit("H3", match (c5b, c4b, n3) {
+                    (Some(a), Some(b), Some(c)) => Some(place_atom(
+                        a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI)),
+                    _ => None,
+                });
+            }
+            _ => {}
+        }
+    };
+
+    match nt {
+        Nucleotide::Adenine | Nucleotide::Guanine => push_base_purines(&mut emit),
+        Nucleotide::Cytosine | Nucleotide::Uracil => push_base_pyrimidines(&mut emit),
+    }
+
+    drop(emit);
+    for (name, position) in to_add {
+        res.atoms.push(PlacedAtom { name, element: Element::H, position });
+    }
+}
+
 /// Build an extended RNA chain (sugar-phosphate backbone + ribose ring
 /// + glycosidic nitrogen + base ring + all hydrogens) from a
 /// nucleotide sequence. Every residue is a `Monomer::Rna`.

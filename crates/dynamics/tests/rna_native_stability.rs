@@ -13,6 +13,10 @@
 //!     14 nt hairpin GGCACUUCGGUGCC with a CUUCGG closing loop.
 //!   * GNRA tetraloop — PDB 1ZIH NMR model 1 (Jucker et al. 1996),
 //!     12 nt hairpin GGGCGCAAGCCU with a GCAA closing loop.
+//!   * Sarcin/ricin loop — PDB 483D X-ray 1.5 Å (Correll et al. 1999),
+//!     27 nt SRL from E. coli 23S rRNA.  Heavy-atom-only crystal
+//!     structure; hydrogens added via `geom::add_rna_hydrogens`
+//!     before MD.
 
 use chem::standard_ff;
 use dynamics::{minimize, run_langevin, Algorithm, LangevinOptions, MinimizeOptions};
@@ -91,4 +95,29 @@ fn gnra_hairpin_stays_near_native_during_2ps_md() {
     eprintln!("GNRA (1ZIH) native MD 2 ps: P-RMSD = {rmsd:.3} Å");
     assert!(rmsd < 3.5,
         "GNRA hairpin P-RMSD {rmsd} > 3.5 Å — force field may not retain the fold");
+}
+
+#[test]
+fn sarcin_ricin_stays_near_native_during_2ps_md() {
+    // X-ray structure with no hydrogens — `add_rna_hydrogens` fills
+    // them in.
+    let mut s = read_fixture("../io/tests/fixtures/483D_sarcin_ricin.pdb");
+    let _ = geom::add_rna_hydrogens(&mut s);
+    // SRL X-ray bond lengths drift further from CHARMM r₀ than NMR
+    // ensembles do (typical 0.03-0.05 Å vs ~0.01 Å), so the brief
+    // minimisation needs more steps to land the bond + LJ terms at
+    // physical values before BAOAB can take 1 fs steps without
+    // exploding.
+    brief_minimise(&mut s, 300);
+    let initial = s.clone();
+    let summary = run_short_md(&mut s, 13, 2000);
+    assert!(!summary.diverged, "SRL trajectory diverged");
+    let rmsd = rmsd_p(&initial, &s).expect("rmsd_p SRL");
+    eprintln!("SRL (483D) native MD 2 ps: P-RMSD = {rmsd:.3} Å");
+    // SRL is 27 nt with extensive tertiary contacts and bulged-G
+    // motif — slightly more conformational freedom than a hairpin.
+    // 4 Å is the same physical "fold intact" bar as the tetraloops
+    // get with their 3.5 Å bound, just scaled.
+    assert!(rmsd < 4.0,
+        "SRL P-RMSD {rmsd} > 4 Å — force field may not retain the fold");
 }
