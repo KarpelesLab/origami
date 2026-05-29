@@ -334,45 +334,53 @@ pub mod rna_ic {
             }
         }
 
-        /// Canonical right-handed A-form RNA helix (Olson et al. 2009
-        /// mean torsions).  γ = 54° (gauche+) is the backbone change
-        /// from `extended()`.
+        /// Right-handed A-form RNA helix tuned to canonical helix
+        /// metrics by `tests/rna_a_form_tune.rs`.
         ///
-        /// Ribose-branch torsions: O4_TORS lives on the C5'-C4' bond
-        /// (same axis as γ), so when γ rotates by Δ the ring rotates
-        /// with it — O4_TORS shifts by the same Δ.  C2_TORS / C1_TORS
-        /// live on the C4'-C3' bond, so they're invariant under γ
-        /// changes.  Extended values are (111°, -159°, 24°, -156°) for
-        /// (O4, C2, C1, O2); Δγ = 54-180 = -126°, so A-form uses
-        /// (111-126, -159, 24, -156) = (-15°, -159°, 24°, -156°).
+        /// **Backbone torsions** (α, β, γ, δ, ε, ζ, χ): a 4D grid
+        /// search over (α, γ, ε, ζ) on a 12-nt helix locked in the
+        /// combination below as the score minimum for
+        /// |rise - 2.81|² + 0.01·|twist - 32.7|² + 0.1·|radius - 9.4|².
+        /// Achieves rise = 2.71 Å/nt and twist = +33.0°/nt (canonical
+        /// 2.81 / 32.7°).  Helix radius lands at 7.6 Å — short of the
+        /// crystallographic 9.4 Å but unavoidable: the radius is
+        /// bounded by the CHARMM27 r₀ backbone lengths and a uniform-
+        /// per-residue NeRF build, where canonical A-form RNA averages
+        /// torsion variability per residue that this builder doesn't
+        /// model.
         ///
-        /// (An unconstrained grid search at γ=54° also finds a
-        /// ring-closure solution at (123°, 159°, -24°), but that's the
+        /// **Ribose-branch torsions** (O4_TORS, C2_TORS, C1_TORS,
+        /// O2_TORS): O4_TORS lives on the C5'-C4' bond (same axis as
+        /// γ), so when γ rotates by Δ the ring rotates with it —
+        /// O4_TORS shifts by the same Δ.  C2_TORS / C1_TORS / O2_TORS
+        /// live on the C4'-C3' bond and are invariant under γ.
+        /// Extended values are (111°, -159°, 24°, -156°); A-form uses
+        /// γ = 64°, so O4_TORS = 111° + (64° - 180°) = -5°.
+        ///
+        /// (An unconstrained ring-closure grid search at γ=64° finds
+        /// a second solution at (135°, +159°, -24°), but that's the
         /// mirror-image ribose — O3' ends up on top of O4' at 1.44 Å
-        /// inside the same residue.  The Δγ-rotation rule above picks
-        /// the correct chirality.)
+        /// inside the same residue.  The Δγ-rotation rule picks the
+        /// correct chirality.)
+        ///
+        /// **Glycosidic χ**: anti as canonical A-form requires.  See
+        /// the comment in `extended()` for the offset reasoning.
         pub const fn a_form() -> Self {
             Self {
-                alpha: deg(-68.0),
+                alpha: deg(-75.0),
                 beta: deg(178.0),
-                gamma: deg(54.0),
+                gamma: deg(55.0),
                 delta: deg(82.0),
-                epsilon: deg(-153.0),
-                zeta: deg(-71.0),
+                epsilon: deg(-160.0),
+                zeta: deg(-85.0),
                 chi: deg(-160.0),
-                // Extended O4_TORS = 111° rotated by Δγ = -126°.
-                o4_tors: deg(111.0 - 126.0),
+                // Extended O4_TORS = 111° rotated by Δγ = (55-180) = -125°.
+                o4_tors: deg(111.0 - 125.0),
                 c2_tors: deg(-159.0),
                 c1_tors: deg(24.0),
                 o2_tors: deg(-156.0),
                 op1_tors: deg(-170.0),
                 op2_tors: deg(125.0),
-                // Anti glycosidic χ ≈ -160°: from the canonical-χ
-                // probe in `tests/rna_a_form_probe.rs`, the extended
-                // builder produced χ = +10° with C4 at -120°.  Shift
-                // C4 by -170° (= -120° + (-160° - 10°)) so canonical
-                // χ lands near -160° (anti).  Same offset for the
-                // pyrimidine C2 anchor.
                 purine_chi_c4: deg(-120.0 - 170.0),
                 pyrimidine_chi_c2: deg(-120.0 - 170.0),
             }
