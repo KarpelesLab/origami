@@ -16,7 +16,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
 license = "MIT"
-repository = "https://github.com/magicaltux/origami"
+repository = "https://github.com/KarpelesLab/origami"
 
 [workspace.dependencies]
 anyhow = "1"
