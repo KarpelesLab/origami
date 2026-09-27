@@ -69,7 +69,11 @@ impl Default for RenderOptions {
 /// renderer would. Exposed so a trajectory caller can scan all frames
 /// once and feed the union extents back through
 /// `RenderOptions::fixed_centroid` + `fixed_bounding_radius`.
-pub fn structure_bounds(structure: &Structure, show_hydrogens: bool, atom_scale: f64) -> (Vec3, f64) {
+pub fn structure_bounds(
+    structure: &Structure,
+    show_hydrogens: bool,
+    atom_scale: f64,
+) -> (Vec3, f64) {
     let mut centers: Vec<(Vec3, f64)> = Vec::new();
     for residue in &structure.residues {
         for atom in &residue.atoms {
@@ -111,8 +115,14 @@ pub fn render(structure: &Structure, opts: &RenderOptions) -> RgbaImage {
     }
     if atoms.is_empty() {
         return RgbaImage::from_pixel(
-            opts.width, opts.height,
-            Rgba([opts.background[0], opts.background[1], opts.background[2], 255]),
+            opts.width,
+            opts.height,
+            Rgba([
+                opts.background[0],
+                opts.background[1],
+                opts.background[2],
+                255,
+            ]),
         );
     }
 
@@ -182,11 +192,17 @@ pub fn render(structure: &Structure, opts: &RenderOptions) -> RgbaImage {
             // Bond cylinders — half-coloured by which endpoint is closer
             // along the bond axis.
             for bond in &bonds {
-                if let Some((t, normal, frac)) = intersect_cylinder(&ray, bond.a, bond.b, bond.radius) {
+                if let Some((t, normal, frac)) =
+                    intersect_cylinder(&ray, bond.a, bond.b, bond.radius)
+                {
                     if t > 1e-4 && t < best_t {
                         best_t = t;
                         best_normal = normal;
-                        best_color = if frac < 0.5 { bond.color_a } else { bond.color_b };
+                        best_color = if frac < 0.5 {
+                            bond.color_a
+                        } else {
+                            bond.color_b
+                        };
                     }
                 }
             }
@@ -212,7 +228,14 @@ pub fn render(structure: &Structure, opts: &RenderOptions) -> RgbaImage {
         // Inset from top-left by one glyph height — looks balanced
         // against the dark border.
         let margin = scale * FONT_HEIGHT.min(7);
-        draw_text(&mut img, text, margin, margin, scale, opts.overlay_text_color);
+        draw_text(
+            &mut img,
+            text,
+            margin,
+            margin,
+            scale,
+            opts.overlay_text_color,
+        );
     }
 
     img
@@ -230,24 +253,58 @@ const FONT_KERN: u32 = 1; // inter-character gap in pixels (× scale)
 
 fn font_glyph(c: char) -> Option<[u8; 7]> {
     match c {
-        '0' => Some([0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110]),
-        '1' => Some([0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110]),
-        '2' => Some([0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111]),
-        '3' => Some([0b01110, 0b10001, 0b00001, 0b00110, 0b00001, 0b10001, 0b01110]),
-        '4' => Some([0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010]),
-        '5' => Some([0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110]),
-        '6' => Some([0b01110, 0b10001, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110]),
-        '7' => Some([0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000]),
-        '8' => Some([0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110]),
-        '9' => Some([0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b10001, 0b01110]),
-        't' => Some([0b01000, 0b01000, 0b11110, 0b01000, 0b01000, 0b01000, 0b00111]),
-        '=' => Some([0b00000, 0b11111, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000]),
-        '.' => Some([0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00110]),
+        '0' => Some([
+            0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
+        ]),
+        '1' => Some([
+            0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+        ]),
+        '2' => Some([
+            0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111,
+        ]),
+        '3' => Some([
+            0b01110, 0b10001, 0b00001, 0b00110, 0b00001, 0b10001, 0b01110,
+        ]),
+        '4' => Some([
+            0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
+        ]),
+        '5' => Some([
+            0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110,
+        ]),
+        '6' => Some([
+            0b01110, 0b10001, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110,
+        ]),
+        '7' => Some([
+            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
+        ]),
+        '8' => Some([
+            0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
+        ]),
+        '9' => Some([
+            0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b10001, 0b01110,
+        ]),
+        't' => Some([
+            0b01000, 0b01000, 0b11110, 0b01000, 0b01000, 0b01000, 0b00111,
+        ]),
+        '=' => Some([
+            0b00000, 0b11111, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000,
+        ]),
+        '.' => Some([
+            0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00110,
+        ]),
         ' ' => Some([0; 7]),
-        'p' => Some([0b00000, 0b00000, 0b11110, 0b10001, 0b11110, 0b10000, 0b10000]),
-        's' => Some([0b00000, 0b00000, 0b01111, 0b10000, 0b01110, 0b00001, 0b11110]),
-        'f' => Some([0b00111, 0b01001, 0b01000, 0b11110, 0b01000, 0b01000, 0b01000]),
-        'n' => Some([0b00000, 0b00000, 0b11110, 0b10001, 0b10001, 0b10001, 0b10001]),
+        'p' => Some([
+            0b00000, 0b00000, 0b11110, 0b10001, 0b11110, 0b10000, 0b10000,
+        ]),
+        's' => Some([
+            0b00000, 0b00000, 0b01111, 0b10000, 0b01110, 0b00001, 0b11110,
+        ]),
+        'f' => Some([
+            0b00111, 0b01001, 0b01000, 0b11110, 0b01000, 0b01000, 0b01000,
+        ]),
+        'n' => Some([
+            0b00000, 0b00000, 0b11110, 0b10001, 0b10001, 0b10001, 0b10001,
+        ]),
         _ => None,
     }
 }
@@ -256,7 +313,14 @@ fn font_glyph(c: char) -> Option<[u8; 7]> {
 /// bitmap font, scaled `scale ×`. Each set pixel becomes a `scale × scale`
 /// block of `color`. Pixels that fall outside the image are silently
 /// skipped — keeps overlays robust to short canvases.
-fn draw_text(img: &mut RgbaImage, text: &str, x_origin: u32, y_origin: u32, scale: u32, color: [u8; 3]) {
+fn draw_text(
+    img: &mut RgbaImage,
+    text: &str,
+    x_origin: u32,
+    y_origin: u32,
+    scale: u32,
+    color: [u8; 3],
+) {
     let scale = scale.max(1);
     let mut x_cursor = x_origin;
     for c in text.chars() {
@@ -331,8 +395,9 @@ impl Camera {
         // with y flipped (image rows go top-down, world up is +y).
         let u_ndc = (2.0 * (i as f64 + 0.5) / width as f64) - 1.0;
         let v_ndc = 1.0 - (2.0 * (j as f64 + 0.5) / height as f64);
-        let dir =
-            self.forward + self.right * (u_ndc * self.half_fov_tan * self.aspect) + self.up * (v_ndc * self.half_fov_tan);
+        let dir = self.forward
+            + self.right * (u_ndc * self.half_fov_tan * self.aspect)
+            + self.up * (v_ndc * self.half_fov_tan);
         Ray {
             origin: self.origin,
             direction: dir.normalize(),
@@ -405,13 +470,7 @@ fn intersect_cylinder(ray: &Ray, a: Vec3, b: Vec3, radius: f64) -> Option<(f64, 
     None
 }
 
-fn shade(
-    normal: Vec3,
-    light_dir: Vec3,
-    view_dir: Vec3,
-    color: [f64; 3],
-    ambient: f64,
-) -> [f64; 3] {
+fn shade(normal: Vec3, light_dir: Vec3, view_dir: Vec3, color: [f64; 3], ambient: f64) -> [f64; 3] {
     let diff = normal.dot(&light_dir).max(0.0);
     let intensity = ambient + (1.0 - ambient) * diff;
     // Blinn-Phong specular: gentle highlight on top of Lambert.
@@ -456,10 +515,19 @@ mod tests {
     #[test]
     fn renders_ala3_to_nonblank_png() {
         let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
-        let opts = RenderOptions { width: 200, height: 150, ..Default::default() };
+        let opts = RenderOptions {
+            width: 200,
+            height: 150,
+            ..Default::default()
+        };
         let img = render(&s, &opts);
         // Verify at least one non-background pixel exists.
-        let bg = Rgba([opts.background[0], opts.background[1], opts.background[2], 255]);
+        let bg = Rgba([
+            opts.background[0],
+            opts.background[1],
+            opts.background[2],
+            255,
+        ]);
         let any_drawn = img.pixels().any(|p| *p != bg);
         assert!(any_drawn, "rendered image is entirely background");
     }
@@ -467,14 +535,33 @@ mod tests {
     #[test]
     fn hide_vs_show_hydrogens_changes_pixel_count() {
         let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala]).unwrap();
-        let opts_hide = RenderOptions { width: 200, height: 150, show_hydrogens: false, ..Default::default() };
-        let opts_show = RenderOptions { width: 200, height: 150, show_hydrogens: true, ..Default::default() };
+        let opts_hide = RenderOptions {
+            width: 200,
+            height: 150,
+            show_hydrogens: false,
+            ..Default::default()
+        };
+        let opts_show = RenderOptions {
+            width: 200,
+            height: 150,
+            show_hydrogens: true,
+            ..Default::default()
+        };
         let img_hide = render(&s, &opts_hide);
         let img_show = render(&s, &opts_show);
-        let bg = Rgba([opts_hide.background[0], opts_hide.background[1], opts_hide.background[2], 255]);
+        let bg = Rgba([
+            opts_hide.background[0],
+            opts_hide.background[1],
+            opts_hide.background[2],
+            255,
+        ]);
         let drawn_hide = img_hide.pixels().filter(|p| **p != bg).count();
         let drawn_show = img_show.pixels().filter(|p| **p != bg).count();
-        assert!(drawn_show > drawn_hide,
-            "showing hydrogens should produce more drawn pixels: {} vs {}", drawn_show, drawn_hide);
+        assert!(
+            drawn_show > drawn_hide,
+            "showing hydrogens should produce more drawn pixels: {} vs {}",
+            drawn_show,
+            drawn_hide
+        );
     }
 }

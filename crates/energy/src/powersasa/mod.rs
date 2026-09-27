@@ -6,8 +6,8 @@
 //! and M5 dynamics.
 
 pub mod analytical;
-pub mod arrangement;
 pub mod area;
+pub mod arrangement;
 pub mod derivatives;
 pub mod geometry;
 
@@ -15,8 +15,8 @@ use chem::{Element, ForceField};
 use geom::{CellList, Structure, Vec3};
 
 use crate::units::kcal_to_kj;
-use arrangement::{build_caps, find_boundary};
 use area::accessible_area;
+use arrangement::{build_caps, find_boundary};
 
 /// Probe radius (water) in Å — same value used by the Shrake-Rupley code.
 pub const PROBE_RADIUS_A: f64 = 1.4;
@@ -166,7 +166,12 @@ mod tests {
         let r = powersasa_energy(&s, ff);
         let expected = 4.0 * std::f64::consts::PI * (1.70_f64 + PROBE_RADIUS_A).powi(2);
         let err = (r.total_area_a2 - expected).abs();
-        assert!(err < 1e-6, "PowerSasa {} vs analytical {}", r.total_area_a2, expected);
+        assert!(
+            err < 1e-6,
+            "PowerSasa {} vs analytical {}",
+            r.total_area_a2,
+            expected
+        );
     }
 
     #[test]
@@ -176,8 +181,16 @@ mod tests {
             residues: vec![PlacedResidue {
                 monomer: geom::structure::Monomer::Protein(AminoAcid::Ala),
                 atoms: vec![
-                    PlacedAtom { name: "CB", element: Element::C, position: Vec3::zeros() },
-                    PlacedAtom { name: "C", element: Element::C, position: Vec3::new(3.0, 0.0, 0.0) },
+                    PlacedAtom {
+                        name: "CB",
+                        element: Element::C,
+                        position: Vec3::zeros(),
+                    },
+                    PlacedAtom {
+                        name: "C",
+                        element: Element::C,
+                        position: Vec3::new(3.0, 0.0, 0.0),
+                    },
                 ],
                 chain: 'A',
             }],
@@ -185,9 +198,17 @@ mod tests {
         let ff = standard_ff();
         let ps = powersasa_energy(&s, ff);
         let sr = crate::sasa::sasa_energy_with_dots(&s, 4096);
-        eprintln!("two carbons: PowerSasa {} vs SR {}", ps.total_area_a2, sr.total_area_a2);
+        eprintln!(
+            "two carbons: PowerSasa {} vs SR {}",
+            ps.total_area_a2, sr.total_area_a2
+        );
         let rel_err = (ps.total_area_a2 - sr.total_area_a2).abs() / sr.total_area_a2;
-        assert!(rel_err < 0.02, "two-carbon SASA mismatch: {} vs {}", ps.total_area_a2, sr.total_area_a2);
+        assert!(
+            rel_err < 0.02,
+            "two-carbon SASA mismatch: {} vs {}",
+            ps.total_area_a2,
+            sr.total_area_a2
+        );
     }
 
     #[test]
@@ -197,9 +218,17 @@ mod tests {
         let ff = standard_ff();
         let ps = powersasa_energy(&s, ff);
         let sr = crate::sasa::sasa_energy_with_dots(&s, 4096);
-        eprintln!("single Ala: PowerSasa {} vs SR {}", ps.total_area_a2, sr.total_area_a2);
+        eprintln!(
+            "single Ala: PowerSasa {} vs SR {}",
+            ps.total_area_a2, sr.total_area_a2
+        );
         let rel_err = (ps.total_area_a2 - sr.total_area_a2).abs() / sr.total_area_a2;
-        assert!(rel_err < 0.02, "single-Ala SASA mismatch: {} vs {}", ps.total_area_a2, sr.total_area_a2);
+        assert!(
+            rel_err < 0.02,
+            "single-Ala SASA mismatch: {} vs {}",
+            ps.total_area_a2,
+            sr.total_area_a2
+        );
     }
 
     #[test]
@@ -232,7 +261,10 @@ mod tests {
         assert!(target_idx != usize::MAX, "did not find Lys CB");
         let pi = all_pos[target_idx];
         let ri_a = all_rad[target_idx];
-        eprintln!("target atom idx={}, pos={:?}, radius={:.3}", target_idx, pi, ri_a);
+        eprintln!(
+            "target atom idx={}, pos={:?}, radius={:.3}",
+            target_idx, pi, ri_a
+        );
 
         let mut neighbours = Vec::new();
         for (j, &pj) in all_pos.iter().enumerate() {
@@ -289,7 +321,10 @@ mod tests {
                     eprintln!("  if χ = {:+}: area = {:+.3}", chi, area);
                 }
                 let sr_per_atom = crate::sasa::sasa_per_atom_with_dots(&s, 4096);
-                eprintln!("\nSR truth for atom {}: {:.3}", target_idx, sr_per_atom[target_idx]);
+                eprintln!(
+                    "\nSR truth for atom {}: {:.3}",
+                    target_idx, sr_per_atom[target_idx]
+                );
             }
         }
     }
@@ -332,14 +367,20 @@ mod tests {
                 neighbours.push((idx, p, all_rad[idx]));
             }
         }
-        eprintln!("Carbonyl C at {:?}, radius {}, has {} neighbours",
-            c_pos, c_radius, neighbours.len());
+        eprintln!(
+            "Carbonyl C at {:?}, radius {}, has {} neighbours",
+            c_pos,
+            c_radius,
+            neighbours.len()
+        );
         let _ = self_idx;
         let (caps, _owners) = build_caps(c_pos, c_radius, &neighbours).unwrap();
         eprintln!("Built {} caps:", caps.len());
         for (i, cap) in caps.iter().enumerate() {
-            eprintln!("  cap {}: axis=({:.3},{:.3},{:.3}), cos_α={:.3}",
-                i, cap.axis.x, cap.axis.y, cap.axis.z, cap.cos_alpha);
+            eprintln!(
+                "  cap {}: axis=({:.3},{:.3},{:.3}), cos_α={:.3}",
+                i, cap.axis.x, cap.axis.y, cap.axis.z, cap.cos_alpha
+            );
         }
         let boundary = find_boundary(&caps);
         match &boundary {
@@ -348,8 +389,10 @@ mod tests {
             arrangement::AtomBoundary::Bounded { arcs, vertices } => {
                 eprintln!("Bounded: {} arcs, {} vertices", arcs.len(), vertices.len());
                 for (i, a) in arcs.iter().enumerate() {
-                    eprintln!("  arc {}: cap={} theta={:.3} full_circle={}",
-                        i, a.cap_idx, a.theta, a.is_full_circle);
+                    eprintln!(
+                        "  arc {}: cap={} theta={:.3} full_circle={}",
+                        i, a.cap_idx, a.theta, a.is_full_circle
+                    );
                 }
             }
         }
@@ -361,7 +404,9 @@ mod tests {
             let mut visited = vec![false; n];
             let mut loops: Vec<Vec<usize>> = Vec::new();
             for start in 0..n {
-                if visited[start] { continue; }
+                if visited[start] {
+                    continue;
+                }
                 visited[start] = true;
                 let mut path = vec![start];
                 let mut current = start;
@@ -370,7 +415,11 @@ mod tests {
                         !visited[i] && (arcs[i].start - arcs[current].end).norm() < 1e-6
                     });
                     match next {
-                        Some(j) => { visited[j] = true; path.push(j); current = j; }
+                        Some(j) => {
+                            visited[j] = true;
+                            path.push(j);
+                            current = j;
+                        }
                         None => break,
                     }
                 }
@@ -393,10 +442,17 @@ mod tests {
                 let sin_eps = v.dot(&t_in.cross(&t_out));
                 let eps = sin_eps.atan2(cos_eps);
                 vertex_sum += eps;
-                eprintln!("  vertex at ({:.3},{:.3},{:.3}) in_cap={} out_cap={} eps={:.3}",
-                    v.x, v.y, v.z, vertex.incoming_cap, vertex.outgoing_cap, eps);
+                eprintln!(
+                    "  vertex at ({:.3},{:.3},{:.3}) in_cap={} out_cap={} eps={:.3}",
+                    v.x, v.y, v.z, vertex.incoming_cap, vertex.outgoing_cap, eps
+                );
             }
-            eprintln!("arc_sum={:.3}, vertex_sum={:.3}, n_loops={}", arc_sum, vertex_sum, loops.len());
+            eprintln!(
+                "arc_sum={:.3}, vertex_sum={:.3}, n_loops={}",
+                arc_sum,
+                vertex_sum,
+                loops.len()
+            );
         }
     }
 
@@ -414,12 +470,17 @@ mod tests {
         let mut atom_idx = 0;
         for (ri, residue) in s.residues.iter().enumerate() {
             for atom in &residue.atoms {
-                eprintln!("res {} atom {:>4} ({:?}): PSA={:.2}",
-                    ri, atom.name, atom.element, ps.per_atom_area[atom_idx]);
+                eprintln!(
+                    "res {} atom {:>4} ({:?}): PSA={:.2}",
+                    ri, atom.name, atom.element, ps.per_atom_area[atom_idx]
+                );
                 atom_idx += 1;
             }
         }
-        eprintln!("Total: PSA {:.2}, SR {:.2}", ps.total_area_a2, sr.total_area_a2);
+        eprintln!(
+            "Total: PSA {:.2}, SR {:.2}",
+            ps.total_area_a2, sr.total_area_a2
+        );
     }
 
     #[test]
@@ -451,19 +512,34 @@ mod tests {
         for (ri, idx, name, el, psa, sra) in diffs.iter().take(10) {
             eprintln!(
                 "  res {:>2} atom {:>4} ({:?}, idx {:>3}): PSA={:>7.2} SR={:>7.2} Δ={:>+7.2}",
-                ri, name, el, idx, psa, sra, psa - sra,
+                ri,
+                name,
+                el,
+                idx,
+                psa,
+                sra,
+                psa - sra,
             );
         }
         eprintln!("Top 10 PSA-SR under-counts:");
         for (ri, idx, name, el, psa, sra) in diffs.iter().rev().take(10) {
             eprintln!(
                 "  res {:>2} atom {:>4} ({:?}, idx {:>3}): PSA={:>7.2} SR={:>7.2} Δ={:>+7.2}",
-                ri, name, el, idx, psa, sra, psa - sra,
+                ri,
+                name,
+                el,
+                idx,
+                psa,
+                sra,
+                psa - sra,
             );
         }
-        eprintln!("Total PSA: {:.2}, SR: {:.2}, ratio: {:.4}",
-            ps.total_area_a2, sr_total.total_area_a2,
-            ps.total_area_a2 / sr_total.total_area_a2);
+        eprintln!(
+            "Total PSA: {:.2}, SR: {:.2}, ratio: {:.4}",
+            ps.total_area_a2,
+            sr_total.total_area_a2,
+            ps.total_area_a2 / sr_total.total_area_a2
+        );
     }
 
     #[test]
@@ -475,8 +551,10 @@ mod tests {
             let ps = powersasa_energy(&s, ff);
             let sr = crate::sasa::sasa_energy_with_dots(&s, 4096);
             let rel_err = (ps.total_area_a2 - sr.total_area_a2).abs() / sr.total_area_a2;
-            eprintln!("Ala_{}: PowerSasa {:.2} vs SR {:.2}, rel err {:.4}",
-                n, ps.total_area_a2, sr.total_area_a2, rel_err);
+            eprintln!(
+                "Ala_{}: PowerSasa {:.2} vs SR {:.2}, rel err {:.4}",
+                n, ps.total_area_a2, sr.total_area_a2, rel_err
+            );
         }
     }
 
@@ -502,8 +580,9 @@ mod tests {
         assert!(
             rel_err < 0.02,
             "PowerSasa {} disagrees with Shrake-Rupley {} (rel err {})",
-            ps.total_area_a2, sr.total_area_a2, rel_err
+            ps.total_area_a2,
+            sr.total_area_a2,
+            rel_err
         );
     }
 }
-

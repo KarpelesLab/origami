@@ -28,11 +28,7 @@ pub fn write_pdb<W: Write>(writer: &mut W, structure: &Structure, title: &str) -
 /// Atoms in each model use the same residue identities — only positions
 /// differ. The caller is responsible for passing structurally-identical
 /// snapshots (the trajectory writer doesn't verify).
-pub fn write_pdb_trajectory<'a, W, I>(
-    writer: &mut W,
-    title: &str,
-    frames: I,
-) -> io::Result<()>
+pub fn write_pdb_trajectory<'a, W, I>(writer: &mut W, title: &str, frames: I) -> io::Result<()>
 where
     W: Write,
     I: IntoIterator<Item = &'a Structure>,

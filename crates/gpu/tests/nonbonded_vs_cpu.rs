@@ -27,7 +27,8 @@ fn gpu_nonbonded_matches_cpu_on_ala3() {
         chem::AminoAcid::Ala,
         chem::AminoAcid::Ala,
         chem::AminoAcid::Ala,
-    ]).unwrap();
+    ])
+    .unwrap();
     let g = build_topology_graph(&s);
     let ff = standard_ff();
 
@@ -38,7 +39,11 @@ fn gpu_nonbonded_matches_cpu_on_ala3() {
     let mut charges: Vec<f32> = Vec::with_capacity(n);
     for r in &s.residues {
         for a in &r.atoms {
-            positions.push([a.position.x as f32, a.position.y as f32, a.position.z as f32]);
+            positions.push([
+                a.position.x as f32,
+                a.position.y as f32,
+                a.position.z as f32,
+            ]);
             let t = classify_atom(r.monomer, a.name).unwrap();
             atom_types.push(t);
             let q = ff.partial_charge_for(r.monomer, a.name).unwrap_or(0.0) as f32;
@@ -76,7 +81,9 @@ fn gpu_nonbonded_matches_cpu_on_ala3() {
     let mut one_four = vec![0u32; (n * n).div_ceil(32)];
     for i in 0..n {
         for j in 0..n {
-            if i == j { continue; }
+            if i == j {
+                continue;
+            }
             let bit = i * n + j;
             if g.is_bonded(i, j) || g.is_one_three(i, j) {
                 exclusions[bit / 32] |= 1u32 << (bit % 32);
@@ -103,7 +110,11 @@ fn gpu_nonbonded_matches_cpu_on_ala3() {
     // Production-CPU reference.
     let mut cpu_forces_v3 = vec![Vec3::zeros(); n];
     energy::forces_nonbonded::add_nonbonded_forces(
-        &s, &g, ff, DEFAULT_CUTOFF_A, &mut cpu_forces_v3,
+        &s,
+        &g,
+        ff,
+        DEFAULT_CUTOFF_A,
+        &mut cpu_forces_v3,
     );
 
     assert_eq!(gpu_forces.len(), cpu_forces_v3.len());
@@ -116,9 +127,8 @@ fn gpu_nonbonded_matches_cpu_on_ala3() {
             let err = (gv - cv).abs();
             if err > max_err {
                 max_err = err;
-                argmax_label = format!(
-                    "atom {i} axis {axis}: cpu={cv:.6} gpu={gv:.6} err={err:.6}"
-                );
+                argmax_label =
+                    format!("atom {i} axis {axis}: cpu={cv:.6} gpu={gv:.6} err={err:.6}");
             }
         }
     }
@@ -129,5 +139,8 @@ fn gpu_nonbonded_matches_cpu_on_ala3() {
     eprintln!("  {argmax_label}");
     // Loose tolerance: f32 round-trip + Coulomb's 1/r² gradient
     // sensitivity at close pairs accumulates.
-    assert!(max_err < 1e-1, "GPU and CPU nonbonded disagree: {argmax_label}");
+    assert!(
+        max_err < 1e-1,
+        "GPU and CPU nonbonded disagree: {argmax_label}"
+    );
 }

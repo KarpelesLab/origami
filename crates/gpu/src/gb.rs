@@ -365,9 +365,11 @@ impl GbPipeline {
         for (i, p) in positions.iter().enumerate() {
             self.pos_padded[i] = [p[0], p[1], p[2], 0.0];
         }
-        self.ctx
-            .queue
-            .write_buffer(&self.positions_buf, 0, bytemuck::cast_slice(&self.pos_padded));
+        self.ctx.queue.write_buffer(
+            &self.positions_buf,
+            0,
+            bytemuck::cast_slice(&self.pos_padded),
+        );
     }
 
     /// Dispatch the Born-radii pass *and* the pair-force pass.
@@ -388,9 +390,13 @@ impl GbPipeline {
 
         let slice = self.readback_buf.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
         let _ = device.poll(wgpu::Maintain::Wait);
-        rx.recv().expect("map_async sender dropped").expect("buffer map");
+        rx.recv()
+            .expect("map_async sender dropped")
+            .expect("buffer map");
         let data = slice.get_mapped_range();
         let padded: &[[f32; 4]] = bytemuck::cast_slice(&data);
         let out: Vec<[f32; 3]> = padded.iter().map(|v| [v[0], v[1], v[2]]).collect();
@@ -403,9 +409,7 @@ impl GbPipeline {
     /// [`crate::nonbonded_verlet::VerletNonbondedPipeline::clear_forces`].
     pub fn clear_forces(&self) {
         let zeroes = vec![0u8; self.forces_size as usize];
-        self.ctx
-            .queue
-            .write_buffer(&self.forces_buf, 0, &zeroes);
+        self.ctx.queue.write_buffer(&self.forces_buf, 0, &zeroes);
     }
 
     /// Record both compute passes (Born radii → pair force) into a
@@ -443,7 +447,9 @@ impl GbPipeline {
     pub fn begin_readback(&self) -> std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>> {
         let slice = self.readback_buf.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
         rx
     }
 
@@ -477,15 +483,42 @@ fn create_born_bind_group(
         label: Some("gb_born_bind"),
         layout,
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: positions.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: rho_tilde.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: rho.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 4, resource: scale.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 5, resource: r_eff.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 6, resource: nbr_count.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 7, resource: nbr_start.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 8, resource: nbr_indices.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: positions.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: rho_tilde.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: rho.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: scale.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: r_eff.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: nbr_count.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: nbr_start.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 8,
+                resource: nbr_indices.as_entire_binding(),
+            },
         ],
     })
 }
@@ -507,14 +540,38 @@ fn create_force_bind_group(
         label: Some("gb_force_bind"),
         layout,
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: positions.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: charges.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: r_eff.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 4, resource: forces.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 5, resource: nbr_count.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 6, resource: nbr_start.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 7, resource: nbr_indices.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: positions.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: charges.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: r_eff.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: forces.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: nbr_count.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: nbr_start.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: nbr_indices.as_entire_binding(),
+            },
         ],
     })
 }

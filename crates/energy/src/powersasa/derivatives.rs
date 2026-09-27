@@ -197,12 +197,7 @@ pub fn cap_axis_jvp(p_i: Vec3, p_k: Vec3, v: Vec3) -> (Vec3, Vec3) {
 ///
 ///   ∂cos α / ∂r_k = ((d² − R_i² + R_k²) / (2 d² R_i)) · u_ik
 ///   ∂cos α / ∂r_i = − ∂cos α / ∂r_k
-pub fn cos_alpha_grad(
-    p_i: Vec3,
-    p_k: Vec3,
-    radius_i: f64,
-    radius_k: f64,
-) -> (Vec3, Vec3) {
+pub fn cos_alpha_grad(p_i: Vec3, p_k: Vec3, radius_i: f64, radius_k: f64) -> (Vec3, Vec3) {
     let r_vec = p_k - p_i;
     let d2 = r_vec.norm_squared();
     let d = d2.sqrt();
@@ -323,8 +318,8 @@ pub fn vertex_point_jvp(
     let d_b = (d_num_b * denom - num_b * d_denom) / (denom * denom);
 
     // dc² = -2a·da − 2b·db − 2·(da·b + a·db)·σ − 2ab·dσ
-    let dc_sq = -2.0 * a * d_a - 2.0 * b * d_b - 2.0 * (d_a * b + a * d_b) * sigma
-        - 2.0 * a * b * d_sigma;
+    let dc_sq =
+        -2.0 * a * d_a - 2.0 * b * d_b - 2.0 * (d_a * b + a * d_b) * sigma - 2.0 * a * b * d_sigma;
     let d_c = dc_sq / (2.0 * c);
 
     // dbase = da·ω_K + a·dω_K + db·ω_L + b·dω_L
@@ -595,7 +590,9 @@ mod tests {
             assert!(
                 (g_i[axis] - numeric_i).abs() < 1e-7,
                 "g_i[{}]: analytical={} numeric={}",
-                axis, g_i[axis], numeric_i,
+                axis,
+                g_i[axis],
+                numeric_i,
             );
             // ∂/∂r_k[axis]
             let mut pk_p = p_k;
@@ -606,7 +603,9 @@ mod tests {
             assert!(
                 (g_k[axis] - numeric_k).abs() < 1e-7,
                 "g_k[{}]: analytical={} numeric={}",
-                axis, g_k[axis], numeric_k,
+                axis,
+                g_k[axis],
+                numeric_k,
             );
         }
     }
@@ -646,10 +645,8 @@ mod tests {
         // Directional finite-difference: (∂ω/∂r_i) · v ≈
         //   (ω(p_i + ε v, p_k) − ω(p_i − ε v, p_k)) / (2 ε).
         let eps = 1e-6;
-        let numeric_i =
-            (axis_of(p_i + v * eps, p_k) - axis_of(p_i - v * eps, p_k)) / (2.0 * eps);
-        let numeric_k =
-            (axis_of(p_i, p_k + v * eps) - axis_of(p_i, p_k - v * eps)) / (2.0 * eps);
+        let numeric_i = (axis_of(p_i + v * eps, p_k) - axis_of(p_i - v * eps, p_k)) / (2.0 * eps);
+        let numeric_k = (axis_of(p_i, p_k + v * eps) - axis_of(p_i, p_k - v * eps)) / (2.0 * eps);
 
         assert!(
             (g_i - numeric_i).norm() < 1e-7,
@@ -790,8 +787,18 @@ mod tests {
                         let ve = vertex_point(ck, cm, sign_e).expect("V_e");
                         signed_arc_angle(vs, ve, ck)
                     };
-                    let t_p = theta_at(p_i + di * eps, p_k + dk * eps, p_l + dl * eps, p_m + dm * eps);
-                    let t_m = theta_at(p_i - di * eps, p_k - dk * eps, p_l - dl * eps, p_m - dm * eps);
+                    let t_p = theta_at(
+                        p_i + di * eps,
+                        p_k + dk * eps,
+                        p_l + dl * eps,
+                        p_m + dm * eps,
+                    );
+                    let t_m = theta_at(
+                        p_i - di * eps,
+                        p_k - dk * eps,
+                        p_l - dl * eps,
+                        p_m - dm * eps,
+                    );
                     let numeric = (t_p - t_m) / (2.0 * eps);
 
                     let err = (analytical - numeric).abs();
@@ -857,7 +864,17 @@ mod tests {
                     ("combined", dr_i, dr_k, dr_l),
                 ] {
                     let analytical = vertex_epsilon_jvp(
-                        p_i, p_k, p_l, r_i, r_k, r_l, sign, incoming_is_k, di, dk, dl,
+                        p_i,
+                        p_k,
+                        p_l,
+                        r_i,
+                        r_k,
+                        r_l,
+                        sign,
+                        incoming_is_k,
+                        di,
+                        dk,
+                        dl,
                     )
                     .expect("vertex_epsilon_jvp");
 
@@ -912,7 +929,10 @@ mod tests {
         let matches_plus = (v_plus - p).norm() < 1e-12 || (v_plus - q).norm() < 1e-12;
         let matches_minus = (v_minus - p).norm() < 1e-12 || (v_minus - q).norm() < 1e-12;
         assert!(matches_plus && matches_minus);
-        assert!((v_plus - v_minus).norm() > 1e-6, "plus and minus must differ");
+        assert!(
+            (v_plus - v_minus).norm() > 1e-6,
+            "plus and minus must differ"
+        );
 
         // identify_root_sign reproduces both halves.
         assert_eq!(identify_root_sign(c1, c2, v_plus), Some(RootSign::Plus));

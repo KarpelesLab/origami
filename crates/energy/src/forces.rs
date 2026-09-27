@@ -15,11 +15,7 @@ use crate::nonbonded::DEFAULT_CUTOFF_A;
 
 /// Compute the total atomic force vector (without SASA forces — preserves
 /// the M4 force-aggregator behaviour). Length equals `structure.atom_count()`.
-pub fn total_force(
-    structure: &Structure,
-    graph: &TopologyGraph,
-    ff: &ForceField,
-) -> Vec<Vec3> {
+pub fn total_force(structure: &Structure, graph: &TopologyGraph, ff: &ForceField) -> Vec<Vec3> {
     total_force_with_cutoff(structure, graph, ff, DEFAULT_CUTOFF_A)
 }
 
@@ -197,9 +193,13 @@ mod tests {
         for i in 0..n {
             for j in (i + 1)..n {
                 let qq = frozen_charges[i] * frozen_charges[j];
-                if qq == 0.0 { continue; }
+                if qq == 0.0 {
+                    continue;
+                }
                 let r2 = (positions[i] - positions[j]).norm_squared();
-                if r2 > gb_cutoff_sq { continue; }
+                if r2 > gb_cutoff_sq {
+                    continue;
+                }
                 let rprod = frozen_radii[i] * frozen_radii[j];
                 let f_gb = (r2 + rprod * (-r2 / (4.0 * rprod)).exp()).sqrt();
                 pair_e += 2.0 * prefactor_kj * qq / f_gb;
@@ -210,9 +210,7 @@ mod tests {
 
     #[test]
     fn total_force_finite_difference() {
-        let s = build_extended_chain(&[
-            AminoAcid::Lys, AminoAcid::Ala, AminoAcid::Glu,
-        ]).unwrap();
+        let s = build_extended_chain(&[AminoAcid::Lys, AminoAcid::Ala, AminoAcid::Glu]).unwrap();
         let g = build_topology_graph(&s);
         let ff = standard_ff();
         let analytical = total_force(&s, &g, ff);
@@ -230,42 +228,75 @@ mod tests {
                 let mut s_minus = s.clone();
                 bump(&mut s_plus, i, axis, eps);
                 bump(&mut s_minus, i, axis, -eps);
-                let e_plus = total_energy_for_force_check(&s_plus, &g, ff, &frozen_charges, &frozen_radii);
-                let e_minus = total_energy_for_force_check(&s_minus, &g, ff, &frozen_charges, &frozen_radii);
+                let e_plus =
+                    total_energy_for_force_check(&s_plus, &g, ff, &frozen_charges, &frozen_radii);
+                let e_minus =
+                    total_energy_for_force_check(&s_minus, &g, ff, &frozen_charges, &frozen_radii);
                 let numeric = -(e_plus - e_minus) / (2.0 * eps);
                 let an = analytical[i][axis];
                 let err = (an - numeric).abs();
                 if err > max_err {
                     max_err = err;
-                    max_label = format!("atom {} axis {}: analytical={:.4}, numeric={:.4}", i, axis, an, numeric);
+                    max_label = format!(
+                        "atom {} axis {}: analytical={:.4}, numeric={:.4}",
+                        i, axis, an, numeric
+                    );
                 }
-                assert!(
-                    err < 1.0,
-                    "{}", max_label
-                );
+                assert!(err < 1.0, "{}", max_label);
             }
         }
-        eprintln!("max force discrepancy in total_force test: {} ({})", max_err, max_label);
+        eprintln!(
+            "max force discrepancy in total_force test: {} ({})",
+            max_err, max_label
+        );
     }
 
     #[test]
     fn total_force_with_scratch_matches_aos() {
         let s = build_extended_chain(&[
-            AminoAcid::Lys, AminoAcid::Ala, AminoAcid::Glu, AminoAcid::Phe,
-        ]).unwrap();
+            AminoAcid::Lys,
+            AminoAcid::Ala,
+            AminoAcid::Glu,
+            AminoAcid::Phe,
+        ])
+        .unwrap();
         let g = build_topology_graph(&s);
         let ff = standard_ff();
         let aos = total_force_with_options(&s, &g, ff, DEFAULT_CUTOFF_A, false, false);
 
         let mut scratch = crate::scratch::ForceScratch::new(&s, &g, ff);
         let mut soa = Vec::new();
-        super::total_force_with_scratch(&s, &g, ff, DEFAULT_CUTOFF_A, false, false, &mut scratch, &mut soa);
+        super::total_force_with_scratch(
+            &s,
+            &g,
+            ff,
+            DEFAULT_CUTOFF_A,
+            false,
+            false,
+            &mut scratch,
+            &mut soa,
+        );
 
         assert_eq!(aos.len(), soa.len());
         for (i, (a, b)) in aos.iter().zip(soa.iter()).enumerate() {
-            assert!((a.x - b.x).abs() < 1e-9, "atom {i} x: AoS={:.6e} SoA={:.6e}", a.x, b.x);
-            assert!((a.y - b.y).abs() < 1e-9, "atom {i} y: AoS={:.6e} SoA={:.6e}", a.y, b.y);
-            assert!((a.z - b.z).abs() < 1e-9, "atom {i} z: AoS={:.6e} SoA={:.6e}", a.z, b.z);
+            assert!(
+                (a.x - b.x).abs() < 1e-9,
+                "atom {i} x: AoS={:.6e} SoA={:.6e}",
+                a.x,
+                b.x
+            );
+            assert!(
+                (a.y - b.y).abs() < 1e-9,
+                "atom {i} y: AoS={:.6e} SoA={:.6e}",
+                a.y,
+                b.y
+            );
+            assert!(
+                (a.z - b.z).abs() < 1e-9,
+                "atom {i} z: AoS={:.6e} SoA={:.6e}",
+                a.z,
+                b.z
+            );
         }
     }
 }

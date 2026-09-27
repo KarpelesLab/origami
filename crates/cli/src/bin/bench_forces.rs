@@ -40,10 +40,7 @@ fn main() {
         .get(1)
         .cloned()
         .unwrap_or_else(|| "crates/io/tests/fixtures/1L2Y_model1.pdb".to_string());
-    let n_iter: usize = args
-        .get(2)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(200);
+    let n_iter: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(200);
     let pdb = std::fs::read_to_string(&path).expect("read pdb");
     let s = read_pdb(pdb.as_bytes()).expect("parse pdb");
     let graph = build_topology_graph(&s);
@@ -74,7 +71,8 @@ fn main() {
             .flat_map(|r| r.atoms.iter().map(|a| a.position))
             .collect();
         let cl = geom::CellList::build(&positions, energy::DEFAULT_CUTOFF_A);
-        cl.iter_pairs_within(&positions, energy::DEFAULT_CUTOFF_A).count()
+        cl.iter_pairs_within(&positions, energy::DEFAULT_CUTOFF_A)
+            .count()
     };
     println!("  {} pairs after cell-list cutoff", pair_n);
     println!();

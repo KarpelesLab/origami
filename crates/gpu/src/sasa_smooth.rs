@@ -98,7 +98,8 @@ impl SasaSmoothPipeline {
         let params = Params {
             n_atoms: n_atoms as u32,
             sigma: setup.sigma_a,
-            _pad0: 0, _pad1: 0,
+            _pad0: 0,
+            _pad1: 0,
         };
         let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("sasa_smooth_params"),
@@ -245,14 +246,15 @@ impl SasaSmoothPipeline {
             compilation_options: Default::default(),
             cache: None,
         });
-        let precompute_w_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("sasa_smooth_precompute_w_pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: Some("sasa_smooth_precompute_w"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
+        let precompute_w_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("sasa_smooth_precompute_w_pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: Some("sasa_smooth_precompute_w"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
         let bind_group = create_bind_group(
             device,
             &bind_group_layout,
@@ -302,9 +304,11 @@ impl SasaSmoothPipeline {
         for (i, p) in positions.iter().enumerate() {
             self.pos_padded[i] = [p[0], p[1], p[2], 0.0];
         }
-        self.ctx
-            .queue
-            .write_buffer(&self.positions_buf, 0, bytemuck::cast_slice(&self.pos_padded));
+        self.ctx.queue.write_buffer(
+            &self.positions_buf,
+            0,
+            bytemuck::cast_slice(&self.pos_padded),
+        );
     }
 
     pub fn update_neighbours(&mut self, counts: &[u32], starts: &[u32], indices: &[u32]) {
@@ -361,12 +365,18 @@ impl SasaSmoothPipeline {
             pass.dispatch_workgroups(self.n_atoms.div_ceil(64) as u32, 1, 1);
         }
         encoder.copy_buffer_to_buffer(
-            &self.per_atom_area_buf, 0, &self.area_readback_buf, 0, self.area_size,
+            &self.per_atom_area_buf,
+            0,
+            &self.area_readback_buf,
+            0,
+            self.area_size,
         );
         queue.submit(Some(encoder.finish()));
         let slice = self.area_readback_buf.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
         let _ = device.poll(wgpu::Maintain::Wait);
         rx.recv().unwrap().unwrap();
         let data = slice.get_mapped_range();
@@ -414,9 +424,7 @@ impl SasaSmoothPipeline {
     /// Clear the forces buffer to zero.
     pub fn clear_forces(&self) {
         let zeroes = vec![0u8; self.forces_size as usize];
-        self.ctx
-            .queue
-            .write_buffer(&self.forces_buf, 0, &zeroes);
+        self.ctx.queue.write_buffer(&self.forces_buf, 0, &zeroes);
     }
 
     /// Compute SASA forces (accumulates into the persistent forces
@@ -431,11 +439,19 @@ impl SasaSmoothPipeline {
             label: Some("sasa_smooth_force_encoder"),
         });
         self.record_forces_into(&mut encoder);
-        encoder.copy_buffer_to_buffer(&self.forces_buf, 0, &self.forces_readback_buf, 0, self.forces_size);
+        encoder.copy_buffer_to_buffer(
+            &self.forces_buf,
+            0,
+            &self.forces_readback_buf,
+            0,
+            self.forces_size,
+        );
         queue.submit(Some(encoder.finish()));
         let slice = self.forces_readback_buf.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
         let _ = device.poll(wgpu::Maintain::Wait);
         rx.recv().unwrap().unwrap();
         let data = slice.get_mapped_range();
@@ -467,17 +483,50 @@ fn create_bind_group(
         label: Some("sasa_smooth_bind_group"),
         layout,
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: positions.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: radii.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: gammas.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 4, resource: dots.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 5, resource: nbr_count.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 6, resource: nbr_start.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 7, resource: nbr_indices.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 8, resource: per_atom_area.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 9, resource: forces.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 10, resource: w_cache.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: positions.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: radii.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: gammas.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: dots.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: nbr_count.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: nbr_start.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: nbr_indices.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 8,
+                resource: per_atom_area.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 9,
+                resource: forces.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 10,
+                resource: w_cache.as_entire_binding(),
+            },
         ],
     })
 }

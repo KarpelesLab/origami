@@ -42,7 +42,10 @@ pub fn add_nonbonded_forces(
                     panic!("unclassified atom {:?} {}", residue.monomer, atom.name)
                 }),
             );
-            charges.push(ff.partial_charge_for(residue.monomer, atom.name).unwrap_or(0.0));
+            charges.push(
+                ff.partial_charge_for(residue.monomer, atom.name)
+                    .unwrap_or(0.0),
+            );
         }
     }
 
@@ -55,7 +58,9 @@ pub fn add_nonbonded_forces(
         }
         let one_four = graph.is_one_four(i, j);
         let (Some(pi), Some(pj)) = (ff.nonbonded(atom_types[i]), ff.nonbonded(atom_types[j]))
-        else { continue };
+        else {
+            continue;
+        };
 
         let (rmin_half_i, eps_i, rmin_half_j, eps_j) = if one_four {
             (
@@ -172,10 +177,7 @@ pub fn ensure_verlet_list(scratch: &mut crate::scratch::ForceScratch, cutoff_a: 
     true
 }
 
-pub fn add_nonbonded_forces_soa(
-    scratch: &mut crate::scratch::ForceScratch,
-    cutoff_a: f64,
-) {
+pub fn add_nonbonded_forces_soa(scratch: &mut crate::scratch::ForceScratch, cutoff_a: f64) {
     let n = scratch.n;
     let cutoff_sq = cutoff_a * cutoff_a;
     let kj_per_kcal = kcal_to_kj(1.0);
@@ -224,7 +226,12 @@ pub fn add_nonbonded_forces_soa(
         let r = r2.sqrt();
         let one_four = (mask & crate::scratch::ONE_FOUR_BIT) != 0;
         let (rmin_half_i, eps_i, rmin_half_j, eps_j) = if one_four {
-            (rmin_half_14[i], epsilon_14[i], rmin_half_14[j], epsilon_14[j])
+            (
+                rmin_half_14[i],
+                epsilon_14[i],
+                rmin_half_14[j],
+                epsilon_14[j],
+            )
         } else {
             (rmin_half[i], epsilon[i], rmin_half[j], epsilon[j])
         };
@@ -323,12 +330,17 @@ pub fn add_nonbonded_forces_soa(
 mod tests {
     use super::*;
     use crate::nonbonded::nonbonded_energy;
-    use chem::{standard_ff, AminoAcid};
-    use geom::{build_extended_chain, build_topology_graph, structure::PlacedAtom, structure::PlacedResidue};
     use chem::Element;
+    use chem::{standard_ff, AminoAcid};
+    use geom::{
+        build_extended_chain, build_topology_graph, structure::PlacedAtom, structure::PlacedResidue,
+    };
 
     fn flatten(s: &Structure) -> Vec<Vec3> {
-        s.residues.iter().flat_map(|r| r.atoms.iter().map(|a| a.position)).collect()
+        s.residues
+            .iter()
+            .flat_map(|r| r.atoms.iter().map(|a| a.position))
+            .collect()
     }
 
     fn bump(s: &mut Structure, atom_idx: usize, axis: usize, eps: f64) {
@@ -350,20 +362,36 @@ mod tests {
         // Verlet list, the second reuses it (zero displacement, no
         // rebuild). Both must give identical forces.
         let s = build_extended_chain(&[
-            AminoAcid::Lys, AminoAcid::Glu, AminoAcid::Ala, AminoAcid::Phe,
-        ]).unwrap();
+            AminoAcid::Lys,
+            AminoAcid::Glu,
+            AminoAcid::Ala,
+            AminoAcid::Phe,
+        ])
+        .unwrap();
         let g = build_topology_graph(&s);
         let ff = standard_ff();
         let mut scratch = crate::scratch::ForceScratch::new(&s, &g, ff);
 
         scratch.zero_forces();
         add_nonbonded_forces_soa(&mut scratch, DEFAULT_CUTOFF_A);
-        let first: Vec<f64> = scratch.fxs.iter().chain(&scratch.fys).chain(&scratch.fzs).copied().collect();
+        let first: Vec<f64> = scratch
+            .fxs
+            .iter()
+            .chain(&scratch.fys)
+            .chain(&scratch.fzs)
+            .copied()
+            .collect();
         assert!(scratch.verlet_valid, "first call should build the list");
 
         scratch.zero_forces();
         add_nonbonded_forces_soa(&mut scratch, DEFAULT_CUTOFF_A);
-        let second: Vec<f64> = scratch.fxs.iter().chain(&scratch.fys).chain(&scratch.fzs).copied().collect();
+        let second: Vec<f64> = scratch
+            .fxs
+            .iter()
+            .chain(&scratch.fys)
+            .chain(&scratch.fzs)
+            .copied()
+            .collect();
 
         for (a, b) in first.iter().zip(&second) {
             assert!((a - b).abs() < 1e-12, "cached call diverged: {a} vs {b}");
@@ -374,9 +402,7 @@ mod tests {
     fn verlet_rebuilds_after_large_displacement() {
         // After moving an atom far (> skin), the next call must rebuild
         // the list and still match a from-scratch reference.
-        let s = build_extended_chain(&[
-            AminoAcid::Lys, AminoAcid::Glu, AminoAcid::Ala,
-        ]).unwrap();
+        let s = build_extended_chain(&[AminoAcid::Lys, AminoAcid::Glu, AminoAcid::Ala]).unwrap();
         let g = build_topology_graph(&s);
         let ff = standard_ff();
         let mut scratch = crate::scratch::ForceScratch::new(&s, &g, ff);
@@ -394,16 +420,26 @@ mod tests {
         scratch.sync_positions(&s2);
         scratch.zero_forces();
         add_nonbonded_forces_soa(&mut scratch, DEFAULT_CUTOFF_A);
-        let verlet_forces: Vec<f64> =
-            scratch.fxs.iter().chain(&scratch.fys).chain(&scratch.fzs).copied().collect();
+        let verlet_forces: Vec<f64> = scratch
+            .fxs
+            .iter()
+            .chain(&scratch.fys)
+            .chain(&scratch.fzs)
+            .copied()
+            .collect();
 
         // Reference: a fresh scratch built directly on the moved
         // structure (no cached list).
         let mut fresh = crate::scratch::ForceScratch::new(&s2, &g, ff);
         fresh.zero_forces();
         add_nonbonded_forces_soa(&mut fresh, DEFAULT_CUTOFF_A);
-        let fresh_forces: Vec<f64> =
-            fresh.fxs.iter().chain(&fresh.fys).chain(&fresh.fzs).copied().collect();
+        let fresh_forces: Vec<f64> = fresh
+            .fxs
+            .iter()
+            .chain(&fresh.fys)
+            .chain(&fresh.fzs)
+            .copied()
+            .collect();
 
         for (a, b) in verlet_forces.iter().zip(&fresh_forces) {
             assert!((a - b).abs() < 1e-9, "rebuild diverged: {a} vs {b}");
@@ -438,7 +474,11 @@ mod tests {
                 let an = forces[i][axis];
                 assert!(
                     (an - numeric).abs() < 1e-1,
-                    "atom {} axis {}: analytical={:.4}, numeric={:.4}", i, axis, an, numeric
+                    "atom {} axis {}: analytical={:.4}, numeric={:.4}",
+                    i,
+                    axis,
+                    an,
+                    numeric
                 );
             }
         }
@@ -486,8 +526,16 @@ mod tests {
             residues: vec![PlacedResidue {
                 monomer: geom::structure::Monomer::Protein(AminoAcid::Ala),
                 atoms: vec![
-                    PlacedAtom { name: "CB", element: Element::C, position: Vec3::zeros() },
-                    PlacedAtom { name: "C", element: Element::C, position: Vec3::new(dist, 0.0, 0.0) },
+                    PlacedAtom {
+                        name: "CB",
+                        element: Element::C,
+                        position: Vec3::zeros(),
+                    },
+                    PlacedAtom {
+                        name: "C",
+                        element: Element::C,
+                        position: Vec3::new(dist, 0.0, 0.0),
+                    },
                 ],
                 chain: 'A',
             }],

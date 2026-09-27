@@ -31,10 +31,26 @@ fn rna_chain_energy_is_finite() {
     let nb = nonbonded_energy(&s, &g, ff, DEFAULT_CUTOFF_A);
     let gb = gb_energy(&s, ff);
 
-    assert!(bonded.bond_kj_mol.is_finite(), "bond: {}", bonded.bond_kj_mol);
-    assert!(bonded.angle_kj_mol.is_finite(), "angle: {}", bonded.angle_kj_mol);
-    assert!(bonded.dihedral_kj_mol.is_finite(), "dihedral: {}", bonded.dihedral_kj_mol);
-    assert!(bonded.improper_kj_mol.is_finite(), "improper: {}", bonded.improper_kj_mol);
+    assert!(
+        bonded.bond_kj_mol.is_finite(),
+        "bond: {}",
+        bonded.bond_kj_mol
+    );
+    assert!(
+        bonded.angle_kj_mol.is_finite(),
+        "angle: {}",
+        bonded.angle_kj_mol
+    );
+    assert!(
+        bonded.dihedral_kj_mol.is_finite(),
+        "dihedral: {}",
+        bonded.dihedral_kj_mol
+    );
+    assert!(
+        bonded.improper_kj_mol.is_finite(),
+        "improper: {}",
+        bonded.improper_kj_mol
+    );
     assert!(nb.lj_kj_mol.is_finite(), "LJ: {}", nb.lj_kj_mol);
     assert!(nb.coulomb_kj_mol.is_finite(), "Coul: {}", nb.coulomb_kj_mol);
     assert!(gb.gb_kj_mol.is_finite(), "GB: {}", gb.gb_kj_mol);
@@ -86,7 +102,10 @@ fn rna_chain_minimises() {
     let after = result.final_energy;
 
     assert!(after.is_finite(), "post-minimise energy NaN/inf: {after}");
-    assert!(after < before, "minimisation didn't drop energy: {before} → {after}");
+    assert!(
+        after < before,
+        "minimisation didn't drop energy: {before} → {after}"
+    );
     for residue in &s.residues {
         for atom in &residue.atoms {
             assert!(atom.position.x.is_finite());
@@ -106,11 +125,7 @@ fn rna_chain_minimises() {
 /// once it's fed RNA forces through the new dispatch path.
 #[test]
 fn rna_chain_langevin_runs_without_explosion() {
-    let mut s = build_extended_rna_chain(&[
-        Nucleotide::Uracil,
-        Nucleotide::Adenine,
-    ])
-    .unwrap();
+    let mut s = build_extended_rna_chain(&[Nucleotide::Uracil, Nucleotide::Adenine]).unwrap();
     let g = build_topology_graph(&s);
     let ff = standard_ff();
 
@@ -156,8 +171,10 @@ fn rna_chain_langevin_runs_without_explosion() {
 
     assert!(!summary.diverged, "Langevin trajectory diverged");
     assert!(summary.steps_run >= 100);
-    assert!(last_t.is_finite() && last_t > 0.0 && last_t < 10_000.0,
-        "final instantaneous T off-scale: {last_t} K");
+    assert!(
+        last_t.is_finite() && last_t > 0.0 && last_t < 10_000.0,
+        "final instantaneous T off-scale: {last_t} K"
+    );
 
     for residue in &s.residues {
         for atom in &residue.atoms {

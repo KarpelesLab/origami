@@ -58,7 +58,13 @@ impl CellList {
             cells[idx].push(i);
             atom_to_cell[i] = idx;
         }
-        CellList { cell_size, origin, dims, cells, atom_to_cell }
+        CellList {
+            cell_size,
+            origin,
+            dims,
+            cells,
+            atom_to_cell,
+        }
     }
 
     pub fn cell_size(&self) -> f64 {
@@ -73,8 +79,12 @@ impl CellList {
         positions: &'a [Vec3],
         cutoff: f64,
     ) -> impl Iterator<Item = (usize, usize, f64)> + 'a {
-        assert!(cutoff <= self.cell_size + 1e-9,
-            "cutoff {} exceeds cell size {}", cutoff, self.cell_size);
+        assert!(
+            cutoff <= self.cell_size + 1e-9,
+            "cutoff {} exceeds cell size {}",
+            cutoff,
+            self.cell_size
+        );
         let cutoff_sq = cutoff * cutoff;
         let dims = self.dims;
         // For each cell, we visit its 13 "forward" neighbours plus itself —
@@ -109,21 +119,24 @@ impl CellList {
             }
             neigh_pairs.into_iter().flat_map(move |(c1, c2)| {
                 let same = c1 == c2;
-                self.cells[c1].iter().enumerate().flat_map(move |(idx_in_c1, &i)| {
-                    let starts_at = if same { idx_in_c1 + 1 } else { 0 };
-                    self.cells[c2][starts_at..].iter().filter_map(move |&j| {
-                        if i == j {
-                            return None;
-                        }
-                        let (a, b) = if i < j { (i, j) } else { (j, i) };
-                        let r2 = (positions[a] - positions[b]).norm_squared();
-                        if r2 <= cutoff_sq {
-                            Some((a, b, r2.sqrt()))
-                        } else {
-                            None
-                        }
+                self.cells[c1]
+                    .iter()
+                    .enumerate()
+                    .flat_map(move |(idx_in_c1, &i)| {
+                        let starts_at = if same { idx_in_c1 + 1 } else { 0 };
+                        self.cells[c2][starts_at..].iter().filter_map(move |&j| {
+                            if i == j {
+                                return None;
+                            }
+                            let (a, b) = if i < j { (i, j) } else { (j, i) };
+                            let r2 = (positions[a] - positions[b]).norm_squared();
+                            if r2 <= cutoff_sq {
+                                Some((a, b, r2.sqrt()))
+                            } else {
+                                None
+                            }
+                        })
                     })
-                })
             })
         })
     }

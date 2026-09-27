@@ -48,12 +48,17 @@ pub fn rmsd_p(a: &Structure, b: &Structure) -> Option<f64> {
     let mut q: Vec<Vec3> = Vec::new();
     for (ra, rb) in a.residues.iter().zip(b.residues.iter()) {
         match (ra.position("P"), rb.position("P")) {
-            (Some(pa), Some(pb)) => { p.push(pa); q.push(pb); }
+            (Some(pa), Some(pb)) => {
+                p.push(pa);
+                q.push(pb);
+            }
             (None, None) => continue,
             _ => return None, // one side has P, the other doesn't — abort
         }
     }
-    if p.is_empty() { return None; }
+    if p.is_empty() {
+        return None;
+    }
     Some(rmsd_points(&p, &q))
 }
 

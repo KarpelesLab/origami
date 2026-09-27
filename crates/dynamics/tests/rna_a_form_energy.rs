@@ -16,16 +16,23 @@ fn breakdown(label: &str, s: &geom::Structure, g: &geom::TopologyGraph, ff: &che
     let gb = gb_energy(s, ff);
     eprintln!(
         "{label}: bond={:.0} angle={:.0} dih={:.0} imp={:.0} LJ={:.0} Coul={:.0} GB={:.0}",
-        b.bond_kj_mol, b.angle_kj_mol, b.dihedral_kj_mol, b.improper_kj_mol,
-        nb.lj_kj_mol, nb.coulomb_kj_mol, gb.gb_kj_mol,
+        b.bond_kj_mol,
+        b.angle_kj_mol,
+        b.dihedral_kj_mol,
+        b.improper_kj_mol,
+        nb.lj_kj_mol,
+        nb.coulomb_kj_mol,
+        gb.gb_kj_mol,
     );
 }
 
 #[test]
 fn a_form_rna_energy_below_extended() {
     let seq = [
-        Nucleotide::Uracil, Nucleotide::Cytosine,
-        Nucleotide::Adenine, Nucleotide::Guanine,
+        Nucleotide::Uracil,
+        Nucleotide::Cytosine,
+        Nucleotide::Adenine,
+        Nucleotide::Guanine,
     ];
 
     let s_ext = build_extended_rna_chain(&seq).unwrap();
@@ -44,22 +51,23 @@ fn a_form_rna_energy_below_extended() {
 
     // Dump the closest non-bonded pairs in A-form to localise clashes.
     let atoms: Vec<_> = s_a.iter_atoms().collect();
-    let bonded: std::collections::HashSet<(usize, usize)> = g_a.bonds.iter()
+    let bonded: std::collections::HashSet<(usize, usize)> = g_a
+        .bonds
+        .iter()
         .flat_map(|b| [(b.a, b.b), (b.b, b.a)])
         .chain(g_a.angles.iter().flat_map(|a| [(a.a, a.c), (a.c, a.a)]))
         .collect();
     let mut close: Vec<(f64, String, String)> = Vec::new();
     for i in 0..atoms.len() {
         for j in (i + 1)..atoms.len() {
-            if bonded.contains(&(i, j)) { continue; }
+            if bonded.contains(&(i, j)) {
+                continue;
+            }
             let (ri, ai) = atoms[i];
             let (rj, aj) = atoms[j];
             let d = (ai.position - aj.position).norm();
             if d < 1.5 {
-                close.push((d,
-                    format!("{ri}/{}", ai.name),
-                    format!("{rj}/{}", aj.name),
-                ));
+                close.push((d, format!("{ri}/{}", ai.name), format!("{rj}/{}", aj.name)));
             }
         }
     }

@@ -69,7 +69,13 @@ pub fn lbfgs(
 ) -> LbfgsResult {
     let n_dofs = structure.atom_count() * 3;
 
-    let initial_energy = total_energy_with_options(structure, graph, ff, options.include_sasa, options.include_cmap);
+    let initial_energy = total_energy_with_options(
+        structure,
+        graph,
+        ff,
+        options.include_sasa,
+        options.include_cmap,
+    );
     let mut e_prev = initial_energy;
 
     let mut history_s: VecDeque<Vec<f64>> = VecDeque::with_capacity(options.history);
@@ -88,7 +94,13 @@ pub fn lbfgs(
 
     for step in 0..options.max_steps {
         steps = step;
-        force_buffer = total_force_opts(structure, graph, ff, options.include_sasa, options.include_cmap);
+        force_buffer = total_force_opts(
+            structure,
+            graph,
+            ff,
+            options.include_sasa,
+            options.include_cmap,
+        );
         // gradient = -force.
         flatten_vec3(&force_buffer, &mut g_curr);
         for g in g_curr.iter_mut() {
@@ -117,16 +129,14 @@ pub fn lbfgs(
             ls_options.alpha0 = ls_options.alpha0.min(options.max_step_a / max_dir);
         }
 
-        let e_now = total_energy_with_options(structure, graph, ff, options.include_sasa, options.include_cmap);
-        let res = backtracking(
+        let e_now = total_energy_with_options(
             structure,
             graph,
             ff,
-            &direction,
-            &g_curr,
-            e_now,
-            ls_options,
+            options.include_sasa,
+            options.include_cmap,
         );
+        let res = backtracking(structure, graph, ff, &direction, &g_curr, e_now, ls_options);
         let Some(ls) = res else {
             ls_failures += 1;
             // Fallback: try a steepest-descent step before giving up entirely.
@@ -165,7 +175,13 @@ pub fn lbfgs(
 
         // Update history with (s = x_new - x_prev, y = g_new - g_prev) using
         // the next gradient.
-        let force_after = total_force_opts(structure, graph, ff, options.include_sasa, options.include_cmap);
+        let force_after = total_force_opts(
+            structure,
+            graph,
+            ff,
+            options.include_sasa,
+            options.include_cmap,
+        );
         let mut g_after = vec![0.0_f64; n_dofs];
         flatten_vec3(&force_after, &mut g_after);
         for g in g_after.iter_mut() {
@@ -205,7 +221,13 @@ pub fn lbfgs(
 
     LbfgsResult {
         steps,
-        final_energy: total_energy_with_options(structure, graph, ff, options.include_sasa, options.include_cmap),
+        final_energy: total_energy_with_options(
+            structure,
+            graph,
+            ff,
+            options.include_sasa,
+            options.include_cmap,
+        ),
         initial_energy,
         max_force,
         converged,
@@ -282,8 +304,16 @@ mod tests {
             residues: vec![PlacedResidue {
                 monomer: geom::structure::Monomer::Protein(AminoAcid::Ala),
                 atoms: vec![
-                    PlacedAtom { name: "N", element: Element::N, position: Vec3::zeros() },
-                    PlacedAtom { name: "CA", element: Element::C, position: Vec3::new(1.7, 0.0, 0.0) },
+                    PlacedAtom {
+                        name: "N",
+                        element: Element::N,
+                        position: Vec3::zeros(),
+                    },
+                    PlacedAtom {
+                        name: "CA",
+                        element: Element::C,
+                        position: Vec3::new(1.7, 0.0, 0.0),
+                    },
                 ],
                 chain: 'A',
             }],
@@ -304,7 +334,8 @@ mod tests {
 
     #[test]
     fn lbfgs_ala3_chain_drops_below_sd_in_fewer_steps() {
-        let mut s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
+        let mut s =
+            build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
         let g = build_topology_graph(&s);
         let ff = standard_ff();
         let opts = LbfgsOptions {

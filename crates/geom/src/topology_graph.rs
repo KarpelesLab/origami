@@ -32,7 +32,11 @@ pub struct Bond {
 
 impl Bond {
     fn new(a: usize, b: usize) -> Self {
-        if a < b { Bond { a, b } } else { Bond { a: b, b: a } }
+        if a < b {
+            Bond { a, b }
+        } else {
+            Bond { a: b, b: a }
+        }
     }
 }
 
@@ -141,9 +145,7 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
             total += 1;
         }
     }
-    let lookup = |ri: usize, name: &str| -> Option<usize> {
-        atom_idx.get(&(ri, name)).copied()
-    };
+    let lookup = |ri: usize, name: &str| -> Option<usize> { atom_idx.get(&(ri, name)).copied() };
 
     // Collect bonds as a deduplicated set, then sort for stable iteration.
     let mut bonds: HashSet<Bond> = HashSet::new();
@@ -245,8 +247,7 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
                     && structure.residues[ri - 1].chain == res.chain
                     && structure.residues[ri - 1].monomer.is_rna()
                 {
-                    if let (Some(prev_o3), Some(p)) = (lookup(ri - 1, "O3'"), lookup(ri, "P"))
-                    {
+                    if let (Some(prev_o3), Some(p)) = (lookup(ri - 1, "O3'"), lookup(ri, "P")) {
                         add_bond(&mut bonds, prev_o3, p);
                     }
                 }
@@ -302,7 +303,11 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
     for (b, neigh) in bonded_to.iter().enumerate() {
         for i in 0..neigh.len() {
             for j in (i + 1)..neigh.len() {
-                angles.push(Angle { a: neigh[i], b, c: neigh[j] });
+                angles.push(Angle {
+                    a: neigh[i],
+                    b,
+                    c: neigh[j],
+                });
             }
         }
     }
@@ -325,7 +330,12 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
                 // Canonical order: smaller central pair comes first.
                 let key = if b < c { (a, b, c, d) } else { (d, c, b, a) };
                 if dihedral_seen.insert(key) {
-                    dihedrals.push(Dihedral { a: key.0, b: key.1, c: key.2, d: key.3 });
+                    dihedrals.push(Dihedral {
+                        a: key.0,
+                        b: key.1,
+                        c: key.2,
+                        d: key.3,
+                    });
                 }
             }
         }
@@ -354,7 +364,12 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
                     lookup(ri, sub_b),
                     lookup(ri, sub_c),
                 ) {
-                    impropers.push(Improper { a: ca, b: a, c: b, d: c });
+                    impropers.push(Improper {
+                        a: ca,
+                        b: a,
+                        c: b,
+                        d: c,
+                    });
                 }
             };
             // The CHARMM27 .rtf adds two flavours of base improper:
@@ -409,13 +424,23 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
 
         // Backbone peptide bond: C(i) is sp²; bonded to CA, O, N(i+1).
         let prev_atoms = if ri + 1 < structure.residues.len() {
-            (lookup(ri, "CA"), lookup(ri, "C"), lookup(ri, "O"), lookup(ri + 1, "N"))
+            (
+                lookup(ri, "CA"),
+                lookup(ri, "C"),
+                lookup(ri, "O"),
+                lookup(ri + 1, "N"),
+            )
         } else {
             (None, None, None, None)
         };
         if let (Some(ca), Some(c), Some(o), Some(next_n)) = prev_atoms {
             // Central = C (sp² peptide-bond carbon).
-            impropers.push(Improper { a: c, b: ca, c: o, d: next_n });
+            impropers.push(Improper {
+                a: c,
+                b: ca,
+                c: o,
+                d: next_n,
+            });
         }
 
         // Aromatic / sp² side-chain centres.
@@ -428,7 +453,12 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
                     lookup(ri, "ND2"),
                 ) {
                     // Central = CG (sp² amide C).
-                    impropers.push(Improper { a: cg, b: cb, c: od1, d: nd2 });
+                    impropers.push(Improper {
+                        a: cg,
+                        b: cb,
+                        c: od1,
+                        d: nd2,
+                    });
                 }
             }
             AminoAcid::Gln => {
@@ -439,7 +469,12 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
                     lookup(ri, "NE2"),
                 ) {
                     // Central = CD.
-                    impropers.push(Improper { a: cd, b: cg, c: oe1, d: ne2 });
+                    impropers.push(Improper {
+                        a: cd,
+                        b: cg,
+                        c: oe1,
+                        d: ne2,
+                    });
                 }
             }
             AminoAcid::Asp => {
@@ -450,7 +485,12 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
                     lookup(ri, "OD2"),
                 ) {
                     // Central = CG (sp² carboxyl C).
-                    impropers.push(Improper { a: cg, b: cb, c: od1, d: od2 });
+                    impropers.push(Improper {
+                        a: cg,
+                        b: cb,
+                        c: od1,
+                        d: od2,
+                    });
                 }
             }
             AminoAcid::Glu => {
@@ -461,7 +501,12 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
                     lookup(ri, "OE2"),
                 ) {
                     // Central = CD.
-                    impropers.push(Improper { a: cd, b: cg, c: oe1, d: oe2 });
+                    impropers.push(Improper {
+                        a: cd,
+                        b: cg,
+                        c: oe1,
+                        d: oe2,
+                    });
                 }
             }
             AminoAcid::Arg => {
@@ -473,7 +518,12 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
                     lookup(ri, "NH2"),
                 ) {
                     // Central = CZ.
-                    impropers.push(Improper { a: cz, b: ne, c: nh1, d: nh2 });
+                    impropers.push(Improper {
+                        a: cz,
+                        b: ne,
+                        c: nh1,
+                        d: nh2,
+                    });
                 }
             }
             // Aromatic rings (Phe, Tyr, Trp, His) get an improper at every
@@ -485,7 +535,13 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
         }
     }
 
-    TopologyGraph { bonds, angles, dihedrals, impropers, bonded_to }
+    TopologyGraph {
+        bonds,
+        angles,
+        dihedrals,
+        impropers,
+        bonded_to,
+    }
 }
 
 #[cfg(test)]
@@ -525,8 +581,12 @@ mod tests {
         let mut pro_cd = None;
         for (ri, res) in s.residues.iter().enumerate() {
             for atom in &res.atoms {
-                if ri == 1 && atom.name == "N" { pro_n = Some(total); }
-                if ri == 1 && atom.name == "CD" { pro_cd = Some(total); }
+                if ri == 1 && atom.name == "N" {
+                    pro_n = Some(total);
+                }
+                if ri == 1 && atom.name == "CD" {
+                    pro_cd = Some(total);
+                }
                 total += 1;
             }
         }
@@ -546,8 +606,12 @@ mod tests {
         let mut res1_n = None;
         for (ri, res) in s.residues.iter().enumerate() {
             for atom in &res.atoms {
-                if ri == 0 && atom.name == "C" { res0_c = Some(total); }
-                if ri == 1 && atom.name == "N" { res1_n = Some(total); }
+                if ri == 0 && atom.name == "C" {
+                    res0_c = Some(total);
+                }
+                if ri == 1 && atom.name == "N" {
+                    res1_n = Some(total);
+                }
                 total += 1;
             }
         }
@@ -598,7 +662,8 @@ mod tests {
     #[test]
     fn angles_and_dihedrals_grow_with_chain() {
         let one = build_topology_graph(&build_extended_chain(&[AminoAcid::Ala]).unwrap());
-        let two = build_topology_graph(&build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala]).unwrap());
+        let two =
+            build_topology_graph(&build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala]).unwrap());
         // More residues = more bonds, angles, dihedrals.
         assert!(two.bonds.len() > one.bonds.len());
         assert!(two.angles.len() > one.angles.len());
@@ -610,7 +675,10 @@ mod tests {
         // Ala-Ala: residue 0's C should have an improper around it (CA, C, O, next_N).
         let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala]).unwrap();
         let g = build_topology_graph(&s);
-        assert!(!g.impropers.is_empty(), "expected at least the peptide-bond improper");
+        assert!(
+            !g.impropers.is_empty(),
+            "expected at least the peptide-bond improper"
+        );
     }
 
     #[test]
@@ -705,11 +773,8 @@ mod tests {
     #[test]
     fn rna_phosphodiester_bond_between_residues() {
         use crate::build_extended_rna_chain;
-        let s = build_extended_rna_chain(&[
-            chem::Nucleotide::Adenine,
-            chem::Nucleotide::Uracil,
-        ])
-        .unwrap();
+        let s = build_extended_rna_chain(&[chem::Nucleotide::Adenine, chem::Nucleotide::Uracil])
+            .unwrap();
         let g = build_topology_graph(&s);
         let o3_prev = rna_atom_index(&s, 0, "O3'").unwrap();
         let p_curr = rna_atom_index(&s, 1, "P").unwrap();
@@ -722,11 +787,8 @@ mod tests {
     #[test]
     fn rna_dinucleotide_has_no_phantom_protein_bonds() {
         use crate::build_extended_rna_chain;
-        let s = build_extended_rna_chain(&[
-            chem::Nucleotide::Cytosine,
-            chem::Nucleotide::Guanine,
-        ])
-        .unwrap();
+        let s = build_extended_rna_chain(&[chem::Nucleotide::Cytosine, chem::Nucleotide::Guanine])
+            .unwrap();
         let g = build_topology_graph(&s);
         // No protein-style peptide bond should be detected — the
         // residues don't have C or N backbone atoms, but the
@@ -757,7 +819,11 @@ mod tests {
                     position: crate::Vec3::zeros(),
                 });
             }
-            PlacedResidue { monomer: Monomer::Rna(nt), atoms, chain: 'A' }
+            PlacedResidue {
+                monomer: Monomer::Rna(nt),
+                atoms,
+                chain: 'A',
+            }
         };
 
         // Adenine: C6 ring improper + N6 amine improper.
@@ -771,7 +837,10 @@ mod tests {
             let n6 = rna_atom_index(&s, 0, "N6").unwrap();
             let h61 = rna_atom_index(&s, 0, "H61").unwrap();
             let h62 = rna_atom_index(&s, 0, "H62").unwrap();
-            assert!(has_improper(&g, c6, [c5, n1, n6]), "Adenine C6 improper missing");
+            assert!(
+                has_improper(&g, c6, [c5, n1, n6]),
+                "Adenine C6 improper missing"
+            );
             assert!(
                 has_improper(&g, n6, [c6, h61, h62]),
                 "Adenine N6 amine improper missing"
@@ -792,8 +861,14 @@ mod tests {
             let n2 = rna_atom_index(&s, 0, "N2").unwrap();
             let h21 = rna_atom_index(&s, 0, "H21").unwrap();
             let h22 = rna_atom_index(&s, 0, "H22").unwrap();
-            assert!(has_improper(&g, c6, [c5, n1, o6]), "Guanine C6 improper missing");
-            assert!(has_improper(&g, c2, [n1, n3, n2]), "Guanine C2 improper missing");
+            assert!(
+                has_improper(&g, c6, [c5, n1, o6]),
+                "Guanine C6 improper missing"
+            );
+            assert!(
+                has_improper(&g, c2, [n1, n3, n2]),
+                "Guanine C2 improper missing"
+            );
             assert!(
                 has_improper(&g, n2, [c2, h21, h22]),
                 "Guanine N2 amine improper missing"
@@ -814,8 +889,14 @@ mod tests {
             let n4 = rna_atom_index(&s, 0, "N4").unwrap();
             let h41 = rna_atom_index(&s, 0, "H41").unwrap();
             let h42 = rna_atom_index(&s, 0, "H42").unwrap();
-            assert!(has_improper(&g, c2, [n1, n3, o2]), "Cytosine C2 improper missing");
-            assert!(has_improper(&g, c4, [n3, c5, n4]), "Cytosine C4 improper missing");
+            assert!(
+                has_improper(&g, c2, [n1, n3, o2]),
+                "Cytosine C2 improper missing"
+            );
+            assert!(
+                has_improper(&g, c4, [n3, c5, n4]),
+                "Cytosine C4 improper missing"
+            );
             assert!(
                 has_improper(&g, n4, [c4, h41, h42]),
                 "Cytosine N4 amine improper missing"
@@ -834,8 +915,14 @@ mod tests {
             let c4 = rna_atom_index(&s, 0, "C4").unwrap();
             let c5 = rna_atom_index(&s, 0, "C5").unwrap();
             let o4 = rna_atom_index(&s, 0, "O4").unwrap();
-            assert!(has_improper(&g, c2, [n1, n3, o2]), "Uracil C2 improper missing");
-            assert!(has_improper(&g, c4, [n3, c5, o4]), "Uracil C4 improper missing");
+            assert!(
+                has_improper(&g, c2, [n1, n3, o2]),
+                "Uracil C2 improper missing"
+            );
+            assert!(
+                has_improper(&g, c4, [n3, c5, o4]),
+                "Uracil C4 improper missing"
+            );
         }
     }
 

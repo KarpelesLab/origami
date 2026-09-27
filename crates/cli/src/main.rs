@@ -9,20 +9,22 @@ use dynamics::{
     minimize, run_cotranslate, run_langevin, Algorithm, CylindricalTunnel, LangevinOptions,
     MinimizeOptions, Ribosome, UniformRibosome,
 };
+use energy::{bonded::bonded_energy, gb_energy, nonbonded_energy, sasa_energy, DEFAULT_CUTOFF_A};
 use geom::Vec3;
-use energy::{
-    bonded::bonded_energy, gb_energy, nonbonded_energy, sasa_energy, DEFAULT_CUTOFF_A,
-};
 use geom::{build_extended_chain, build_extended_rna_chain, build_topology_graph};
 use io::{
     read_pdb, read_pdb_trajectory, render, structure_bounds, write_pdb, write_pdb_trajectory,
     RenderOptions,
 };
-use translate::{find_orfs, parse_fasta, translate_codons};
 use translate::translate::{one_letter_string, three_letter_string};
+use translate::{find_orfs, parse_fasta, translate_codons};
 
 #[derive(Debug, Parser)]
-#[command(name = "origami", version, about = "Experimental physics-based protein folding")]
+#[command(
+    name = "origami",
+    version,
+    about = "Experimental physics-based protein folding"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -359,19 +361,55 @@ enum AlgoFlag {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Translate { input, orfs, min_aa, three_letter } => {
-            run_translate(&input, orfs, min_aa, three_letter)
-        }
-        Command::Build { seq, from_fasta, rna, a_form, output } => {
-            run_build(seq.as_deref(), from_fasta.as_deref(), rna, a_form, output.as_deref())
-        }
+        Command::Translate {
+            input,
+            orfs,
+            min_aa,
+            three_letter,
+        } => run_translate(&input, orfs, min_aa, three_letter),
+        Command::Build {
+            seq,
+            from_fasta,
+            rna,
+            a_form,
+            output,
+        } => run_build(
+            seq.as_deref(),
+            from_fasta.as_deref(),
+            rna,
+            a_form,
+            output.as_deref(),
+        ),
         Command::Energy { input, skip_sasa } => run_energy(&input, skip_sasa),
-        Command::Minimize { input, output, algorithm, max_steps, tol, max_step, with_sasa, with_cmap } => {
-            run_minimize(&input, &output, algorithm, max_steps, tol, max_step, with_sasa, with_cmap)
-        }
-        Command::Render { input, output, output_dir, width, height, show_hydrogens, frame_dt_fs } => {
-            run_render(&input, output.as_deref(), output_dir.as_deref(), width, height, show_hydrogens, frame_dt_fs)
-        }
+        Command::Minimize {
+            input,
+            output,
+            algorithm,
+            max_steps,
+            tol,
+            max_step,
+            with_sasa,
+            with_cmap,
+        } => run_minimize(
+            &input, &output, algorithm, max_steps, tol, max_step, with_sasa, with_cmap,
+        ),
+        Command::Render {
+            input,
+            output,
+            output_dir,
+            width,
+            height,
+            show_hydrogens,
+            frame_dt_fs,
+        } => run_render(
+            &input,
+            output.as_deref(),
+            output_dir.as_deref(),
+            width,
+            height,
+            show_hydrogens,
+            frame_dt_fs,
+        ),
         Command::Cotranslate {
             seq,
             mrna,
@@ -492,8 +530,7 @@ fn run_render(
     show_hydrogens: bool,
     frame_dt_fs: Option<f64>,
 ) -> Result<()> {
-    let file = fs::File::open(input)
-        .with_context(|| format!("opening {}", input.display()))?;
+    let file = fs::File::open(input).with_context(|| format!("opening {}", input.display()))?;
     let opts = RenderOptions {
         width,
         height,
@@ -501,10 +538,9 @@ fn run_render(
         ..Default::default()
     };
     if let Some(dir) = output_dir {
-        let frames = read_pdb_trajectory(file)
-            .with_context(|| format!("reading {}", input.display()))?;
-        fs::create_dir_all(dir)
-            .with_context(|| format!("creating {}", dir.display()))?;
+        let frames =
+            read_pdb_trajectory(file).with_context(|| format!("reading {}", input.display()))?;
+        fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
 
         // Lock the camera across all frames using the union extents of
         // the trajectory, so the molecule appears to grow / fold in
@@ -549,10 +585,9 @@ fn run_render(
             dir.display(),
         );
     } else {
-        let out_path = output
-            .ok_or_else(|| anyhow!("either --output or --output-dir is required"))?;
-        let structure = read_pdb(file)
-            .with_context(|| format!("reading {}", input.display()))?;
+        let out_path =
+            output.ok_or_else(|| anyhow!("either --output or --output-dir is required"))?;
+        let structure = read_pdb(file).with_context(|| format!("reading {}", input.display()))?;
         let img = render(&structure, &opts);
         img.save(out_path)
             .with_context(|| format!("writing {}", out_path.display()))?;
@@ -588,10 +623,8 @@ fn run_remd_cmd(
             temperatures.len()
         ));
     }
-    let file = fs::File::open(input)
-        .with_context(|| format!("opening {}", input.display()))?;
-    let structure = read_pdb(file)
-        .with_context(|| format!("reading {}", input.display()))?;
+    let file = fs::File::open(input).with_context(|| format!("opening {}", input.display()))?;
+    let structure = read_pdb(file).with_context(|| format!("reading {}", input.display()))?;
     let graph = build_topology_graph(&structure);
     let ff = standard_ff();
 
@@ -653,8 +686,7 @@ fn run_remd_cmd(
     );
     let mut out = fs::File::create(output_traj)
         .with_context(|| format!("creating {}", output_traj.display()))?;
-    write_pdb_trajectory(&mut out, &title, frames.iter())
-        .context("writing trajectory PDB")?;
+    write_pdb_trajectory(&mut out, &title, frames.iter()).context("writing trajectory PDB")?;
     eprintln!(
         "wrote {} frames from replica 0 → {}",
         frames.len(),
@@ -664,7 +696,10 @@ fn run_remd_cmd(
     let ratios = summary.acceptance_ratios();
     eprintln!();
     eprintln!("REMD summary:");
-    eprintln!("  atoms: {}, replicas: {}", summary.atoms_count, summary.n_replicas);
+    eprintln!(
+        "  atoms: {}, replicas: {}",
+        summary.atoms_count, summary.n_replicas
+    );
     for (i, r) in summary.per_replica.iter().enumerate() {
         eprintln!(
             "  replica {} @ T={:.0} K: PE={:.1} kJ/mol, KE={:.1} kJ/mol, {}{}",
@@ -712,10 +747,8 @@ fn run_dynamics(
     use_gpu: bool,
     use_gpu_integrator_flag: bool,
 ) -> Result<()> {
-    let file = fs::File::open(input)
-        .with_context(|| format!("opening {}", input.display()))?;
-    let mut structure = read_pdb(file)
-        .with_context(|| format!("reading {}", input.display()))?;
+    let file = fs::File::open(input).with_context(|| format!("opening {}", input.display()))?;
+    let mut structure = read_pdb(file).with_context(|| format!("reading {}", input.display()))?;
     let graph = build_topology_graph(&structure);
     let ff = standard_ff();
 
@@ -749,7 +782,10 @@ fn run_dynamics(
     let summary = run_langevin(&mut structure, &graph, ff, opts, |frame| {
         eprintln!(
             "  step {:>6} t={:>8.1} fs   T={:>7.1} K   KE={:>9.2} kJ/mol",
-            frame.step, frame.time_fs, frame.instantaneous_temperature_k, frame.kinetic_energy_kj_mol,
+            frame.step,
+            frame.time_fs,
+            frame.instantaneous_temperature_k,
+            frame.kinetic_energy_kj_mol,
         );
         frames.push(frame.structure.clone());
     });
@@ -772,11 +808,7 @@ fn run_dynamics(
     let mut out = fs::File::create(output_traj)
         .with_context(|| format!("creating {}", output_traj.display()))?;
     write_pdb_trajectory(&mut out, &title, frames.iter()).context("writing trajectory PDB")?;
-    eprintln!(
-        "wrote {} frames → {}",
-        frames.len(),
-        output_traj.display(),
-    );
+    eprintln!("wrote {} frames → {}", frames.len(), output_traj.display(),);
     Ok(())
 }
 
@@ -819,7 +851,8 @@ fn run_cotranslate_cmd(
             let seq = r.sequence().to_vec();
             let label = format!(
                 "codon-paced (E. coli K-12), mRNA len {} → {} residues",
-                m.len(), seq.len()
+                m.len(),
+                seq.len()
             );
             (Box::new(r), seq, label)
         }
@@ -854,8 +887,9 @@ fn run_cotranslate_cmd(
     } else {
         None
     };
-    let external: Option<&dyn dynamics::ExternalPotential> =
-        tunnel.as_ref().map(|t| t as &dyn dynamics::ExternalPotential);
+    let external: Option<&dyn dynamics::ExternalPotential> = tunnel
+        .as_ref()
+        .map(|t| t as &dyn dynamics::ExternalPotential);
 
     eprintln!(
         "origami cotranslate: {} residues, {}, base interval={} fs, dt={} fs, T={} K, γ={} ps⁻¹{}{}",
@@ -879,19 +913,20 @@ fn run_cotranslate_cmd(
     let tail_steps = (tail_fs / dt_fs).round() as usize;
     let mut frames: Vec<geom::Structure> = Vec::new();
     let mut last_residue = 0usize;
-    let final_struct = run_cotranslate(ribosome.as_ref(), ff, opts, tail_steps, external, |frame| {
-        if frame.residue_count != last_residue {
-            eprintln!(
-                "  residue {:>2}/{:<2} appended at t={:>8.1} fs (chain has {} atoms)",
-                frame.residue_count,
-                sequence.len(),
-                frame.time_fs,
-                frame.structure.atom_count(),
-            );
-            last_residue = frame.residue_count;
-        }
-        frames.push(frame.structure.clone());
-    });
+    let final_struct =
+        run_cotranslate(ribosome.as_ref(), ff, opts, tail_steps, external, |frame| {
+            if frame.residue_count != last_residue {
+                eprintln!(
+                    "  residue {:>2}/{:<2} appended at t={:>8.1} fs (chain has {} atoms)",
+                    frame.residue_count,
+                    sequence.len(),
+                    frame.time_fs,
+                    frame.structure.atom_count(),
+                );
+                last_residue = frame.residue_count;
+            }
+            frames.push(frame.structure.clone());
+        });
 
     let title = format!(
         "Cotranslate {} interval={}fs dt={}fs T={}K{}",
@@ -925,10 +960,8 @@ fn run_minimize(
     include_sasa: bool,
     include_cmap: bool,
 ) -> Result<()> {
-    let file = fs::File::open(input)
-        .with_context(|| format!("opening {}", input.display()))?;
-    let mut structure = read_pdb(file)
-        .with_context(|| format!("reading {}", input.display()))?;
+    let file = fs::File::open(input).with_context(|| format!("opening {}", input.display()))?;
+    let mut structure = read_pdb(file).with_context(|| format!("reading {}", input.display()))?;
     let graph = build_topology_graph(&structure);
     let ff = standard_ff();
     let opts = MinimizeOptions {
@@ -951,18 +984,16 @@ fn run_minimize(
     println!("  final energy:   {:>12.2} kJ/mol", result.final_energy);
     println!("  max force:      {:>12.4} kJ/mol/Å", result.max_force);
     println!("  converged:      {}", result.converged);
-    let mut out_file = fs::File::create(output)
-        .with_context(|| format!("creating {}", output.display()))?;
+    let mut out_file =
+        fs::File::create(output).with_context(|| format!("creating {}", output.display()))?;
     let title = format!("minimized from {}", input.display());
     write_pdb(&mut out_file, &structure, &title).context("writing minimized PDB")?;
     Ok(())
 }
 
 fn run_energy(input: &Path, skip_sasa: bool) -> Result<()> {
-    let file = fs::File::open(input)
-        .with_context(|| format!("opening {}", input.display()))?;
-    let structure = read_pdb(file)
-        .with_context(|| format!("reading {}", input.display()))?;
+    let file = fs::File::open(input).with_context(|| format!("opening {}", input.display()))?;
+    let structure = read_pdb(file).with_context(|| format!("reading {}", input.display()))?;
     let graph = build_topology_graph(&structure);
     let ff = standard_ff();
 
@@ -1005,7 +1036,10 @@ fn run_energy(input: &Path, skip_sasa: bool) -> Result<()> {
         nb.lj_kj_mol, nb.pair_count, nb.one_four_count
     );
     println!("  Coulomb:   {:>11.2}", nb.coulomb_kj_mol);
-    println!("  GB:        {:>11.2}   (self {:.2}, cross {:.2})", gb.gb_kj_mol, gb.self_kj_mol, gb.pair_kj_mol);
+    println!(
+        "  GB:        {:>11.2}   (self {:.2}, cross {:.2})",
+        gb.gb_kj_mol, gb.self_kj_mol, gb.pair_kj_mol
+    );
     if !skip_sasa {
         println!(
             "  SASA:      {:>11.2}   ({:.0} Å² total)",
@@ -1048,7 +1082,11 @@ fn run_translate(input: &str, orfs: bool, min_aa: usize, three_letter: bool) -> 
                     orf.start,
                     orf.end,
                     orf.protein.len(),
-                    if orf.terminated { "stop=yes" } else { "stop=no" },
+                    if orf.terminated {
+                        "stop=yes"
+                    } else {
+                        "stop=no"
+                    },
                 );
                 let seq_str = if three_letter {
                     three_letter_string(&orf.protein)
@@ -1062,12 +1100,20 @@ fn run_translate(input: &str, orfs: bool, min_aa: usize, three_letter: bool) -> 
             let outcome = translate_codons(&record.sequence)
                 .with_context(|| format!("translating record {:?}", record.id))?;
             let header = if record.description.is_empty() {
-                format!(">{} aa={} stop={}", record.id, outcome.protein.len(),
-                    if outcome.terminated { "yes" } else { "no" })
-            } else {
-                format!(">{} {} aa={} stop={}", record.id, record.description,
+                format!(
+                    ">{} aa={} stop={}",
+                    record.id,
                     outcome.protein.len(),
-                    if outcome.terminated { "yes" } else { "no" })
+                    if outcome.terminated { "yes" } else { "no" }
+                )
+            } else {
+                format!(
+                    ">{} {} aa={} stop={}",
+                    record.id,
+                    record.description,
+                    outcome.protein.len(),
+                    if outcome.terminated { "yes" } else { "no" }
+                )
             };
             println!("{}", header);
             let seq_str = if three_letter {
@@ -1089,8 +1135,7 @@ fn read_input(input: &str) -> Result<String> {
             .context("reading stdin")?;
         Ok(buf)
     } else {
-        fs::read_to_string(PathBuf::from(input))
-            .with_context(|| format!("reading {input}"))
+        fs::read_to_string(PathBuf::from(input)).with_context(|| format!("reading {input}"))
     }
 }
 
@@ -1105,7 +1150,9 @@ fn run_build(
     let structure = if rna {
         // RNA path: only --seq is supported (no FASTA reader for RNA yet).
         if from_fasta.is_some() {
-            return Err(anyhow!("--from-fasta is not supported with --rna; pass --seq AUGC..."));
+            return Err(anyhow!(
+                "--from-fasta is not supported with --rna; pass --seq AUGC..."
+            ));
         }
         let s = seq.ok_or_else(|| anyhow!("--rna requires --seq with A/U/G/C letters"))?;
         let nucleotides = parse_rna_seq(s)?;
@@ -1132,8 +1179,8 @@ fn run_build(
     };
 
     if let Some(path) = output {
-        let mut file = fs::File::create(path)
-            .with_context(|| format!("creating {}", path.display()))?;
+        let mut file =
+            fs::File::create(path).with_context(|| format!("creating {}", path.display()))?;
         write_pdb(&mut file, &structure, &title).context("writing PDB")?;
     } else {
         let stdout = std::io::stdout();
@@ -1153,8 +1200,7 @@ fn run_analyze(
     cluster_cutoff_a: Option<f64>,
     cluster_out_prefix: Option<&Path>,
 ) -> Result<()> {
-    let traj_bytes = fs::read(input)
-        .with_context(|| format!("reading {}", input.display()))?;
+    let traj_bytes = fs::read(input).with_context(|| format!("reading {}", input.display()))?;
     let frames = read_pdb_trajectory(traj_bytes.as_slice())
         .with_context(|| format!("parsing trajectory {}", input.display()))?;
     if frames.is_empty() {
@@ -1172,9 +1218,9 @@ fn run_analyze(
     };
 
     let mut sink: Box<dyn std::io::Write> = match output {
-        Some(p) => Box::new(
-            fs::File::create(p).with_context(|| format!("creating {}", p.display()))?,
-        ),
+        Some(p) => {
+            Box::new(fs::File::create(p).with_context(|| format!("creating {}", p.display()))?)
+        }
         None => Box::new(std::io::stdout()),
     };
     // Pre-compute clustering if requested. Needs all frames at once
@@ -1182,29 +1228,37 @@ fn run_analyze(
     let cluster_labels: Vec<usize> = if let Some(cutoff) = cluster_cutoff_a {
         let labels = geom::cluster_trajectory(&frames, cutoff);
         let sizes = geom::cluster_sizes(&labels);
-        eprintln!("clustering @ {:.2} Å Cα-RMSD cutoff: {} clusters", cutoff, sizes.len());
+        eprintln!(
+            "clustering @ {:.2} Å Cα-RMSD cutoff: {} clusters",
+            cutoff,
+            sizes.len()
+        );
         for (cid, count) in sizes.iter().take(10) {
-            eprintln!("  cluster {cid:>3}: {count:>4} frames ({:.1}%)", 100.0 * *count as f64 / frames.len() as f64);
+            eprintln!(
+                "  cluster {cid:>3}: {count:>4} frames ({:.1}%)",
+                100.0 * *count as f64 / frames.len() as f64
+            );
         }
         // Optional: dump one representative PDB per cluster (the medoid).
         if let Some(prefix) = cluster_out_prefix {
             let medoids = geom::cluster_medoids(&frames, &labels);
             for (cid, &frame_idx) in medoids.iter().enumerate() {
-                let path = prefix
-                    .as_os_str()
-                    .to_owned();
+                let path = prefix.as_os_str().to_owned();
                 let mut p = std::path::PathBuf::from(path);
                 p.set_file_name(format!(
                     "{}{cid}.pdb",
-                    prefix.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+                    prefix
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default()
                 ));
                 if let Some(parent) = p.parent() {
                     if !parent.as_os_str().is_empty() {
                         fs::create_dir_all(parent).ok();
                     }
                 }
-                let mut f = fs::File::create(&p)
-                    .with_context(|| format!("creating {}", p.display()))?;
+                let mut f =
+                    fs::File::create(&p).with_context(|| format!("creating {}", p.display()))?;
                 io::write_pdb(
                     &mut f,
                     &frames[frame_idx],
@@ -1221,7 +1275,11 @@ fn run_analyze(
     } else {
         Vec::new()
     };
-    let cluster_header = if cluster_cutoff_a.is_some() { "\tcluster_id" } else { "" };
+    let cluster_header = if cluster_cutoff_a.is_some() {
+        "\tcluster_id"
+    } else {
+        ""
+    };
     writeln!(
         sink,
         "# frame\trmsd_ca_A\trg_ca_A\tend_to_end_A\tn_residues\tn_atoms\tpct_helix\tpct_strand\tss_string{}",
@@ -1244,9 +1302,15 @@ fn run_analyze(
         let rg = geom::radius_of_gyration_ca(frame);
         let e2e = geom::end_to_end_ca(frame);
         last_rmsd = rmsd;
-        let rmsd_s = rmsd.map(|v| format!("{v:.3}")).unwrap_or_else(|| "NaN".into());
-        let rg_s = rg.map(|v| format!("{v:.3}")).unwrap_or_else(|| "NaN".into());
-        let e2e_s = e2e.map(|v| format!("{v:.3}")).unwrap_or_else(|| "NaN".into());
+        let rmsd_s = rmsd
+            .map(|v| format!("{v:.3}"))
+            .unwrap_or_else(|| "NaN".into());
+        let rg_s = rg
+            .map(|v| format!("{v:.3}"))
+            .unwrap_or_else(|| "NaN".into());
+        let e2e_s = e2e
+            .map(|v| format!("{v:.3}"))
+            .unwrap_or_else(|| "NaN".into());
         // DSSP-based secondary structure (Kabsch-Sander H-bond
         // detection). If the structure has no explicit `H` atoms
         // (e.g. heavy-atom-only PDB without our chain builder's
@@ -1303,9 +1367,7 @@ fn run_analyze(
                 min_rmsd_idx,
             );
         } else {
-            eprintln!(
-                "RMSD vs reference was NaN on every frame — sequences may not match"
-            );
+            eprintln!("RMSD vs reference was NaN on every frame — sequences may not match");
         }
     }
     if let Some(path) = contact_map {
@@ -1332,8 +1394,8 @@ fn run_analyze(
         }
         let map = geom::contact_map_ca(&kept, contact_cutoff_a)
             .ok_or_else(|| anyhow!("contact map needs ≥1 frame with consistent residue counts"))?;
-        let mut f = fs::File::create(path)
-            .with_context(|| format!("creating {}", path.display()))?;
+        let mut f =
+            fs::File::create(path).with_context(|| format!("creating {}", path.display()))?;
         writeln!(
             f,
             "# res_i\tres_j\tfreq\t# {} fully-grown frames, cutoff {} Å",

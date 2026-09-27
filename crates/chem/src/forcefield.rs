@@ -27,13 +27,13 @@ use crate::nucleotide::Nucleotide;
 
 #[derive(Debug, Clone, Copy)]
 pub struct BondParams {
-    pub k: f64,    // kcal/mol/Å²
-    pub r0: f64,   // Å
+    pub k: f64,  // kcal/mol/Å²
+    pub r0: f64, // Å
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct AngleParams {
-    pub k: f64,        // kcal/mol/rad²
+    pub k: f64, // kcal/mol/rad²
     pub theta0_deg: f64,
 }
 
@@ -48,7 +48,7 @@ pub struct DihedralTerm {
 
 #[derive(Debug, Clone, Copy)]
 pub struct ImproperParams {
-    pub k: f64,         // kcal/mol
+    pub k: f64, // kcal/mol
     pub psi0_deg: f64,
 }
 
@@ -219,11 +219,19 @@ impl ForceField {
 }
 
 fn canonical_pair(a: AtomType, b: AtomType) -> (AtomType, AtomType) {
-    if a <= b { (a, b) } else { (b, a) }
+    if a <= b {
+        (a, b)
+    } else {
+        (b, a)
+    }
 }
 
 fn canonical_triple(a: AtomType, b: AtomType, c: AtomType) -> (AtomType, AtomType, AtomType) {
-    if a <= c { (a, b, c) } else { (c, b, a) }
+    if a <= c {
+        (a, b, c)
+    } else {
+        (c, b, a)
+    }
 }
 
 fn canonical_quad(
@@ -415,9 +423,16 @@ fn parse_bond_line(line: &str, ff: &mut ForceField) {
         return;
     }
     let (AtomTypeOrWildcard::Specific(a), AtomTypeOrWildcard::Specific(b)) =
-        (parse_atom(tokens[0]), parse_atom(tokens[1])) else { return };
-    let Ok(k) = tokens[2].parse::<f64>() else { return };
-    let Ok(r0) = tokens[3].parse::<f64>() else { return };
+        (parse_atom(tokens[0]), parse_atom(tokens[1]))
+    else {
+        return;
+    };
+    let Ok(k) = tokens[2].parse::<f64>() else {
+        return;
+    };
+    let Ok(r0) = tokens[3].parse::<f64>() else {
+        return;
+    };
     let key = canonical_pair(a, b);
     ff.bonds.entry(key).or_insert(BondParams { k, r0 });
 }
@@ -435,13 +450,20 @@ fn parse_angle_line(line: &str, ff: &mut ForceField) {
         parse_atom(tokens[0]),
         parse_atom(tokens[1]),
         parse_atom(tokens[2]),
-    ) else {
+    )
+    else {
         return;
     };
-    let Ok(k) = tokens[3].parse::<f64>() else { return };
-    let Ok(theta0_deg) = tokens[4].parse::<f64>() else { return };
+    let Ok(k) = tokens[3].parse::<f64>() else {
+        return;
+    };
+    let Ok(theta0_deg) = tokens[4].parse::<f64>() else {
+        return;
+    };
     let key = canonical_triple(a, b, c);
-    ff.angles.entry(key).or_insert(AngleParams { k, theta0_deg });
+    ff.angles
+        .entry(key)
+        .or_insert(AngleParams { k, theta0_deg });
 }
 
 fn parse_dihedral_line(line: &str, ff: &mut ForceField) {
@@ -453,9 +475,15 @@ fn parse_dihedral_line(line: &str, ff: &mut ForceField) {
     let b = parse_atom(tokens[1]);
     let c = parse_atom(tokens[2]);
     let d = parse_atom(tokens[3]);
-    let Ok(k) = tokens[4].parse::<f64>() else { return };
-    let Ok(n) = tokens[5].parse::<u32>() else { return };
-    let Ok(delta_deg) = tokens[6].parse::<f64>() else { return };
+    let Ok(k) = tokens[4].parse::<f64>() else {
+        return;
+    };
+    let Ok(n) = tokens[5].parse::<u32>() else {
+        return;
+    };
+    let Ok(delta_deg) = tokens[6].parse::<f64>() else {
+        return;
+    };
     let term = DihedralTerm { k, n, delta_deg };
     match (a, b, c, d) {
         (
@@ -489,9 +517,13 @@ fn parse_improper_line(line: &str, ff: &mut ForceField) {
     let b = parse_atom(tokens[1]);
     let c = parse_atom(tokens[2]);
     let d = parse_atom(tokens[3]);
-    let Ok(k) = tokens[4].parse::<f64>() else { return };
+    let Ok(k) = tokens[4].parse::<f64>() else {
+        return;
+    };
     // tokens[5] is a placeholder (always 0)
-    let Ok(psi0_deg) = tokens[6].parse::<f64>() else { return };
+    let Ok(psi0_deg) = tokens[6].parse::<f64>() else {
+        return;
+    };
     let params = ImproperParams { k, psi0_deg };
     match (a, b, c, d) {
         (
@@ -613,8 +645,12 @@ fn parse_nonbonded_line(line: &str, ff: &mut ForceField) {
         return;
     };
     // tokens[1] is "ignored" (always 0 in CHARMM)
-    let Ok(eps_signed) = tokens[2].parse::<f64>() else { return };
-    let Ok(rmin_half) = tokens[3].parse::<f64>() else { return };
+    let Ok(eps_signed) = tokens[2].parse::<f64>() else {
+        return;
+    };
+    let Ok(rmin_half) = tokens[3].parse::<f64>() else {
+        return;
+    };
     let mut params = NonbondedParams {
         epsilon: -eps_signed, // CHARMM stores -ε, we want positive ε
         rmin_half,
@@ -623,9 +659,7 @@ fn parse_nonbonded_line(line: &str, ff: &mut ForceField) {
     };
     if tokens.len() >= 7 {
         // 1-4 LJ parameters present.
-        if let (Ok(eps14), Ok(rmin14)) =
-            (tokens[5].parse::<f64>(), tokens[6].parse::<f64>())
-        {
+        if let (Ok(eps14), Ok(rmin14)) = (tokens[5].parse::<f64>(), tokens[6].parse::<f64>()) {
             params.epsilon_14 = Some(-eps14);
             params.rmin_half_14 = Some(rmin14);
         }
@@ -694,7 +728,9 @@ fn parse_rtf_charges(text: &str, ff: &mut ForceField) {
         let charmm_name = tokens.next().unwrap_or("");
         let _atom_type = tokens.next().unwrap_or("");
         let charge_str = tokens.next().unwrap_or("");
-        let Ok(charge) = charge_str.parse::<f64>() else { continue };
+        let Ok(charge) = charge_str.parse::<f64>() else {
+            continue;
+        };
         let pdb_name = charmm_to_pdb_atom_name(aa, charmm_name);
         ff.partial_charges.insert((aa, pdb_name.to_owned()), charge);
     }
@@ -736,10 +772,14 @@ fn charmm_to_pdb_atom_name(aa: AminoAcid, charmm: &str) -> &'static str {
         (Cys, "HG1") => "HG",
 
         // CB methylene shift (residues whose Cβ has 2 hydrogens):
-        (Leu | Met | Pro | Ser | Cys | Asn | Gln | Asp | Glu
-            | Lys | Arg | His | Phe | Tyr | Trp, "HB1") => "HB2",
-        (Leu | Met | Pro | Ser | Cys | Asn | Gln | Asp | Glu
-            | Lys | Arg | His | Phe | Tyr | Trp, "HB2") => "HB3",
+        (
+            Leu | Met | Pro | Ser | Cys | Asn | Gln | Asp | Glu | Lys | Arg | His | Phe | Tyr | Trp,
+            "HB1",
+        ) => "HB2",
+        (
+            Leu | Met | Pro | Ser | Cys | Asn | Gln | Asp | Glu | Lys | Arg | His | Phe | Tyr | Trp,
+            "HB2",
+        ) => "HB3",
 
         // CG methylene shift (residues whose Cγ has 2 hydrogens):
         (Met | Pro | Gln | Glu | Lys | Arg, "HG1") => "HG2",
@@ -811,12 +851,15 @@ fn parse_rtf_rna_charges(text: &str, ff: &mut ForceField) {
         let charmm_name = tokens.next().unwrap_or("");
         let _atom_type = tokens.next().unwrap_or("");
         let charge_str = tokens.next().unwrap_or("");
-        let Ok(charge) = charge_str.parse::<f64>() else { continue };
+        let Ok(charge) = charge_str.parse::<f64>() else {
+            continue;
+        };
         let pdb_name = charmm_to_pdb_rna_name(charmm_name);
         if pdb_name.is_empty() {
             continue;
         }
-        ff.rna_partial_charges.insert((nt, pdb_name.to_owned()), charge);
+        ff.rna_partial_charges
+            .insert((nt, pdb_name.to_owned()), charge);
     }
 }
 
@@ -935,7 +978,9 @@ mod tests {
     fn known_angle_params() {
         // N-CT1-C: backbone CA angle, has standard CHARMM value.
         let ff = standard();
-        let p = ff.angle(AtomType::NH1, AtomType::CT1, AtomType::C).expect("NH1-CT1-C");
+        let p = ff
+            .angle(AtomType::NH1, AtomType::CT1, AtomType::C)
+            .expect("NH1-CT1-C");
         assert!(p.k > 0.0);
         assert!((p.theta0_deg - 110.0).abs() < 15.0);
     }
@@ -957,7 +1002,8 @@ mod tests {
         // Most CT3 / CT2 dihedrals are wildcard X-CT3-CT2-X form.
         let ff = standard();
         // Should resolve via wildcard.
-        let _ = ff.dihedral(AtomType::HA3, AtomType::CT3, AtomType::CT2, AtomType::HA2)
+        let _ = ff
+            .dihedral(AtomType::HA3, AtomType::CT3, AtomType::CT2, AtomType::HA2)
             .expect("HA3-CT3-CT2-HA2 via wildcard");
     }
 
@@ -965,12 +1011,18 @@ mod tests {
     fn partial_charges_loaded() {
         let ff = standard();
         // Backbone N and CA charges are well known.
-        let n_charge = ff.partial_charge(AminoAcid::Ala, "N").expect("Ala N charge");
+        let n_charge = ff
+            .partial_charge(AminoAcid::Ala, "N")
+            .expect("Ala N charge");
         assert!((n_charge - (-0.47)).abs() < 0.01);
-        let ca_charge = ff.partial_charge(AminoAcid::Ala, "CA").expect("Ala CA charge");
+        let ca_charge = ff
+            .partial_charge(AminoAcid::Ala, "CA")
+            .expect("Ala CA charge");
         assert!((ca_charge - 0.07).abs() < 0.01);
         // The amide H in PDB-named form.
-        let h_charge = ff.partial_charge(AminoAcid::Ala, "H").expect("Ala H charge");
+        let h_charge = ff
+            .partial_charge(AminoAcid::Ala, "H")
+            .expect("Ala H charge");
         assert!((h_charge - 0.31).abs() < 0.01);
     }
 
@@ -999,10 +1051,14 @@ mod tests {
     fn histidine_uses_hsd_charges() {
         let ff = standard();
         // HSD has HD1 with +0.32 (the proton on ND1).
-        let hd1 = ff.partial_charge(AminoAcid::His, "HD1").expect("His HD1 charge");
+        let hd1 = ff
+            .partial_charge(AminoAcid::His, "HD1")
+            .expect("His HD1 charge");
         assert!((hd1 - 0.32).abs() < 0.02);
         // ND1 in HSD has -0.36.
-        let nd1 = ff.partial_charge(AminoAcid::His, "ND1").expect("His ND1 charge");
+        let nd1 = ff
+            .partial_charge(AminoAcid::His, "ND1")
+            .expect("His ND1 charge");
         assert!((nd1 - (-0.36)).abs() < 0.02);
     }
 
@@ -1035,7 +1091,8 @@ mod tests {
     fn rna_partial_charges_loaded() {
         let ff = standard();
         // Phosphate P: +1.50 in CHARMM27.
-        let p = ff.partial_charge_rna(Nucleotide::Adenine, "P")
+        let p = ff
+            .partial_charge_rna(Nucleotide::Adenine, "P")
             .expect("P charge on adenine");
         assert!((p - 1.50).abs() < 0.01);
         // OP1 (anionic phosphate O): -0.78.
@@ -1066,13 +1123,18 @@ mod tests {
         // Every atom placed by the RNA builder should have a charge
         // loaded — sanity check for the name-translation table.
         let ff = standard();
-        for nt in [Nucleotide::Adenine, Nucleotide::Uracil,
-                   Nucleotide::Guanine, Nucleotide::Cytosine] {
+        for nt in [
+            Nucleotide::Adenine,
+            Nucleotide::Uracil,
+            Nucleotide::Guanine,
+            Nucleotide::Cytosine,
+        ] {
             for (name, _) in nt.all_atoms() {
                 assert!(
                     ff.partial_charge_rna(nt, name).is_some(),
                     "{:?} atom {} has no CHARMM27 partial charge",
-                    nt, name,
+                    nt,
+                    name,
                 );
             }
         }
@@ -1084,9 +1146,14 @@ mod tests {
         // charge of -1.0 (the anionic phosphate). Sum up all the
         // CHARMM27 atomic charges and verify.
         let ff = standard();
-        for nt in [Nucleotide::Adenine, Nucleotide::Uracil,
-                   Nucleotide::Guanine, Nucleotide::Cytosine] {
-            let sum: f64 = nt.all_atoms()
+        for nt in [
+            Nucleotide::Adenine,
+            Nucleotide::Uracil,
+            Nucleotide::Guanine,
+            Nucleotide::Cytosine,
+        ] {
+            let sum: f64 = nt
+                .all_atoms()
                 .iter()
                 .map(|(name, _)| ff.partial_charge_rna(nt, name).unwrap_or(0.0))
                 .sum();
@@ -1107,7 +1174,12 @@ mod tests {
         for &ca in &ca_classes {
             for &n in &next_ns {
                 let g = ff.cmap(ca, n);
-                assert!(g.is_some(), "missing CMAP for (CA={:?}, N_next={:?})", ca, n);
+                assert!(
+                    g.is_some(),
+                    "missing CMAP for (CA={:?}, N_next={:?})",
+                    ca,
+                    n
+                );
                 assert_eq!(g.unwrap().data.len(), 24 * 24);
                 total += 1;
             }

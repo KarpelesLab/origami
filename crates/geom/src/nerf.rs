@@ -91,7 +91,14 @@ mod tests {
         ];
         for _ in 0..5 {
             let n = atoms.len();
-            let next = place_atom(atoms[n - 3], atoms[n - 2], atoms[n - 1], 1.5, deg(109.47), deg(180.0));
+            let next = place_atom(
+                atoms[n - 3],
+                atoms[n - 2],
+                atoms[n - 1],
+                1.5,
+                deg(109.47),
+                deg(180.0),
+            );
             atoms.push(next);
         }
         // All atoms share z = 0 (the chain stays in the original plane).

@@ -62,9 +62,8 @@ pub fn add_gb_forces_soa(
     // step, which dominated GB cost for short-running proteins.
     let _ = crate::gb::compute_born_radii_into_scratch(structure, scratch);
     let n = scratch.n;
-    let prefactor_kj = kcal_to_kj(
-        (1.0 / EPSILON_SOLUTE - 1.0 / EPSILON_WATER) * COULOMB_CONST_KCAL_A_PER_E2,
-    );
+    let prefactor_kj =
+        kcal_to_kj((1.0 / EPSILON_SOLUTE - 1.0 / EPSILON_WATER) * COULOMB_CONST_KCAL_A_PER_E2);
     let cutoff_sq = cutoff_a * cutoff_a;
 
     // Same threshold logic as the AoS path.
@@ -273,9 +272,13 @@ mod tests {
             for i in 0..n {
                 for j in (i + 1)..n {
                     let qq = charges[i] * charges[j];
-                    if qq == 0.0 { continue; }
+                    if qq == 0.0 {
+                        continue;
+                    }
                     let r2 = (positions[i] - positions[j]).norm_squared();
-                    if r2 > cutoff_sq { continue; }
+                    if r2 > cutoff_sq {
+                        continue;
+                    }
                     let rprod = frozen_radii[i] * frozen_radii[j];
                     let f_gb = (r2 + rprod * (-r2 / (4.0 * rprod)).exp()).sqrt();
                     pair_e += 2.0 * prefactor_kj * qq / f_gb;
@@ -297,7 +300,11 @@ mod tests {
                 let an = forces[i][axis];
                 assert!(
                     (an - numeric).abs() < 1e-1,
-                    "atom {} axis {}: analytical={:.4}, numeric={:.4}", i, axis, an, numeric
+                    "atom {} axis {}: analytical={:.4}, numeric={:.4}",
+                    i,
+                    axis,
+                    an,
+                    numeric
                 );
             }
         }
@@ -322,20 +329,36 @@ mod tests {
         // builds the GB-Verlet pair list, second reuses it (zero
         // displacement). Both must give bit-identical forces.
         let s = build_extended_chain(&[
-            AminoAcid::Lys, AminoAcid::Glu, AminoAcid::Ala, AminoAcid::Phe,
-        ]).unwrap();
+            AminoAcid::Lys,
+            AminoAcid::Glu,
+            AminoAcid::Ala,
+            AminoAcid::Phe,
+        ])
+        .unwrap();
         let g = geom::build_topology_graph(&s);
         let ff = standard_ff();
         let mut scratch = crate::scratch::ForceScratch::new(&s, &g, ff);
 
         scratch.zero_forces();
         add_gb_forces_soa(&mut scratch, &s, ff, GB_DEFAULT_CUTOFF_A);
-        let first: Vec<f64> = scratch.fxs.iter().chain(&scratch.fys).chain(&scratch.fzs).copied().collect();
+        let first: Vec<f64> = scratch
+            .fxs
+            .iter()
+            .chain(&scratch.fys)
+            .chain(&scratch.fzs)
+            .copied()
+            .collect();
         assert!(scratch.gb_verlet_valid, "first call should build the list");
 
         scratch.zero_forces();
         add_gb_forces_soa(&mut scratch, &s, ff, GB_DEFAULT_CUTOFF_A);
-        let second: Vec<f64> = scratch.fxs.iter().chain(&scratch.fys).chain(&scratch.fzs).copied().collect();
+        let second: Vec<f64> = scratch
+            .fxs
+            .iter()
+            .chain(&scratch.fys)
+            .chain(&scratch.fzs)
+            .copied()
+            .collect();
 
         for (a, b) in first.iter().zip(&second) {
             assert!((a - b).abs() < 1e-12, "cached GB call diverged: {a} vs {b}");

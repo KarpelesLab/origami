@@ -30,15 +30,20 @@ fn read_fixture(path: &str) -> geom::Structure {
 fn brief_minimise(s: &mut geom::Structure, steps: usize) {
     let g = build_topology_graph(s);
     let ff = standard_ff();
-    let _ = minimize(s, &g, ff, MinimizeOptions {
-        algorithm: Algorithm::Lbfgs,
-        max_steps: steps,
-        gradient_tol: 50.0,
-        energy_tol: 1.0,
-        max_step_a: 0.1,
-        include_sasa: false,
-        include_cmap: false,
-    });
+    let _ = minimize(
+        s,
+        &g,
+        ff,
+        MinimizeOptions {
+            algorithm: Algorithm::Lbfgs,
+            max_steps: steps,
+            gradient_tol: 50.0,
+            energy_tol: 1.0,
+            max_step_a: 0.1,
+            include_sasa: false,
+            include_cmap: false,
+        },
+    );
 }
 
 fn run_gpu_md(s: &mut geom::Structure, n_steps: usize, seed: u64) -> bool {
@@ -46,10 +51,7 @@ fn run_gpu_md(s: &mut geom::Structure, n_steps: usize, seed: u64) -> bool {
     let ff = standard_ff();
     let n = s.atom_count();
     let mut integ = match FullGpuIntegrator::new(
-        s, &g, ff,
-        /*dt_fs=*/ 1.0,
-        /*gamma_ps_inv=*/ 2.0,
-        /*temperature_k=*/ 310.0,
+        s, &g, ff, /*dt_fs=*/ 1.0, /*gamma_ps_inv=*/ 2.0, /*temperature_k=*/ 310.0,
         seed,
     ) {
         Ok(x) => x,
@@ -71,33 +73,41 @@ fn run_gpu_md(s: &mut geom::Structure, n_steps: usize, seed: u64) -> bool {
 
 #[test]
 fn uucg_hairpin_stays_near_native_during_2ps_gpu_md() {
-    if GpuContext::get().is_err() { eprintln!("GPU unavailable, skipping"); return; }
+    if GpuContext::get().is_err() {
+        eprintln!("GPU unavailable, skipping");
+        return;
+    }
     let mut s = read_fixture("../io/tests/fixtures/2KOC_uucg_hairpin.pdb");
     brief_minimise(&mut s, 100);
     let initial = s.clone();
     assert!(run_gpu_md(&mut s, 2000, 7), "UUCG GPU trajectory diverged");
     let rmsd = rmsd_p(&initial, &s).expect("rmsd_p UUCG GPU");
     eprintln!("UUCG (2KOC) GPU MD 2 ps: P-RMSD = {rmsd:.3} Å");
-    assert!(rmsd < 3.5,
-        "UUCG GPU hairpin P-RMSD {rmsd} > 3.5 Å — GPU stack may not retain the fold");
+    assert!(
+        rmsd < 3.5,
+        "UUCG GPU hairpin P-RMSD {rmsd} > 3.5 Å — GPU stack may not retain the fold"
+    );
 }
 
 #[test]
 fn gnra_hairpin_stays_near_native_during_2ps_gpu_md() {
-    if GpuContext::get().is_err() { return; }
+    if GpuContext::get().is_err() {
+        return;
+    }
     let mut s = read_fixture("../io/tests/fixtures/1ZIH_gnra_tetraloop.pdb");
     brief_minimise(&mut s, 100);
     let initial = s.clone();
     assert!(run_gpu_md(&mut s, 2000, 11), "GNRA GPU trajectory diverged");
     let rmsd = rmsd_p(&initial, &s).expect("rmsd_p GNRA GPU");
     eprintln!("GNRA (1ZIH) GPU MD 2 ps: P-RMSD = {rmsd:.3} Å");
-    assert!(rmsd < 3.5,
-        "GNRA GPU hairpin P-RMSD {rmsd} > 3.5 Å");
+    assert!(rmsd < 3.5, "GNRA GPU hairpin P-RMSD {rmsd} > 3.5 Å");
 }
 
 #[test]
 fn sarcin_ricin_stays_near_native_during_2ps_gpu_md() {
-    if GpuContext::get().is_err() { return; }
+    if GpuContext::get().is_err() {
+        return;
+    }
     let mut s = read_fixture("../io/tests/fixtures/483D_sarcin_ricin.pdb");
     let _ = geom::add_rna_hydrogens(&mut s);
     brief_minimise(&mut s, 300);
@@ -105,6 +115,5 @@ fn sarcin_ricin_stays_near_native_during_2ps_gpu_md() {
     assert!(run_gpu_md(&mut s, 2000, 13), "SRL GPU trajectory diverged");
     let rmsd = rmsd_p(&initial, &s).expect("rmsd_p SRL GPU");
     eprintln!("SRL (483D) GPU MD 2 ps: P-RMSD = {rmsd:.3} Å");
-    assert!(rmsd < 4.0,
-        "SRL GPU P-RMSD {rmsd} > 4 Å");
+    assert!(rmsd < 4.0, "SRL GPU P-RMSD {rmsd} > 4 Å");
 }

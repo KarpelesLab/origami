@@ -27,14 +27,24 @@ fn all_twenty_residues_build_cleanly() {
         let o = res.position("O").unwrap();
         // Within tolerance because everything is constructed via NeRF, which
         // is exact.
-        assert!((measure::distance(n, ca) - 1.458).abs() < 1e-6,
-            "residue {} ({:?}): N-CA = {}", i, res.aa(), measure::distance(n, ca));
+        assert!(
+            (measure::distance(n, ca) - 1.458).abs() < 1e-6,
+            "residue {} ({:?}): N-CA = {}",
+            i,
+            res.aa(),
+            measure::distance(n, ca)
+        );
         assert!((measure::distance(ca, c) - 1.525).abs() < 1e-6);
         assert!((measure::distance(c, o) - 1.231).abs() < 1e-6);
         if i > 0 {
             let prev_c = structure.residues[i - 1].position("C").unwrap();
-            assert!((measure::distance(prev_c, n) - 1.329).abs() < 1e-6,
-                "residue {} ({:?}): prev_C-N = {}", i, res.aa(), measure::distance(prev_c, n));
+            assert!(
+                (measure::distance(prev_c, n) - 1.329).abs() < 1e-6,
+                "residue {} ({:?}): prev_C-N = {}",
+                i,
+                res.aa(),
+                measure::distance(prev_c, n)
+            );
         }
     }
 
@@ -47,8 +57,10 @@ fn all_twenty_residues_build_cleanly() {
             assert!(
                 d > 0.7,
                 "atoms too close: residue {} {} <-> residue {} {} = {} Å",
-                atoms[i].0, atoms[i].1.name,
-                atoms[j].0, atoms[j].1.name,
+                atoms[i].0,
+                atoms[i].1.name,
+                atoms[j].0,
+                atoms[j].1.name,
                 d
             );
         }
@@ -75,8 +87,12 @@ fn tryptophan_indole_is_approximately_planar() {
     // atoms should be within a small distance of that plane.
     let n_plane = (cd1 - cg).cross(&(cd2 - cg)).normalize();
     for (name, pt) in [
-        ("NE1", ne1), ("CE2", ce2), ("CE3", ce3),
-        ("CZ3", cz3), ("CZ2", cz2), ("CH2", ch2),
+        ("NE1", ne1),
+        ("CE2", ce2),
+        ("CE3", ce3),
+        ("CZ3", cz3),
+        ("CZ2", cz2),
+        ("CH2", ch2),
     ] {
         let d = (pt - cg).dot(&n_plane).abs();
         assert!(d < 0.05, "{name} is {d} Å out of indole plane");
@@ -97,9 +113,12 @@ fn phenylalanine_ring_is_planar_and_regular() {
 
     // Bond lengths.
     for (a, b, label) in [
-        (cg, cd1, "CG-CD1"), (cg, cd2, "CG-CD2"),
-        (cd1, ce1, "CD1-CE1"), (cd2, ce2, "CD2-CE2"),
-        (ce1, cz, "CE1-CZ"), (ce2, cz, "CE2-CZ"),
+        (cg, cd1, "CG-CD1"),
+        (cg, cd2, "CG-CD2"),
+        (cd1, ce1, "CD1-CE1"),
+        (cd2, ce2, "CD2-CE2"),
+        (ce1, cz, "CE1-CZ"),
+        (ce2, cz, "CE2-CZ"),
     ] {
         let d = measure::distance(a, b);
         assert!((d - 1.39).abs() < 0.02, "{label} = {d} Å");
@@ -126,7 +145,8 @@ fn every_built_atom_has_an_atom_type() {
             assert!(
                 cls.is_some(),
                 "{:?}: atom {:?} not classified",
-                aa, atom.name
+                aa,
+                atom.name
             );
             // Element must agree.
             let t = cls.unwrap();
@@ -134,7 +154,10 @@ fn every_built_atom_has_an_atom_type() {
                 t.element(),
                 atom.element,
                 "{:?} {:?}: classifier element {:?} != topology element {:?}",
-                aa, atom.name, t.element(), atom.element
+                aa,
+                atom.name,
+                t.element(),
+                atom.element
             );
         }
     }

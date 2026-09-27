@@ -31,15 +31,20 @@ fn read_fixture(path: &str) -> geom::Structure {
 fn brief_minimise(s: &mut geom::Structure, steps: usize) {
     let g = build_topology_graph(s);
     let ff = standard_ff();
-    let _ = minimize(s, &g, ff, MinimizeOptions {
-        algorithm: Algorithm::Lbfgs,
-        max_steps: steps,
-        gradient_tol: 50.0,
-        energy_tol: 1.0,
-        max_step_a: 0.1,
-        include_sasa: false,
-        include_cmap: false,
-    });
+    let _ = minimize(
+        s,
+        &g,
+        ff,
+        MinimizeOptions {
+            algorithm: Algorithm::Lbfgs,
+            max_steps: steps,
+            gradient_tol: 50.0,
+            energy_tol: 1.0,
+            max_step_a: 0.1,
+            include_sasa: false,
+            include_cmap: false,
+        },
+    );
 }
 
 fn run_short_md(s: &mut geom::Structure, seed: u64, steps: usize) -> dynamics::LangevinSummary {
@@ -80,8 +85,10 @@ fn uucg_hairpin_stays_near_native_during_2ps_md() {
     // backbones are stiffer per nucleotide but the hairpin loop has
     // more conformational freedom.  3.5 Å keeps the same physical
     // meaning ("the fold didn't fall apart").
-    assert!(rmsd < 3.5,
-        "UUCG hairpin P-RMSD {rmsd} > 3.5 Å — force field may not retain the fold");
+    assert!(
+        rmsd < 3.5,
+        "UUCG hairpin P-RMSD {rmsd} > 3.5 Å — force field may not retain the fold"
+    );
 }
 
 #[test]
@@ -93,8 +100,10 @@ fn gnra_hairpin_stays_near_native_during_2ps_md() {
     assert!(!summary.diverged, "GNRA trajectory diverged");
     let rmsd = rmsd_p(&initial, &s).expect("rmsd_p GNRA");
     eprintln!("GNRA (1ZIH) native MD 2 ps: P-RMSD = {rmsd:.3} Å");
-    assert!(rmsd < 3.5,
-        "GNRA hairpin P-RMSD {rmsd} > 3.5 Å — force field may not retain the fold");
+    assert!(
+        rmsd < 3.5,
+        "GNRA hairpin P-RMSD {rmsd} > 3.5 Å — force field may not retain the fold"
+    );
 }
 
 #[test]
@@ -118,6 +127,8 @@ fn sarcin_ricin_stays_near_native_during_2ps_md() {
     // motif — slightly more conformational freedom than a hairpin.
     // 4 Å is the same physical "fold intact" bar as the tetraloops
     // get with their 3.5 Å bound, just scaled.
-    assert!(rmsd < 4.0,
-        "SRL P-RMSD {rmsd} > 4 Å — force field may not retain the fold");
+    assert!(
+        rmsd < 4.0,
+        "SRL P-RMSD {rmsd} > 4 Å — force field may not retain the fold"
+    );
 }

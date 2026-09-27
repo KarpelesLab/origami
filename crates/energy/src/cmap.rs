@@ -62,10 +62,7 @@ pub fn bilinear_lookup(grid: &CmapGrid, phi_rad: f64, psi_rad: f64) -> f64 {
     let g10 = grid.at(i + 1, j);
     let g01 = grid.at(i, j + 1);
     let g11 = grid.at(i + 1, j + 1);
-    (1.0 - fx) * (1.0 - fy) * g00
-        + fx * (1.0 - fy) * g10
-        + (1.0 - fx) * fy * g01
-        + fx * fy * g11
+    (1.0 - fx) * (1.0 - fy) * g00 + fx * (1.0 - fy) * g10 + (1.0 - fx) * fy * g01 + fx * fy * g11
 }
 
 /// Bilinear partial derivatives (∂E/∂φ, ∂E/∂ψ) at the same point.
@@ -111,7 +108,10 @@ fn wrap_180(deg: f64) -> f64 {
 /// force path.
 pub(crate) fn build_atom_index_and_types(
     structure: &Structure,
-) -> (Vec<std::collections::HashMap<&'static str, usize>>, Vec<AtomType>) {
+) -> (
+    Vec<std::collections::HashMap<&'static str, usize>>,
+    Vec<AtomType>,
+) {
     let mut atom_index: Vec<std::collections::HashMap<&'static str, usize>> =
         Vec::with_capacity(structure.residues.len());
     let mut atom_types: Vec<AtomType> = Vec::with_capacity(structure.atom_count());
@@ -120,9 +120,8 @@ pub(crate) fn build_atom_index_and_types(
         let mut map = std::collections::HashMap::with_capacity(residue.atoms.len());
         for atom in &residue.atoms {
             map.insert(atom.name, global);
-            let ty = classify_atom(residue.monomer, atom.name).unwrap_or_else(|| {
-                panic!("unclassified atom {:?} {}", residue.monomer, atom.name)
-            });
+            let ty = classify_atom(residue.monomer, atom.name)
+                .unwrap_or_else(|| panic!("unclassified atom {:?} {}", residue.monomer, atom.name));
             atom_types.push(ty);
             global += 1;
         }
@@ -148,7 +147,11 @@ pub(crate) fn residue_phi_psi(
 ) -> Option<(f64, f64, AtomType, AtomType)> {
     // Bail on RNA / non-protein residues; CMAP is protein-only.
     structure.residues[ri].monomer.as_amino_acid()?;
-    structure.residues.get(ri.wrapping_sub(1))?.monomer.as_amino_acid()?;
+    structure
+        .residues
+        .get(ri.wrapping_sub(1))?
+        .monomer
+        .as_amino_acid()?;
     structure.residues.get(ri + 1)?.monomer.as_amino_acid()?;
     let prev_c = *atom_index[ri - 1].get("C")?;
     let cur_n = *atom_index[ri].get("N")?;
@@ -209,11 +212,21 @@ pub fn add_cmap_forces(
         {
             continue;
         }
-        let Some(&prev_c) = atom_index[ri - 1].get("C") else { continue };
-        let Some(&cur_n) = atom_index[ri].get("N") else { continue };
-        let Some(&cur_ca) = atom_index[ri].get("CA") else { continue };
-        let Some(&cur_c) = atom_index[ri].get("C") else { continue };
-        let Some(&next_n) = atom_index[ri + 1].get("N") else { continue };
+        let Some(&prev_c) = atom_index[ri - 1].get("C") else {
+            continue;
+        };
+        let Some(&cur_n) = atom_index[ri].get("N") else {
+            continue;
+        };
+        let Some(&cur_ca) = atom_index[ri].get("CA") else {
+            continue;
+        };
+        let Some(&cur_c) = atom_index[ri].get("C") else {
+            continue;
+        };
+        let Some(&next_n) = atom_index[ri + 1].get("N") else {
+            continue;
+        };
 
         let grid = match ff.cmap(atom_types[cur_ca], atom_types[next_n]) {
             Some(g) => g,
@@ -322,7 +335,8 @@ mod tests {
         // Tolerance: 1e-2 kJ/mol/Å absolute on every backbone-atom
         // axis.
         use geom::Vec3;
-        let mut s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
+        let mut s =
+            build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
         // Deterministic per-axis nudge so the chain isn't sitting on
         // a CMAP grid boundary.  Magnitude ~0.05 Å is enough to walk
         // φ and ψ ~1° off the nearest grid point without breaking
@@ -345,21 +359,21 @@ mod tests {
 
         // Locate the 5 atoms involved in the lone CMAP term:
         // C(0), N(1), CA(1), C(1), N(2).
-        let bump = |s: &geom::Structure, atom_idx: usize, axis: usize, eps: f64|
-                    -> geom::Structure {
-            let mut s2 = s.clone();
-            let mut count = 0usize;
-            'outer: for residue in &mut s2.residues {
-                for atom in &mut residue.atoms {
-                    if count == atom_idx {
-                        atom.position[axis] += eps;
-                        break 'outer;
+        let bump =
+            |s: &geom::Structure, atom_idx: usize, axis: usize, eps: f64| -> geom::Structure {
+                let mut s2 = s.clone();
+                let mut count = 0usize;
+                'outer: for residue in &mut s2.residues {
+                    for atom in &mut residue.atoms {
+                        if count == atom_idx {
+                            atom.position[axis] += eps;
+                            break 'outer;
+                        }
+                        count += 1;
                     }
-                    count += 1;
                 }
-            }
-            s2
-        };
+                s2
+            };
 
         let mut global = 0usize;
         let mut atom_indices = Vec::new();
@@ -401,8 +415,11 @@ mod tests {
         // Ala3 chain.  If they differ in sign, the energy and force
         // code must use the same one.
         let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
-        let positions: Vec<geom::Vec3> = s.residues.iter()
-            .flat_map(|r| r.atoms.iter().map(|a| a.position)).collect();
+        let positions: Vec<geom::Vec3> = s
+            .residues
+            .iter()
+            .flat_map(|r| r.atoms.iter().map(|a| a.position))
+            .collect();
         let mut atom_idx = std::collections::HashMap::new();
         let mut g_idx = 0;
         for (ri, r) in s.residues.iter().enumerate() {
@@ -415,10 +432,20 @@ mod tests {
         let n1 = atom_idx[&(1, "N".to_string())];
         let ca1 = atom_idx[&(1, "CA".to_string())];
         let c1 = atom_idx[&(1, "C".to_string())];
-        let phi_geom = geom::measure::dihedral(positions[c0], positions[n1], positions[ca1], positions[c1]);
+        let phi_geom =
+            geom::measure::dihedral(positions[c0], positions[n1], positions[ca1], positions[c1]);
         let (_, _, _, _, phi_fb) = crate::forces_bonded::dihedral_gradient(
-            positions[c0], positions[n1], positions[ca1], positions[c1]).unwrap();
-        eprintln!("phi geom: {:.4} rad ({:.2}°)", phi_geom, phi_geom.to_degrees());
+            positions[c0],
+            positions[n1],
+            positions[ca1],
+            positions[c1],
+        )
+        .unwrap();
+        eprintln!(
+            "phi geom: {:.4} rad ({:.2}°)",
+            phi_geom,
+            phi_geom.to_degrees()
+        );
         eprintln!("phi fb:   {:.4} rad ({:.2}°)", phi_fb, phi_fb.to_degrees());
     }
 
@@ -431,6 +458,11 @@ mod tests {
         let phi = -180.0_f64.to_radians();
         let psi = -180.0_f64.to_radians();
         let e = bilinear_lookup(grid, phi, psi);
-        assert!((e - grid.at(0, 0)).abs() < 1e-9, "expected {}, got {}", grid.at(0, 0), e);
+        assert!(
+            (e - grid.at(0, 0)).abs() < 1e-9,
+            "expected {}, got {}",
+            grid.at(0, 0),
+            e
+        );
     }
 }

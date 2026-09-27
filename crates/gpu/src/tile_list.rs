@@ -47,8 +47,14 @@ pub fn build_tile_interaction_list(
 
     // Per-tile bbox: [min_x, min_y, min_z, max_x, max_y, max_z].
     let mut bbox: Vec<[f32; 6]> = vec![
-        [f32::INFINITY, f32::INFINITY, f32::INFINITY,
-         f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
+        [
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY
+        ];
         n_tiles
     ];
     for atom_idx in 0..n_atoms {
@@ -56,8 +62,12 @@ pub fn build_tile_interaction_list(
         let p = positions_gpu_order[atom_idx];
         let b = &mut bbox[tile];
         for k in 0..3 {
-            if p[k] < b[k]     { b[k]     = p[k]; }
-            if p[k] > b[k + 3] { b[k + 3] = p[k]; }
+            if p[k] < b[k] {
+                b[k] = p[k];
+            }
+            if p[k] > b[k + 3] {
+                b[k + 3] = p[k];
+            }
         }
     }
 
@@ -79,8 +89,8 @@ pub fn build_tile_interaction_list(
             //   d_k = max(0, bi.min[k] - bj.max[k], bj.min[k] - bi.max[k])
             let mut d_sq = 0.0_f32;
             for k in 0..3 {
-                let lo = bi[k] - bj[k + 3];           // i_min - j_max
-                let hi = bj[k] - bi[k + 3];           // j_min - i_max
+                let lo = bi[k] - bj[k + 3]; // i_min - j_max
+                let hi = bj[k] - bi[k + 3]; // j_min - i_max
                 let d = lo.max(hi).max(0.0);
                 d_sq += d * d;
             }
@@ -124,7 +134,7 @@ mod tests {
             positions.push([0.0, 0.0, 0.0]);
         }
         for _ in 0..64 {
-            positions.push([1000.0, 0.0, 0.0]);  // far away
+            positions.push([1000.0, 0.0, 0.0]); // far away
         }
         let list = build_tile_interaction_list(&positions, 10.0);
         assert_eq!(list.n_tiles, 2);

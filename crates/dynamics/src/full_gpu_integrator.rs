@@ -29,13 +29,13 @@
 //! that's typically true for batches of 20-50 steps at dt = 1 fs.
 
 use chem::{classify_atom, AtomType, Element, ForceField};
-use energy::scratch::ForceScratch;
+use energy::forces_gb::GB_DEFAULT_CUTOFF_A_PUB;
 use energy::forces_nonbonded::ensure_verlet_list;
 use energy::gb::{
     ensure_gb_verlet_list, hct_scale_pub, intrinsic_radius_pub, BORN_RADIUS_CUTOFF_A_PUB,
     OBC_OFFSET_PUB,
 };
-use energy::forces_gb::GB_DEFAULT_CUTOFF_A_PUB;
+use energy::scratch::ForceScratch;
 use energy::units::{deg_to_rad, kcal_to_kj};
 use energy::DEFAULT_CUTOFF_A;
 use geom::{Structure, TopologyGraph, Vec3};
@@ -125,9 +125,9 @@ impl FullGpuIntegrator {
     ) -> Result<Self, gpu::context::GpuInitError> {
         let ctx = GpuContext::get()?;
         let n = structure.atom_count();
-        let atom_types = build_atom_types(structure);  // CPU-indexed
-        // First pass: gather per-atom data + initial positions in CPU
-        // order — the same order `structure.residues` walks.
+        let atom_types = build_atom_types(structure); // CPU-indexed
+                                                      // First pass: gather per-atom data + initial positions in CPU
+                                                      // order — the same order `structure.residues` walks.
         let mut masses_cpu: Vec<f32> = Vec::with_capacity(n);
         let mut charges_cpu: Vec<f32> = Vec::with_capacity(n);
         let mut rho_cpu: Vec<f32> = Vec::with_capacity(n);
@@ -152,9 +152,9 @@ impl FullGpuIntegrator {
         let atom_lj_data_cpu: Vec<[f32; 4]> = atom_types
             .iter()
             .map(|t| {
-                let p = ff.nonbonded(*t).unwrap_or_else(|| {
-                    panic!("no nonbonded params for {:?}", t)
-                });
+                let p = ff
+                    .nonbonded(*t)
+                    .unwrap_or_else(|| panic!("no nonbonded params for {:?}", t));
                 let eps14 = p.epsilon_14.unwrap_or(p.epsilon);
                 let rmh14 = p.rmin_half_14.unwrap_or(p.rmin_half);
                 [
@@ -176,9 +176,8 @@ impl FullGpuIntegrator {
         // stays in original order — we translate at the upload /
         // download boundaries.
         let (gpu_to_cpu, cpu_to_gpu) = morton_permutation(&positions_cpu);
-        let permute = |src: &[f32]| -> Vec<f32> {
-            (0..n).map(|g| src[gpu_to_cpu[g] as usize]).collect()
-        };
+        let permute =
+            |src: &[f32]| -> Vec<f32> { (0..n).map(|g| src[gpu_to_cpu[g] as usize]).collect() };
         let permute_vec4 = |src: &[[f32; 4]]| -> Vec<[f32; 4]> {
             (0..n).map(|g| src[gpu_to_cpu[g] as usize]).collect()
         };
@@ -204,16 +203,25 @@ impl FullGpuIntegrator {
             buf[bit / 32] |= 1u32 << (bit % 32);
         };
         for b in &graph.bonds {
-            set_bit(&mut exclusions,
-                cpu_to_gpu[b.a] as usize, cpu_to_gpu[b.b] as usize);
+            set_bit(
+                &mut exclusions,
+                cpu_to_gpu[b.a] as usize,
+                cpu_to_gpu[b.b] as usize,
+            );
         }
         for a in &graph.angles {
-            set_bit(&mut exclusions,
-                cpu_to_gpu[a.a] as usize, cpu_to_gpu[a.c] as usize);
+            set_bit(
+                &mut exclusions,
+                cpu_to_gpu[a.a] as usize,
+                cpu_to_gpu[a.c] as usize,
+            );
         }
         for d in &graph.dihedrals {
-            set_bit(&mut one_four,
-                cpu_to_gpu[d.a] as usize, cpu_to_gpu[d.d] as usize);
+            set_bit(
+                &mut one_four,
+                cpu_to_gpu[d.a] as usize,
+                cpu_to_gpu[d.d] as usize,
+            );
         }
 
         // Bonded term tables + per-atom CSR — built in GPU index
@@ -267,7 +275,13 @@ impl FullGpuIntegrator {
         };
 
         let integ = IntegratorPipeline::new(
-            ctx, n, &masses_f32, rng_seed, bonded_setup, nb_setup, gb_setup,
+            ctx,
+            n,
+            &masses_f32,
+            rng_seed,
+            bonded_setup,
+            nb_setup,
+            gb_setup,
         );
 
         // BAOAB Langevin params.
@@ -318,11 +332,7 @@ impl FullGpuIntegrator {
     /// `gammas_cpu_order` is in kJ/mol/Å² in CPU index order (use
     /// `energy::powersasa::default_sasa_gammas(structure)`).
     /// Internally translated to GPU/Morton order.
-    pub fn enable_sasa_mode(
-        &mut self,
-        structure: &Structure,
-        gammas_cpu_order: &[f64],
-    ) {
+    pub fn enable_sasa_mode(&mut self, structure: &Structure, gammas_cpu_order: &[f64]) {
         let n = self.n_atoms;
         assert_eq!(gammas_cpu_order.len(), n);
         // Per-atom radii (vdW + probe) in CPU order.
@@ -383,20 +393,26 @@ impl FullGpuIntegrator {
                 charges_cpu.push(ff.partial_charge_for(r.monomer, a.name).unwrap_or(0.0) as f32);
             }
         }
-        let atom_lj_data_cpu: Vec<[f32; 4]> = atom_types.iter().map(|t| {
-            let p = ff.nonbonded(*t).unwrap();
-            let eps_14 = p.epsilon_14.unwrap_or(p.epsilon);
-            let rmin_half_14 = p.rmin_half_14.unwrap_or(p.rmin_half);
-            [
-                (p.epsilon as f32) * KCAL_TO_KJ,
-                p.rmin_half as f32,
-                (eps_14 as f32) * KCAL_TO_KJ,
-                rmin_half_14 as f32,
-            ]
-        }).collect();
-        let charges: Vec<f32> = (0..n).map(|g| charges_cpu[self.gpu_to_cpu[g] as usize]).collect();
+        let atom_lj_data_cpu: Vec<[f32; 4]> = atom_types
+            .iter()
+            .map(|t| {
+                let p = ff.nonbonded(*t).unwrap();
+                let eps_14 = p.epsilon_14.unwrap_or(p.epsilon);
+                let rmin_half_14 = p.rmin_half_14.unwrap_or(p.rmin_half);
+                [
+                    (p.epsilon as f32) * KCAL_TO_KJ,
+                    p.rmin_half as f32,
+                    (eps_14 as f32) * KCAL_TO_KJ,
+                    rmin_half_14 as f32,
+                ]
+            })
+            .collect();
+        let charges: Vec<f32> = (0..n)
+            .map(|g| charges_cpu[self.gpu_to_cpu[g] as usize])
+            .collect();
         let atom_lj_data: Vec<[f32; 4]> = (0..n)
-            .map(|g| atom_lj_data_cpu[self.gpu_to_cpu[g] as usize]).collect();
+            .map(|g| atom_lj_data_cpu[self.gpu_to_cpu[g] as usize])
+            .collect();
         let n_words = (n * n).div_ceil(32);
         let mut exclusions = vec![0u32; n_words];
         let mut one_four = vec![0u32; n_words];
@@ -407,16 +423,25 @@ impl FullGpuIntegrator {
             buf[bit / 32] |= 1u32 << (bit % 32);
         };
         for b in &graph.bonds {
-            set_bit(&mut exclusions,
-                self.cpu_to_gpu[b.a] as usize, self.cpu_to_gpu[b.b] as usize);
+            set_bit(
+                &mut exclusions,
+                self.cpu_to_gpu[b.a] as usize,
+                self.cpu_to_gpu[b.b] as usize,
+            );
         }
         for a in &graph.angles {
-            set_bit(&mut exclusions,
-                self.cpu_to_gpu[a.a] as usize, self.cpu_to_gpu[a.c] as usize);
+            set_bit(
+                &mut exclusions,
+                self.cpu_to_gpu[a.a] as usize,
+                self.cpu_to_gpu[a.c] as usize,
+            );
         }
         for d in &graph.dihedrals {
-            set_bit(&mut one_four,
-                self.cpu_to_gpu[d.a] as usize, self.cpu_to_gpu[d.d] as usize);
+            set_bit(
+                &mut one_four,
+                self.cpu_to_gpu[d.a] as usize,
+                self.cpu_to_gpu[d.d] as usize,
+            );
         }
         self.integ.enable_tile_nb(TileNonbondedSetup {
             atom_lj_data: &atom_lj_data,
@@ -519,29 +544,39 @@ impl FullGpuIntegrator {
                 self.tile_start = list.tile_start;
                 self.tile_indices = list.tile_indices;
                 self.integ.update_tile_nb_list(
-                    &self.tile_count, &self.tile_start, &self.tile_indices,
+                    &self.tile_count,
+                    &self.tile_start,
+                    &self.tile_indices,
                 );
             } else {
                 // Verlet mode: translate pairs CPU→GPU then upload CSR.
-                let gpu_pairs: Vec<(u32, u32)> = self.scratch.verlet_pairs.iter()
+                let gpu_pairs: Vec<(u32, u32)> = self
+                    .scratch
+                    .verlet_pairs
+                    .iter()
                     .map(|&(a, b)| (self.cpu_to_gpu[a as usize], self.cpu_to_gpu[b as usize]))
                     .collect();
                 let (c, s, i) = pair_list_to_csr(self.n_atoms, &gpu_pairs);
                 self.nb_counts = c;
                 self.nb_starts = s;
                 self.nb_indices = i;
-                self.integ.update_nb_neighbours(&self.nb_counts, &self.nb_starts, &self.nb_indices);
+                self.integ
+                    .update_nb_neighbours(&self.nb_counts, &self.nb_starts, &self.nb_indices);
             }
         }
         if gb_rebuilt || self.gb_counts.is_empty() {
-            let gpu_pairs: Vec<(u32, u32)> = self.scratch.gb_verlet_pairs.iter()
+            let gpu_pairs: Vec<(u32, u32)> = self
+                .scratch
+                .gb_verlet_pairs
+                .iter()
                 .map(|&(a, b)| (self.cpu_to_gpu[a as usize], self.cpu_to_gpu[b as usize]))
                 .collect();
             let (c, s, i) = pair_list_to_csr(self.n_atoms, &gpu_pairs);
             self.gb_counts = c;
             self.gb_starts = s;
             self.gb_indices = i;
-            self.integ.update_gb_neighbours(&self.gb_counts, &self.gb_starts, &self.gb_indices);
+            self.integ
+                .update_gb_neighbours(&self.gb_counts, &self.gb_starts, &self.gb_indices);
         }
         // ---- SASA neighbour list ----
         //
@@ -577,7 +612,9 @@ impl FullGpuIntegrator {
                 for cpu_i in 0..n {
                     let ri = self.sasa_radii_cpu_order[cpu_i];
                     for cpu_j in 0..n {
-                        if cpu_i == cpu_j { continue; }
+                        if cpu_i == cpu_j {
+                            continue;
+                        }
                         let dx = self.scratch.xs[cpu_i] - self.scratch.xs[cpu_j];
                         let dy = self.scratch.ys[cpu_i] - self.scratch.ys[cpu_j];
                         let dz = self.scratch.zs[cpu_i] - self.scratch.zs[cpu_j];
@@ -605,7 +642,9 @@ impl FullGpuIntegrator {
                     self.sasa_indices.extend_from_slice(list);
                 }
                 self.integ.update_sasa_neighbours(
-                    &self.sasa_counts, &self.sasa_starts, &self.sasa_indices,
+                    &self.sasa_counts,
+                    &self.sasa_starts,
+                    &self.sasa_indices,
                 );
                 // Snapshot drift ref.
                 self.sasa_ref_x.copy_from_slice(&self.scratch.xs);
@@ -646,7 +685,9 @@ impl FullGpuIntegrator {
         out
     }
 
-    pub fn n_atoms(&self) -> usize { self.n_atoms }
+    pub fn n_atoms(&self) -> usize {
+        self.n_atoms
+    }
 }
 
 /// Translate a `PerXShakeData` built in CPU index space into a
@@ -698,9 +739,8 @@ fn build_atom_types(s: &Structure) -> Vec<AtomType> {
     for r in &s.residues {
         for a in &r.atoms {
             out.push(
-                classify_atom(r.monomer, a.name).unwrap_or_else(|| {
-                    panic!("unclassified atom {:?} {}", r.monomer, a.name)
-                }),
+                classify_atom(r.monomer, a.name)
+                    .unwrap_or_else(|| panic!("unclassified atom {:?} {}", r.monomer, a.name)),
             );
         }
     }
@@ -709,23 +749,30 @@ fn build_atom_types(s: &Structure) -> Vec<AtomType> {
 
 fn _silence_element(_: Element) {}
 
-fn build_bonds(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType],
-               cpu_to_gpu: &[u32], n: usize)
-    -> (Vec<BondTerm>, Vec<u32>, Vec<u32>, Vec<u32>)
-{
+fn build_bonds(
+    g: &TopologyGraph,
+    ff: &ForceField,
+    atom_types: &[AtomType],
+    cpu_to_gpu: &[u32],
+    n: usize,
+) -> (Vec<BondTerm>, Vec<u32>, Vec<u32>, Vec<u32>) {
     let mut terms: Vec<BondTerm> = Vec::new();
     let mut per_atom: Vec<Vec<u32>> = vec![Vec::new(); n];
     for b in &g.bonds {
         // FF lookup uses CPU index (atom_types[] is CPU-ordered).
-        let Some(p) = ff.bond(atom_types[b.a], atom_types[b.b]) else { continue };
+        let Some(p) = ff.bond(atom_types[b.a], atom_types[b.b]) else {
+            continue;
+        };
         let idx = terms.len() as u32;
         // Store GPU-translated atom indices so the kernel finds them
         // in the right slot of the reordered positions buffer.
         let ga = cpu_to_gpu[b.a];
         let gb = cpu_to_gpu[b.b];
         terms.push(BondTerm {
-            a: ga, b: gb,
-            k_kj: kcal_to_kj(p.k) as f32, r0_a: p.r0 as f32,
+            a: ga,
+            b: gb,
+            k_kj: kcal_to_kj(p.k) as f32,
+            r0_a: p.r0 as f32,
         });
         per_atom[ga as usize].push(idx);
         per_atom[gb as usize].push(idx);
@@ -734,22 +781,32 @@ fn build_bonds(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType],
     (terms, c, s, i)
 }
 
-fn build_angles(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType],
-                cpu_to_gpu: &[u32], n: usize)
-    -> (Vec<AngleTerm>, Vec<u32>, Vec<u32>, Vec<u32>)
-{
+fn build_angles(
+    g: &TopologyGraph,
+    ff: &ForceField,
+    atom_types: &[AtomType],
+    cpu_to_gpu: &[u32],
+    n: usize,
+) -> (Vec<AngleTerm>, Vec<u32>, Vec<u32>, Vec<u32>) {
     let mut terms: Vec<AngleTerm> = Vec::new();
     let mut per_atom: Vec<Vec<u32>> = vec![Vec::new(); n];
     for a in &g.angles {
-        let Some(p) = ff.angle(atom_types[a.a], atom_types[a.b], atom_types[a.c]) else { continue };
+        let Some(p) = ff.angle(atom_types[a.a], atom_types[a.b], atom_types[a.c]) else {
+            continue;
+        };
         let idx = terms.len() as u32;
         let ga = cpu_to_gpu[a.a];
         let gb = cpu_to_gpu[a.b];
         let gc = cpu_to_gpu[a.c];
         terms.push(AngleTerm {
-            a: ga, b: gb, c: gc, _pad: 0,
-            k_kj: kcal_to_kj(p.k) as f32, theta0_rad: deg_to_rad(p.theta0_deg) as f32,
-            _pad2: 0.0, _pad3: 0.0,
+            a: ga,
+            b: gb,
+            c: gc,
+            _pad: 0,
+            k_kj: kcal_to_kj(p.k) as f32,
+            theta0_rad: deg_to_rad(p.theta0_deg) as f32,
+            _pad2: 0.0,
+            _pad3: 0.0,
         });
         per_atom[ga as usize].push(idx);
         per_atom[gb as usize].push(idx);
@@ -759,16 +816,24 @@ fn build_angles(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType],
     (terms, c, s, i)
 }
 
-fn build_dihedrals(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType],
-                   cpu_to_gpu: &[u32], n: usize)
-    -> (Vec<DihedralTerm>, Vec<u32>, Vec<u32>, Vec<u32>)
-{
+fn build_dihedrals(
+    g: &TopologyGraph,
+    ff: &ForceField,
+    atom_types: &[AtomType],
+    cpu_to_gpu: &[u32],
+    n: usize,
+) -> (Vec<DihedralTerm>, Vec<u32>, Vec<u32>, Vec<u32>) {
     let mut terms: Vec<DihedralTerm> = Vec::new();
     let mut per_atom: Vec<Vec<u32>> = vec![Vec::new(); n];
     for d in &g.dihedrals {
         let Some(pterms) = ff.dihedral(
-            atom_types[d.a], atom_types[d.b], atom_types[d.c], atom_types[d.d],
-        ) else { continue };
+            atom_types[d.a],
+            atom_types[d.b],
+            atom_types[d.c],
+            atom_types[d.d],
+        ) else {
+            continue;
+        };
         let ga = cpu_to_gpu[d.a];
         let gb = cpu_to_gpu[d.b];
         let gc = cpu_to_gpu[d.c];
@@ -782,16 +847,25 @@ fn build_dihedrals(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType],
         // contributions just like multiple independent dihedrals.
         for chunk in pterms.chunks(4) {
             let mut packed = DihedralTerm {
-                a: ga, b: gb, c: gc, d: gd,
+                a: ga,
+                b: gb,
+                c: gc,
+                d: gd,
                 n_terms: chunk.len() as u32,
-                _pad0: 0, _pad1: 0, _pad2: 0,
-                term0: zero_term(), term1: zero_term(), term2: zero_term(), term3: zero_term(),
+                _pad0: 0,
+                _pad1: 0,
+                _pad2: 0,
+                term0: zero_term(),
+                term1: zero_term(),
+                term2: zero_term(),
+                term3: zero_term(),
             };
             for (i, t) in chunk.iter().enumerate() {
                 let pt = PeriodicTerm {
                     k_kj: kcal_to_kj(t.k) as f32,
                     n: t.n as f32,
-                    delta_rad: deg_to_rad(t.delta_deg) as f32, _pad: 0.0,
+                    delta_rad: deg_to_rad(t.delta_deg) as f32,
+                    _pad: 0.0,
                 };
                 match i {
                     0 => packed.term0 = pt,
@@ -812,25 +886,38 @@ fn build_dihedrals(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType],
     (terms, c, s, i)
 }
 
-fn build_impropers(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType],
-                   cpu_to_gpu: &[u32], n: usize)
-    -> (Vec<ImproperTerm>, Vec<u32>, Vec<u32>, Vec<u32>)
-{
+fn build_impropers(
+    g: &TopologyGraph,
+    ff: &ForceField,
+    atom_types: &[AtomType],
+    cpu_to_gpu: &[u32],
+    n: usize,
+) -> (Vec<ImproperTerm>, Vec<u32>, Vec<u32>, Vec<u32>) {
     let mut terms: Vec<ImproperTerm> = Vec::new();
     let mut per_atom: Vec<Vec<u32>> = vec![Vec::new(); n];
     for imp in &g.impropers {
         let Some(p) = ff.improper(
-            atom_types[imp.a], atom_types[imp.b], atom_types[imp.c], atom_types[imp.d],
-        ) else { continue };
+            atom_types[imp.a],
+            atom_types[imp.b],
+            atom_types[imp.c],
+            atom_types[imp.d],
+        ) else {
+            continue;
+        };
         let idx = terms.len() as u32;
         let ga = cpu_to_gpu[imp.a];
         let gb = cpu_to_gpu[imp.b];
         let gc = cpu_to_gpu[imp.c];
         let gd = cpu_to_gpu[imp.d];
         terms.push(ImproperTerm {
-            a: ga, b: gb, c: gc, d: gd,
-            k_kj: kcal_to_kj(p.k) as f32, omega0_rad: deg_to_rad(p.psi0_deg) as f32,
-            _pad0: 0.0, _pad1: 0.0,
+            a: ga,
+            b: gb,
+            c: gc,
+            d: gd,
+            k_kj: kcal_to_kj(p.k) as f32,
+            omega0_rad: deg_to_rad(p.psi0_deg) as f32,
+            _pad0: 0.0,
+            _pad1: 0.0,
         });
         per_atom[ga as usize].push(idx);
         per_atom[gb as usize].push(idx);
@@ -842,7 +929,12 @@ fn build_impropers(g: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType],
 }
 
 fn zero_term() -> PeriodicTerm {
-    PeriodicTerm { k_kj: 0.0, n: 0.0, delta_rad: 0.0, _pad: 0.0 }
+    PeriodicTerm {
+        k_kj: 0.0,
+        n: 0.0,
+        delta_rad: 0.0,
+        _pad: 0.0,
+    }
 }
 
 fn flatten_csr(per_atom: Vec<Vec<u32>>, n: usize) -> (Vec<u32>, Vec<u32>, Vec<u32>) {

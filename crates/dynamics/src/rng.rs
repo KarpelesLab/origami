@@ -125,7 +125,10 @@ mod tests {
         let variance = sum2 / N as f64 - mean * mean;
         // Expected mean 0.5, variance 1/12 ≈ 0.0833.
         assert!((mean - 0.5).abs() < 0.01, "mean {mean} far from 0.5");
-        assert!((variance - 1.0 / 12.0).abs() < 0.002, "variance {variance} far from 1/12");
+        assert!(
+            (variance - 1.0 / 12.0).abs() < 0.002,
+            "variance {variance} far from 1/12"
+        );
     }
 
     #[test]
@@ -143,7 +146,10 @@ mod tests {
         let variance = sum2 / N as f64 - mean * mean;
         // Standard normal: mean 0, variance 1.
         assert!(mean.abs() < 0.02, "Gaussian mean {mean} far from 0");
-        assert!((variance - 1.0).abs() < 0.02, "Gaussian variance {variance} far from 1");
+        assert!(
+            (variance - 1.0).abs() < 0.02,
+            "Gaussian variance {variance} far from 1"
+        );
     }
 
     #[test]

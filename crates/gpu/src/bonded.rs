@@ -171,7 +171,9 @@ impl BondedPipeline {
         let device = &ctx.device;
         let globals = GlobalParams {
             n_atoms: n_atoms as u32,
-            _pad0: 0, _pad1: 0, _pad2: 0,
+            _pad0: 0,
+            _pad1: 0,
+            _pad2: 0,
         };
         let globals_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("bonded_globals"),
@@ -179,44 +181,81 @@ impl BondedPipeline {
             usage: wgpu::BufferUsages::UNIFORM,
         });
 
-        let make_storage =
-            |label: &'static str, bytes: &[u8]| -> wgpu::Buffer {
-                // Even empty arrays need a minimum 4-byte buffer; pad up.
-                if bytes.is_empty() {
-                    device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some(label),
-                        size: 4,
-                        usage: wgpu::BufferUsages::STORAGE,
-                        mapped_at_creation: false,
-                    })
-                } else {
-                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(label),
-                        contents: bytes,
-                        usage: wgpu::BufferUsages::STORAGE,
-                    })
-                }
-            };
+        let make_storage = |label: &'static str, bytes: &[u8]| -> wgpu::Buffer {
+            // Even empty arrays need a minimum 4-byte buffer; pad up.
+            if bytes.is_empty() {
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label),
+                    size: 4,
+                    usage: wgpu::BufferUsages::STORAGE,
+                    mapped_at_creation: false,
+                })
+            } else {
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(label),
+                    contents: bytes,
+                    usage: wgpu::BufferUsages::STORAGE,
+                })
+            }
+        };
 
         let bond_terms_buf = make_storage("bond_terms", bytemuck::cast_slice(setup.bond_terms));
-        let atom_bond_count_buf = make_storage("atom_bond_count", bytemuck::cast_slice(setup.atom_bond_count));
-        let atom_bond_start_buf = make_storage("atom_bond_start", bytemuck::cast_slice(setup.atom_bond_start));
-        let atom_bond_index_buf = make_storage("atom_bond_index", bytemuck::cast_slice(setup.atom_bond_index));
+        let atom_bond_count_buf = make_storage(
+            "atom_bond_count",
+            bytemuck::cast_slice(setup.atom_bond_count),
+        );
+        let atom_bond_start_buf = make_storage(
+            "atom_bond_start",
+            bytemuck::cast_slice(setup.atom_bond_start),
+        );
+        let atom_bond_index_buf = make_storage(
+            "atom_bond_index",
+            bytemuck::cast_slice(setup.atom_bond_index),
+        );
 
         let angle_terms_buf = make_storage("angle_terms", bytemuck::cast_slice(setup.angle_terms));
-        let atom_angle_count_buf = make_storage("atom_angle_count", bytemuck::cast_slice(setup.atom_angle_count));
-        let atom_angle_start_buf = make_storage("atom_angle_start", bytemuck::cast_slice(setup.atom_angle_start));
-        let atom_angle_index_buf = make_storage("atom_angle_index", bytemuck::cast_slice(setup.atom_angle_index));
+        let atom_angle_count_buf = make_storage(
+            "atom_angle_count",
+            bytemuck::cast_slice(setup.atom_angle_count),
+        );
+        let atom_angle_start_buf = make_storage(
+            "atom_angle_start",
+            bytemuck::cast_slice(setup.atom_angle_start),
+        );
+        let atom_angle_index_buf = make_storage(
+            "atom_angle_index",
+            bytemuck::cast_slice(setup.atom_angle_index),
+        );
 
-        let dihedral_terms_buf = make_storage("dihedral_terms", bytemuck::cast_slice(setup.dihedral_terms));
-        let atom_dihedral_count_buf = make_storage("atom_dihedral_count", bytemuck::cast_slice(setup.atom_dihedral_count));
-        let atom_dihedral_start_buf = make_storage("atom_dihedral_start", bytemuck::cast_slice(setup.atom_dihedral_start));
-        let atom_dihedral_index_buf = make_storage("atom_dihedral_index", bytemuck::cast_slice(setup.atom_dihedral_index));
+        let dihedral_terms_buf =
+            make_storage("dihedral_terms", bytemuck::cast_slice(setup.dihedral_terms));
+        let atom_dihedral_count_buf = make_storage(
+            "atom_dihedral_count",
+            bytemuck::cast_slice(setup.atom_dihedral_count),
+        );
+        let atom_dihedral_start_buf = make_storage(
+            "atom_dihedral_start",
+            bytemuck::cast_slice(setup.atom_dihedral_start),
+        );
+        let atom_dihedral_index_buf = make_storage(
+            "atom_dihedral_index",
+            bytemuck::cast_slice(setup.atom_dihedral_index),
+        );
 
-        let improper_terms_buf = make_storage("improper_terms", bytemuck::cast_slice(setup.improper_terms));
-        let atom_improper_count_buf = make_storage("atom_improper_count", bytemuck::cast_slice(setup.atom_improper_count));
-        let atom_improper_start_buf = make_storage("atom_improper_start", bytemuck::cast_slice(setup.atom_improper_start));
-        let atom_improper_index_buf = make_storage("atom_improper_index", bytemuck::cast_slice(setup.atom_improper_index));
+        let improper_terms_buf =
+            make_storage("improper_terms", bytemuck::cast_slice(setup.improper_terms));
+        let atom_improper_count_buf = make_storage(
+            "atom_improper_count",
+            bytemuck::cast_slice(setup.atom_improper_count),
+        );
+        let atom_improper_start_buf = make_storage(
+            "atom_improper_start",
+            bytemuck::cast_slice(setup.atom_improper_start),
+        );
+        let atom_improper_index_buf = make_storage(
+            "atom_improper_index",
+            bytemuck::cast_slice(setup.atom_improper_index),
+        );
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bonded.wgsl"),
@@ -253,21 +292,21 @@ impl BondedPipeline {
         };
         let entries = [
             mk_entry(0, uniform),
-            mk_entry(1, storage_ro),   // positions
-            mk_entry(2, storage_rw),   // forces
-            mk_entry(3, storage_ro),   // bond_terms
-            mk_entry(4, storage_ro),   // atom_bond_count
+            mk_entry(1, storage_ro), // positions
+            mk_entry(2, storage_rw), // forces
+            mk_entry(3, storage_ro), // bond_terms
+            mk_entry(4, storage_ro), // atom_bond_count
             mk_entry(5, storage_ro),
             mk_entry(6, storage_ro),
-            mk_entry(7, storage_ro),   // angle_terms
+            mk_entry(7, storage_ro), // angle_terms
             mk_entry(8, storage_ro),
             mk_entry(9, storage_ro),
             mk_entry(10, storage_ro),
-            mk_entry(11, storage_ro),  // dihedral_terms
+            mk_entry(11, storage_ro), // dihedral_terms
             mk_entry(12, storage_ro),
             mk_entry(13, storage_ro),
             mk_entry(14, storage_ro),
-            mk_entry(15, storage_ro),  // improper_terms
+            mk_entry(15, storage_ro), // improper_terms
             mk_entry(16, storage_ro),
             mk_entry(17, storage_ro),
             mk_entry(18, storage_ro),
@@ -281,17 +320,16 @@ impl BondedPipeline {
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
-        let make_pipeline =
-            |label: &'static str, entry: &str| -> wgpu::ComputePipeline {
-                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some(label),
-                    layout: Some(&pipeline_layout),
-                    module: &shader,
-                    entry_point: Some(entry),
-                    compilation_options: Default::default(),
-                    cache: None,
-                })
-            };
+        let make_pipeline = |label: &'static str, entry: &str| -> wgpu::ComputePipeline {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        };
         let zero_pipeline = make_pipeline("bonded_zero_pipeline", "zero_forces");
         let bond_pipeline = make_pipeline("bonded_bond_pipeline", "bond_force");
         let angle_pipeline = make_pipeline("bonded_angle_pipeline", "angle_force");
@@ -302,25 +340,82 @@ impl BondedPipeline {
             label: Some("bonded_bind_group"),
             layout: &bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: globals_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: positions_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: forces_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: bond_terms_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: atom_bond_count_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 5, resource: atom_bond_start_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 6, resource: atom_bond_index_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 7, resource: angle_terms_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 8, resource: atom_angle_count_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 9, resource: atom_angle_start_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 10, resource: atom_angle_index_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 11, resource: dihedral_terms_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 12, resource: atom_dihedral_count_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 13, resource: atom_dihedral_start_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 14, resource: atom_dihedral_index_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 15, resource: improper_terms_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 16, resource: atom_improper_count_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 17, resource: atom_improper_start_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 18, resource: atom_improper_index_buf.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: globals_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: positions_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: forces_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: bond_terms_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: atom_bond_count_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: atom_bond_start_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: atom_bond_index_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: angle_terms_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: atom_angle_count_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: atom_angle_start_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: atom_angle_index_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: dihedral_terms_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: atom_dihedral_count_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: atom_dihedral_start_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 14,
+                    resource: atom_dihedral_index_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 15,
+                    resource: improper_terms_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 16,
+                    resource: atom_improper_count_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 17,
+                    resource: atom_improper_start_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 18,
+                    resource: atom_improper_index_buf.as_entire_binding(),
+                },
             ],
         });
 
@@ -355,7 +450,12 @@ impl BondedPipeline {
         }
     }
 
-    fn record_pass(&self, encoder: &mut wgpu::CommandEncoder, pipeline: &wgpu::ComputePipeline, label: &str) {
+    fn record_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        pipeline: &wgpu::ComputePipeline,
+        label: &str,
+    ) {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some(label),
             timestamp_writes: None,

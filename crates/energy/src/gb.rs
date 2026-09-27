@@ -67,7 +67,9 @@ fn intrinsic_radius(element: Element) -> f64 {
 }
 /// Public re-export so `energy::scratch::ForceScratch::rebuild_params`
 /// can populate its element-derived GB cache in one place.
-pub fn intrinsic_radius_pub(e: Element) -> f64 { intrinsic_radius(e) }
+pub fn intrinsic_radius_pub(e: Element) -> f64 {
+    intrinsic_radius(e)
+}
 
 /// HCT scaling factor for the descreening integral. AMBER's mbondi2 set.
 fn hct_scale(element: Element) -> f64 {
@@ -80,7 +82,9 @@ fn hct_scale(element: Element) -> f64 {
         Element::S => 0.96,
     }
 }
-pub fn hct_scale_pub(e: Element) -> f64 { hct_scale(e) }
+pub fn hct_scale_pub(e: Element) -> f64 {
+    hct_scale(e)
+}
 
 #[allow(dead_code)]
 fn _atom_type_unused(_t: AtomType) {} // silence unused import warning if AtomType ends up unused
@@ -140,16 +144,26 @@ pub fn compute_born_inputs(structure: &Structure, ff: &ForceField) -> BornInputs
         effective.push(r_eff);
     }
 
-    BornInputs { positions, charges, effective_radii: effective, clamped_count: clamped }
+    BornInputs {
+        positions,
+        charges,
+        effective_radii: effective,
+        clamped_count: clamped,
+    }
 }
 
 pub fn gb_energy(structure: &Structure, ff: &ForceField) -> GbBreakdown {
-    let BornInputs { positions, charges, effective_radii: effective, clamped_count: clamped } =
-        compute_born_inputs(structure, ff);
+    let BornInputs {
+        positions,
+        charges,
+        effective_radii: effective,
+        clamped_count: clamped,
+    } = compute_born_inputs(structure, ff);
     let n = positions.len();
 
     // Stage 3: GB pair-energy sum (including self-terms).
-    let prefactor = -0.5 * (1.0 / EPSILON_SOLUTE - 1.0 / EPSILON_WATER) * COULOMB_CONST_KCAL_A_PER_E2;
+    let prefactor =
+        -0.5 * (1.0 / EPSILON_SOLUTE - 1.0 / EPSILON_WATER) * COULOMB_CONST_KCAL_A_PER_E2;
     let mut self_kcal = 0.0;
     for i in 0..n {
         if charges[i] != 0.0 {
@@ -257,7 +271,11 @@ pub fn compute_born_radii_into_scratch(
 ) -> usize {
     use rayon::prelude::*;
     let n = scratch.n;
-    debug_assert_eq!(structure.atom_count(), n, "scratch sized for a different structure");
+    debug_assert_eq!(
+        structure.atom_count(),
+        n,
+        "scratch sized for a different structure"
+    );
 
     // Sync positions into the scratch SoA arrays — the caller may or
     // may not have done this already (the AoS path didn't), and the
@@ -382,7 +400,8 @@ fn pairwise_descreening(r: f64, rho_i_tilde: f64, s_rho_j_tilde: f64) -> f64 {
     let term1 = 0.5 * (inv_l - inv_u);
     let term2 = (r / 4.0) * (inv_u * inv_u - inv_l * inv_l);
     let term3 = (1.0 / (2.0 * r)) * (l / u).ln();
-    let term4 = (s_rho_j_tilde * s_rho_j_tilde - r * r) / (4.0 * r) * (inv_u * inv_u - inv_l * inv_l);
+    let term4 =
+        (s_rho_j_tilde * s_rho_j_tilde - r * r) / (4.0 * r) * (inv_u * inv_u - inv_l * inv_l);
     term1 + term2 + term3 + term4
 }
 
@@ -398,9 +417,19 @@ mod tests {
         let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
         let ff = standard_ff();
         let br = gb_energy(&s, ff);
-        assert!(br.gb_kj_mol.is_finite(), "GB total {} not finite", br.gb_kj_mol);
-        assert!(br.self_kj_mol <= 0.0, "self energy should be non-positive (favourable)");
-        assert_eq!(br.clamped_count, 0, "no atoms should clamp for a small extended chain");
+        assert!(
+            br.gb_kj_mol.is_finite(),
+            "GB total {} not finite",
+            br.gb_kj_mol
+        );
+        assert!(
+            br.self_kj_mol <= 0.0,
+            "self energy should be non-positive (favourable)"
+        );
+        assert_eq!(
+            br.clamped_count, 0,
+            "no atoms should clamp for a small extended chain"
+        );
     }
 
     #[test]
@@ -411,7 +440,11 @@ mod tests {
         let s = build_extended_chain(&[AminoAcid::Lys, AminoAcid::Glu]).unwrap();
         let ff = standard_ff();
         let br = gb_energy(&s, ff);
-        assert!(br.gb_kj_mol < 0.0, "GB total should be negative, got {}", br.gb_kj_mol);
+        assert!(
+            br.gb_kj_mol < 0.0,
+            "GB total should be negative, got {}",
+            br.gb_kj_mol
+        );
     }
 
     #[test]

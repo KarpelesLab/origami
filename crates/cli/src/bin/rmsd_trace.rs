@@ -15,12 +15,12 @@ fn main() {
         eprintln!("usage: rmsd_trace <reference.pdb> <trajectory.pdb>");
         std::process::exit(2);
     }
-    let ref_pdb = std::fs::read_to_string(&args[1])
-        .unwrap_or_else(|e| panic!("read {}: {}", args[1], e));
-    let reference = read_pdb(ref_pdb.as_bytes())
-        .unwrap_or_else(|e| panic!("parse {}: {}", args[1], e));
-    let traj_pdb = std::fs::read_to_string(&args[2])
-        .unwrap_or_else(|e| panic!("read {}: {}", args[2], e));
+    let ref_pdb =
+        std::fs::read_to_string(&args[1]).unwrap_or_else(|e| panic!("read {}: {}", args[1], e));
+    let reference =
+        read_pdb(ref_pdb.as_bytes()).unwrap_or_else(|e| panic!("parse {}: {}", args[1], e));
+    let traj_pdb =
+        std::fs::read_to_string(&args[2]).unwrap_or_else(|e| panic!("read {}: {}", args[2], e));
     let frames = read_pdb_trajectory(traj_pdb.as_bytes())
         .unwrap_or_else(|e| panic!("parse {}: {}", args[2], e));
 

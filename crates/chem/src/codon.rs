@@ -74,8 +74,9 @@ impl Codon {
             // Phenylalanine
             (U, U, U) | (U, U, C) => Translation::Amino(AminoAcid::Phe),
             // Leucine
-            (U, U, A) | (U, U, G)
-            | (C, U, U) | (C, U, C) | (C, U, A) | (C, U, G) => Translation::Amino(AminoAcid::Leu),
+            (U, U, A) | (U, U, G) | (C, U, U) | (C, U, C) | (C, U, A) | (C, U, G) => {
+                Translation::Amino(AminoAcid::Leu)
+            }
             // Isoleucine
             (A, U, U) | (A, U, C) | (A, U, A) => Translation::Amino(AminoAcid::Ile),
             // Methionine (and start codon)
@@ -123,9 +124,11 @@ impl Codon {
     /// Iterate over all 64 codons in canonical order (AAA, AAC, …, UUU).
     pub fn all() -> impl Iterator<Item = Codon> {
         const BASES: [Base; 4] = [Base::A, Base::C, Base::G, Base::U];
-        BASES
-            .into_iter()
-            .flat_map(move |a| BASES.into_iter().flat_map(move |b| BASES.into_iter().map(move |c| Codon([a, b, c]))))
+        BASES.into_iter().flat_map(move |a| {
+            BASES
+                .into_iter()
+                .flat_map(move |b| BASES.into_iter().map(move |c| Codon([a, b, c])))
+        })
     }
 }
 

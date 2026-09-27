@@ -38,30 +38,35 @@ fn fit_helix_axis(p: &[Vec3]) -> (Vec3, Vec3) {
     for _ in 0..60 {
         let v = [axis.x, axis.y, axis.z];
         let next = Vec3::new(
-            m[0][0]*v[0] + m[0][1]*v[1] + m[0][2]*v[2],
-            m[1][0]*v[0] + m[1][1]*v[1] + m[1][2]*v[2],
-            m[2][0]*v[0] + m[2][1]*v[1] + m[2][2]*v[2],
+            m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+            m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+            m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
         );
         axis = next.normalize();
     }
     let mean_rise: f64 = (1..p.len())
-        .map(|i| (p[i] - p[i - 1]).dot(&axis)).sum::<f64>() / (p.len() - 1) as f64;
-    if mean_rise < 0.0 { axis = -axis; }
+        .map(|i| (p[i] - p[i - 1]).dot(&axis))
+        .sum::<f64>()
+        / (p.len() - 1) as f64;
+    if mean_rise < 0.0 {
+        axis = -axis;
+    }
     (centroid, axis)
 }
 
 fn helix_rise_twist(p: &[Vec3]) -> (f64, f64) {
     let (centroid, axis) = fit_helix_axis(p);
     let project = |v: Vec3| v - axis * v.dot(&axis);
-    let rises: Vec<f64> = (1..p.len())
-        .map(|i| (p[i] - p[i - 1]).dot(&axis)).collect();
-    let twists: Vec<f64> = (1..p.len()).map(|i| {
-        let a = project(p[i - 1] - centroid);
-        let b = project(p[i] - centroid);
-        let cos_t = (a.dot(&b) / (a.norm() * b.norm())).clamp(-1.0, 1.0);
-        let sign = a.cross(&b).dot(&axis).signum();
-        sign * cos_t.acos().to_degrees()
-    }).collect();
+    let rises: Vec<f64> = (1..p.len()).map(|i| (p[i] - p[i - 1]).dot(&axis)).collect();
+    let twists: Vec<f64> = (1..p.len())
+        .map(|i| {
+            let a = project(p[i - 1] - centroid);
+            let b = project(p[i] - centroid);
+            let cos_t = (a.dot(&b) / (a.norm() * b.norm())).clamp(-1.0, 1.0);
+            let sign = a.cross(&b).dot(&axis).signum();
+            sign * cos_t.acos().to_degrees()
+        })
+        .collect();
     let mean_rise = rises.iter().sum::<f64>() / rises.len() as f64;
     let mean_twist = twists.iter().sum::<f64>() / twists.len() as f64;
     (mean_rise, mean_twist)
@@ -69,9 +74,17 @@ fn helix_rise_twist(p: &[Vec3]) -> (f64, f64) {
 
 #[test]
 fn a_form_rna_stays_helical_under_langevin() {
-    let seq: Vec<_> = [Nucleotide::Guanine, Nucleotide::Cytosine,
-                       Nucleotide::Adenine, Nucleotide::Uracil]
-        .iter().cloned().cycle().take(12).collect();
+    let seq: Vec<_> = [
+        Nucleotide::Guanine,
+        Nucleotide::Cytosine,
+        Nucleotide::Adenine,
+        Nucleotide::Uracil,
+    ]
+    .iter()
+    .cloned()
+    .cycle()
+    .take(12)
+    .collect();
     let mut s = build_a_form_rna_chain(&seq).unwrap();
     let g = build_topology_graph(&s);
     let ff = standard_ff();
@@ -79,24 +92,34 @@ fn a_form_rna_stays_helical_under_langevin() {
     // Brief minimisation so the integrator doesn't see whatever
     // residual strain the builder left.  The A-form builder gets
     // very close to a CHARMM27 minimum so 100 steps is plenty.
-    let _ = minimize(&mut s, &g, ff, MinimizeOptions {
-        algorithm: Algorithm::Lbfgs,
-        max_steps: 100,
-        gradient_tol: 50.0,
-        energy_tol: 1.0,
-        max_step_a: 0.1,
-        include_sasa: false,
-        include_cmap: false,
-    });
+    let _ = minimize(
+        &mut s,
+        &g,
+        ff,
+        MinimizeOptions {
+            algorithm: Algorithm::Lbfgs,
+            max_steps: 100,
+            gradient_tol: 50.0,
+            energy_tol: 1.0,
+            max_step_a: 0.1,
+            include_sasa: false,
+            include_cmap: false,
+        },
+    );
 
     // Pre-MD reference geometry.
     let initial = s.clone();
-    let p_initial: Vec<_> = initial.residues.iter()
-        .filter_map(|r| r.position("P")).collect();
+    let p_initial: Vec<_> = initial
+        .residues
+        .iter()
+        .filter_map(|r| r.position("P"))
+        .collect();
     let (rise_initial, twist_initial) = helix_rise_twist(&p_initial);
     eprintln!("Pre-MD A-form: rise = {rise_initial:.2} Å/nt, twist = {twist_initial:.1}°/nt");
-    assert!(rise_initial > 0.0 && twist_initial > 0.0,
-        "pre-MD A-form should already be right-handed positive-rise");
+    assert!(
+        rise_initial > 0.0 && twist_initial > 0.0,
+        "pre-MD A-form should already be right-handed positive-rise"
+    );
 
     // 2 ps Langevin at 310 K.
     let g = build_topology_graph(&s);
@@ -118,8 +141,7 @@ fn a_form_rna_stays_helical_under_langevin() {
     assert!(!summary.diverged, "A-form trajectory diverged");
 
     // Post-MD geometry.
-    let p_final: Vec<_> = s.residues.iter()
-        .filter_map(|r| r.position("P")).collect();
+    let p_final: Vec<_> = s.residues.iter().filter_map(|r| r.position("P")).collect();
     let (rise_final, twist_final) = helix_rise_twist(&p_final);
     let rmsd = rmsd_p(&initial, &s).expect("rmsd_p A-form");
     eprintln!(
@@ -130,12 +152,18 @@ fn a_form_rna_stays_helical_under_langevin() {
     // ---- Acceptance bars ----
     // 1. Backbone shape preserved (same 3.5 Å threshold as the
     //    tetraloop tests).
-    assert!(rmsd < 3.5,
-        "A-form P-RMSD {rmsd} > 3.5 Å after 2 ps — builder may be off-canonical");
+    assert!(
+        rmsd < 3.5,
+        "A-form P-RMSD {rmsd} > 3.5 Å after 2 ps — builder may be off-canonical"
+    );
     // 2. Still right-handed (positive twist).
-    assert!(twist_final > 0.0,
-        "A-form helix flipped to left-handed: twist {twist_final}°");
+    assert!(
+        twist_final > 0.0,
+        "A-form helix flipped to left-handed: twist {twist_final}°"
+    );
     // 3. Still helical (positive rise, not stretched flat).
-    assert!(rise_final > 0.5,
-        "A-form helix lost rise: {rise_final} Å/nt (was {rise_initial})");
+    assert!(
+        rise_final > 0.5,
+        "A-form helix lost rise: {rise_final} Å/nt (was {rise_initial})"
+    );
 }

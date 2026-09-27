@@ -118,7 +118,13 @@ impl RemdSummary {
         self.swap_attempts
             .iter()
             .zip(&self.swap_accepts)
-            .map(|(&att, &acc)| if att > 0 { acc as f64 / att as f64 } else { 0.0 })
+            .map(|(&att, &acc)| {
+                if att > 0 {
+                    acc as f64 / att as f64
+                } else {
+                    0.0
+                }
+            })
             .collect()
     }
 }
@@ -181,7 +187,12 @@ where
         ref_buf: Vec<Vec3>,
         // Frames produced during a parallel advance, drained
         // serially into the callback after the rayon scope closes.
-        pending_frames: Vec<(usize /* step */, f64 /* time_fs */, f64 /* T_inst */, Structure)>,
+        pending_frames: Vec<(
+            usize, /* step */
+            f64,   /* time_fs */
+            f64,   /* T_inst */
+            Structure,
+        )>,
     }
 
     let constraints = if opts.constrain_h_bonds {
@@ -204,7 +215,8 @@ where
         let mut rep_structure = structure.clone();
         let masses = crate::langevin::collect_masses_pub(&rep_structure);
         let inv_masses: Vec<f64> = masses.iter().map(|m| 1.0 / m).collect();
-        let mut rng = Xoshiro256pp::from_seed(opts.seed.wrapping_add((i as u64).wrapping_mul(0xC0FFEE)));
+        let mut rng =
+            Xoshiro256pp::from_seed(opts.seed.wrapping_add((i as u64).wrapping_mul(0xC0FFEE)));
         let mut velocities = vec![Vec3::zeros(); n];
         initialise_velocities_for_new_atoms(&rep_structure, &mut velocities, t, &mut rng);
         let mut scratch = ForceScratch::new(&rep_structure, graph, ff);
@@ -330,18 +342,12 @@ where
                 // O
                 let one_minus_alpha2 = 1.0 - alpha * alpha;
                 for i in 0..n {
-                    let sigma = (one_minus_alpha2
-                        * kbt
-                        * dof_correction
-                        * ACCEL_FACTOR
+                    let sigma = (one_minus_alpha2 * kbt * dof_correction * ACCEL_FACTOR
                         / rep.masses[i])
                         .sqrt();
-                    rep.velocities[i].x =
-                        alpha * rep.velocities[i].x + sigma * rep.rng.gaussian();
-                    rep.velocities[i].y =
-                        alpha * rep.velocities[i].y + sigma * rep.rng.gaussian();
-                    rep.velocities[i].z =
-                        alpha * rep.velocities[i].z + sigma * rep.rng.gaussian();
+                    rep.velocities[i].x = alpha * rep.velocities[i].x + sigma * rep.rng.gaussian();
+                    rep.velocities[i].y = alpha * rep.velocities[i].y + sigma * rep.rng.gaussian();
+                    rep.velocities[i].z = alpha * rep.velocities[i].z + sigma * rep.rng.gaussian();
                 }
                 // A (second half)
                 if use_shake {
@@ -531,7 +537,12 @@ fn apply_velocity_step(structure: &mut Structure, velocities: &[Vec3], dt: f64) 
     }
 }
 
-fn potential_energy(structure: &Structure, graph: &TopologyGraph, ff: &ForceField, include_sasa: bool) -> f64 {
+fn potential_energy(
+    structure: &Structure,
+    graph: &TopologyGraph,
+    ff: &ForceField,
+    include_sasa: bool,
+) -> f64 {
     let bonded = bonded_energy(structure, graph, ff);
     let nb = nonbonded_energy(structure, graph, ff, DEFAULT_CUTOFF_A);
     let gb = gb_energy(structure, ff);

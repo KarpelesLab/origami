@@ -131,10 +131,7 @@ mod tests {
     #[test]
     fn single_bond_settles_to_target_length() {
         // Two atoms 1.5 Å apart; constrain to 1.0 Å.
-        let mut positions = vec![
-            Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(1.5, 0.0, 0.0),
-        ];
+        let mut positions = vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.5, 0.0, 0.0)];
         let reference = positions.clone();
         let inv_masses = vec![1.0, 1.0];
         let constraints = vec![Constraint {
@@ -143,8 +140,15 @@ mod tests {
             d: 1.0,
             d_sq: 1.0,
         }];
-        let iters = shake_iterate(&mut positions, &reference, &inv_masses, &constraints, 1e-8, 20)
-            .expect("SHAKE converged");
+        let iters = shake_iterate(
+            &mut positions,
+            &reference,
+            &inv_masses,
+            &constraints,
+            1e-8,
+            20,
+        )
+        .expect("SHAKE converged");
         let r = (positions[0] - positions[1]).norm();
         assert!(
             (r - 1.0).abs() < 1e-3,
@@ -154,10 +158,7 @@ mod tests {
 
     #[test]
     fn already_satisfied_returns_immediately() {
-        let mut positions = vec![
-            Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(1.0, 0.0, 0.0),
-        ];
+        let mut positions = vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0)];
         let reference = positions.clone();
         let inv_masses = vec![1.0, 1.0];
         let constraints = vec![Constraint {
@@ -166,8 +167,15 @@ mod tests {
             d: 1.0,
             d_sq: 1.0,
         }];
-        let iters = shake_iterate(&mut positions, &reference, &inv_masses, &constraints, 1e-8, 5)
-            .unwrap();
+        let iters = shake_iterate(
+            &mut positions,
+            &reference,
+            &inv_masses,
+            &constraints,
+            1e-8,
+            5,
+        )
+        .unwrap();
         assert_eq!(iters, 1);
     }
 
@@ -175,10 +183,7 @@ mod tests {
     fn unequal_masses_split_correction_proportionally() {
         // Atom 0 has mass 1, atom 1 has mass 100 (much heavier). After
         // SHAKE almost all the correction lands on atom 0.
-        let mut positions = vec![
-            Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(1.5, 0.0, 0.0),
-        ];
+        let mut positions = vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.5, 0.0, 0.0)];
         let reference = positions.clone();
         let inv_masses = vec![1.0, 0.01];
         let constraints = vec![Constraint {
@@ -187,13 +192,23 @@ mod tests {
             d: 1.0,
             d_sq: 1.0,
         }];
-        let _ = shake_iterate(&mut positions, &reference, &inv_masses, &constraints, 1e-8, 20)
-            .expect("SHAKE converged");
+        let _ = shake_iterate(
+            &mut positions,
+            &reference,
+            &inv_masses,
+            &constraints,
+            1e-8,
+            20,
+        )
+        .expect("SHAKE converged");
         let r = (positions[0] - positions[1]).norm();
         assert!((r - 1.0).abs() < 1e-3);
         // Atom 1 (heavy) should have moved much less than atom 0.
         let moved_0 = (positions[0] - reference[0]).norm();
         let moved_1 = (positions[1] - reference[1]).norm();
-        assert!(moved_0 > 10.0 * moved_1, "moved_0={moved_0}, moved_1={moved_1}");
+        assert!(
+            moved_0 > 10.0 * moved_1,
+            "moved_0={moved_0}, moved_1={moved_1}"
+        );
     }
 }

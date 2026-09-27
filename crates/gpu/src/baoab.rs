@@ -109,7 +109,15 @@ impl BaoabPipeline {
         masses_da: &[f32],
         initial_rng_state: &[[u32; 4]],
     ) -> Self {
-        Self::new_with_external_buffers(ctx, n_atoms, masses_da, initial_rng_state, None, None, None)
+        Self::new_with_external_buffers(
+            ctx,
+            n_atoms,
+            masses_da,
+            initial_rng_state,
+            None,
+            None,
+            None,
+        )
     }
 
     /// External-buffer constructor.  Pass `Some(buffer)` to bind any of
@@ -137,7 +145,9 @@ impl BaoabPipeline {
             Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("baoab_positions"),
                 size: n_padded as u64,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             }))
         });
@@ -145,7 +155,9 @@ impl BaoabPipeline {
             Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("baoab_velocities"),
                 size: n_padded as u64,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             }))
         });
@@ -176,7 +188,9 @@ impl BaoabPipeline {
             alpha: 0.0,
             o_sigma_sq_base: 0.0,
             accel_factor: 1.0e-4,
-            _pad0: 0, _pad1: 0, _pad2: 0,
+            _pad0: 0,
+            _pad1: 0,
+            _pad2: 0,
         };
         let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("baoab_params"),
@@ -277,32 +291,52 @@ impl BaoabPipeline {
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
-        let first_half_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("baoab_first_half_pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: Some("baoab_first_half"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-        let second_half_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("baoab_second_half_pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: Some("baoab_second_half"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
+        let first_half_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("baoab_first_half_pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: Some("baoab_first_half"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
+        let second_half_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("baoab_second_half_pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: Some("baoab_second_half"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("baoab_bind_group"),
             layout: &bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: positions_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: velocities_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: masses_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: forces_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 5, resource: rng_state_buf.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: positions_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: velocities_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: masses_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: forces_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: rng_state_buf.as_entire_binding(),
+                },
             ],
         });
 
@@ -360,11 +394,12 @@ impl BaoabPipeline {
                 count: None,
             }],
         });
-        let shake_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("baoab_shake_pl"),
-            bind_group_layouts: &[&self.bind_group_layout, &shake_bgl],
-            push_constant_ranges: &[],
-        });
+        let shake_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("baoab_shake_pl"),
+                bind_group_layouts: &[&self.bind_group_layout, &shake_bgl],
+                push_constant_ranges: &[],
+            });
         let make_pipe = |label: &'static str, entry: &str| -> wgpu::ComputePipeline {
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some(label),
@@ -401,8 +436,9 @@ impl BaoabPipeline {
         pipe: &wgpu::ComputePipeline,
         label: &str,
     ) {
-        let shake_bg = self.shake_bind_group.as_ref()
-            .expect("BaoabPipeline::enable_shake_mode must be called before recording SHAKE-mode kernels");
+        let shake_bg = self.shake_bind_group.as_ref().expect(
+            "BaoabPipeline::enable_shake_mode must be called before recording SHAKE-mode kernels",
+        );
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some(label),
             timestamp_writes: None,
@@ -414,16 +450,32 @@ impl BaoabPipeline {
     }
 
     pub fn record_b_only(&self, encoder: &mut wgpu::CommandEncoder) {
-        self.record_shake_pass(encoder, self.b_only_pipeline.as_ref().unwrap(), "baoab_b_only_pass");
+        self.record_shake_pass(
+            encoder,
+            self.b_only_pipeline.as_ref().unwrap(),
+            "baoab_b_only_pass",
+        );
     }
     pub fn record_save_ref_and_a(&self, encoder: &mut wgpu::CommandEncoder) {
-        self.record_shake_pass(encoder, self.save_ref_and_a_pipeline.as_ref().unwrap(), "baoab_save_ref_and_a_pass");
+        self.record_shake_pass(
+            encoder,
+            self.save_ref_and_a_pipeline.as_ref().unwrap(),
+            "baoab_save_ref_and_a_pass",
+        );
     }
     pub fn record_project_v(&self, encoder: &mut wgpu::CommandEncoder) {
-        self.record_shake_pass(encoder, self.project_v_pipeline.as_ref().unwrap(), "baoab_project_v_pass");
+        self.record_shake_pass(
+            encoder,
+            self.project_v_pipeline.as_ref().unwrap(),
+            "baoab_project_v_pass",
+        );
     }
     pub fn record_o_only(&self, encoder: &mut wgpu::CommandEncoder) {
-        self.record_shake_pass(encoder, self.o_only_pipeline.as_ref().unwrap(), "baoab_o_only_pass");
+        self.record_shake_pass(
+            encoder,
+            self.o_only_pipeline.as_ref().unwrap(),
+            "baoab_o_only_pass",
+        );
     }
 
     pub fn upload_positions(&mut self, positions: &[[f32; 3]]) {
@@ -431,9 +483,11 @@ impl BaoabPipeline {
         for (i, p) in positions.iter().enumerate() {
             self.pos_padded[i] = [p[0], p[1], p[2], 0.0];
         }
-        self.ctx
-            .queue
-            .write_buffer(&self.positions_buf, 0, bytemuck::cast_slice(&self.pos_padded));
+        self.ctx.queue.write_buffer(
+            &self.positions_buf,
+            0,
+            bytemuck::cast_slice(&self.pos_padded),
+        );
     }
 
     pub fn upload_velocities(&mut self, velocities: &[[f32; 3]]) {
@@ -441,9 +495,11 @@ impl BaoabPipeline {
         for (i, v) in velocities.iter().enumerate() {
             self.vel_padded[i] = [v[0], v[1], v[2], 0.0];
         }
-        self.ctx
-            .queue
-            .write_buffer(&self.velocities_buf, 0, bytemuck::cast_slice(&self.vel_padded));
+        self.ctx.queue.write_buffer(
+            &self.velocities_buf,
+            0,
+            bytemuck::cast_slice(&self.vel_padded),
+        );
     }
 
     pub fn upload_forces(&mut self, forces: &[[f32; 3]]) {
@@ -451,9 +507,11 @@ impl BaoabPipeline {
         for (i, f) in forces.iter().enumerate() {
             self.forces_padded[i] = [f[0], f[1], f[2], 0.0];
         }
-        self.ctx
-            .queue
-            .write_buffer(&self.forces_buf, 0, bytemuck::cast_slice(&self.forces_padded));
+        self.ctx.queue.write_buffer(
+            &self.forces_buf,
+            0,
+            bytemuck::cast_slice(&self.forces_padded),
+        );
     }
 
     fn write_params(&self, dt_fs: f32, gamma_ps_inv: f32, kbt_kj_mol: f32) {
@@ -468,7 +526,9 @@ impl BaoabPipeline {
             alpha,
             o_sigma_sq_base,
             accel_factor,
-            _pad0: 0, _pad1: 0, _pad2: 0,
+            _pad0: 0,
+            _pad1: 0,
+            _pad2: 0,
         };
         self.ctx
             .queue
@@ -506,11 +566,21 @@ impl BaoabPipeline {
         self.write_params(dt_fs, gamma_ps_inv, kbt_kj_mol);
     }
 
-    pub fn positions_buffer(&self) -> &wgpu::Buffer { &self.positions_buf }
-    pub fn velocities_buffer(&self) -> &wgpu::Buffer { &self.velocities_buf }
-    pub fn forces_buffer(&self) -> &wgpu::Buffer { &self.forces_buf }
-    pub fn positions_buffer_arc(&self) -> Arc<wgpu::Buffer> { self.positions_buf.clone() }
-    pub fn forces_buffer_arc(&self) -> Arc<wgpu::Buffer> { self.forces_buf.clone() }
+    pub fn positions_buffer(&self) -> &wgpu::Buffer {
+        &self.positions_buf
+    }
+    pub fn velocities_buffer(&self) -> &wgpu::Buffer {
+        &self.velocities_buf
+    }
+    pub fn forces_buffer(&self) -> &wgpu::Buffer {
+        &self.forces_buf
+    }
+    pub fn positions_buffer_arc(&self) -> Arc<wgpu::Buffer> {
+        self.positions_buf.clone()
+    }
+    pub fn forces_buffer_arc(&self) -> Arc<wgpu::Buffer> {
+        self.forces_buf.clone()
+    }
 
     /// Download current positions back to the CPU.  Used at save-frame
     /// boundaries.
@@ -525,7 +595,9 @@ impl BaoabPipeline {
         queue.submit(Some(encoder.finish()));
         let slice = self.pos_readback_buf.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
         let _ = device.poll(wgpu::Maintain::Wait);
         rx.recv().unwrap().unwrap();
         let data = slice.get_mapped_range();
@@ -548,7 +620,9 @@ impl BaoabPipeline {
         queue.submit(Some(encoder.finish()));
         let slice = self.vel_readback_buf.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
         let _ = device.poll(wgpu::Maintain::Wait);
         rx.recv().unwrap().unwrap();
         let data = slice.get_mapped_range();
@@ -559,8 +633,12 @@ impl BaoabPipeline {
         out
     }
 
-    pub fn n_atoms(&self) -> usize { self.n_atoms }
+    pub fn n_atoms(&self) -> usize {
+        self.n_atoms
+    }
 
     #[allow(dead_code)]
-    fn _ensure_layout_unused(&self) -> &wgpu::BindGroupLayout { &self.bind_group_layout }
+    fn _ensure_layout_unused(&self) -> &wgpu::BindGroupLayout {
+        &self.bind_group_layout
+    }
 }

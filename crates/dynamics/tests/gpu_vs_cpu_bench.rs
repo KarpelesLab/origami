@@ -20,8 +20,8 @@
 use std::time::Instant;
 
 use chem::{classify_atom, standard_ff, AminoAcid, AtomType, Element};
-use dynamics::shake::build_h_bond_constraints;
 use dynamics::full_gpu_integrator::FullGpuIntegrator;
+use dynamics::shake::build_h_bond_constraints;
 use dynamics::{minimize, run_langevin, Algorithm, LangevinOptions, MinimizeOptions};
 use geom::{build_extended_chain, build_topology_graph, Vec3};
 use gpu::{build_per_x_shake_data, GpuContext, ShakeConstraint};
@@ -56,7 +56,10 @@ fn bench_one(path: &str, label: &str, warmup: usize, timed: usize) {
     let n = s.atom_count();
     let g = build_topology_graph(&s);
     let ff = standard_ff();
-    eprintln!("\n=== {label} — {n} atoms ({} residues) ===", s.residues.len());
+    eprintln!(
+        "\n=== {label} — {n} atoms ({} residues) ===",
+        s.residues.len()
+    );
     // Brief minimisation to absorb crystal-strain bond strain.  Without
     // this, raw-PDB structures often have 0.05 Å bond offsets from r₀
     // which Langevin redistributes into 1000+ K kinetic energy.
@@ -164,7 +167,10 @@ fn bench_tile_arm(
     let n = s.atom_count();
     let mut tile = match FullGpuIntegrator::new(s, g, ff, 1.0, 2.0, 310.0, 1) {
         Ok(f) => f,
-        Err(e) => { eprintln!("  TILE arm: GPU unavailable ({e})"); return; }
+        Err(e) => {
+            eprintln!("  TILE arm: GPU unavailable ({e})");
+            return;
+        }
     };
     tile.enable_tile_nb_mode(s, g, ff);
     let velocities = vec![Vec3::zeros(); n];
@@ -197,22 +203,39 @@ fn bench_shake_arm(
     cpu_ms_per_fs_dt1: f64,
 ) {
     let n = s.atom_count();
-    let atom_types: Vec<AtomType> = s.residues.iter()
-        .flat_map(|r| r.atoms.iter()
-            .map(|a| classify_atom(r.monomer, a.name).unwrap()))
+    let atom_types: Vec<AtomType> = s
+        .residues
+        .iter()
+        .flat_map(|r| {
+            r.atoms
+                .iter()
+                .map(|a| classify_atom(r.monomer, a.name).unwrap())
+        })
         .collect();
     let cpu_constraints = build_h_bond_constraints(s, g, ff, &atom_types);
-    let atoms_flat: Vec<Element> = s.residues.iter()
-        .flat_map(|r| r.atoms.iter().map(|a| a.element)).collect();
-    let gpu_constraints: Vec<ShakeConstraint> = cpu_constraints.iter().map(|c| {
-        let (x, h) = if atoms_flat[c.i] == Element::H {
-            (c.j as u32, c.i as u32)
-        } else {
-            (c.i as u32, c.j as u32)
-        };
-        ShakeConstraint { x_atom: x, h_atom: h, d_sq: c.d_sq as f32 }
-    }).collect();
-    let masses_f32: Vec<f32> = s.residues.iter()
+    let atoms_flat: Vec<Element> = s
+        .residues
+        .iter()
+        .flat_map(|r| r.atoms.iter().map(|a| a.element))
+        .collect();
+    let gpu_constraints: Vec<ShakeConstraint> = cpu_constraints
+        .iter()
+        .map(|c| {
+            let (x, h) = if atoms_flat[c.i] == Element::H {
+                (c.j as u32, c.i as u32)
+            } else {
+                (c.i as u32, c.j as u32)
+            };
+            ShakeConstraint {
+                x_atom: x,
+                h_atom: h,
+                d_sq: c.d_sq as f32,
+            }
+        })
+        .collect();
+    let masses_f32: Vec<f32> = s
+        .residues
+        .iter()
         .flat_map(|r| r.atoms.iter().map(|a| a.element.mass_da() as f32))
         .collect();
     let shake_data = build_per_x_shake_data(n, &gpu_constraints, &masses_f32);
@@ -223,7 +246,10 @@ fn bench_shake_arm(
     // we're comparing apples-to-apples.
     let mut no_shake = match FullGpuIntegrator::new(s, g, ff, 1.0, 2.0, 310.0, 1) {
         Ok(f) => f,
-        Err(e) => { eprintln!("  SHAKE arm: GPU unavailable ({e})"); return; }
+        Err(e) => {
+            eprintln!("  SHAKE arm: GPU unavailable ({e})");
+            return;
+        }
     };
     let velocities = vec![Vec3::zeros(); n];
     no_shake.upload_initial_state(s, &velocities);
@@ -239,7 +265,10 @@ fn bench_shake_arm(
 
     let mut full = match FullGpuIntegrator::new(s, g, ff, 2.0, 2.0, 310.0, 1) {
         Ok(f) => f,
-        Err(e) => { eprintln!("  SHAKE arm: GPU unavailable ({e})"); return; }
+        Err(e) => {
+            eprintln!("  SHAKE arm: GPU unavailable ({e})");
+            return;
+        }
     };
     full.enable_shake(&shake_data, 64, 1e-6);
     full.upload_initial_state(s, &velocities);
@@ -248,7 +277,7 @@ fn bench_shake_arm(
     full.step_batch_shake(timed);
     let secs = t0.elapsed().as_secs_f64();
     let ms_per_step = secs * 1000.0 / timed as f64;
-    let ms_per_fs = ms_per_step / 2.0;  // dt = 2 fs
+    let ms_per_fs = ms_per_step / 2.0; // dt = 2 fs
     eprintln!(
         "  GPU (SHAKE, dt=2 fs, bare step_batch_shake): {timed} steps in {:.2} s — {:.3} ms/step = {:.3} ms/fs",
         secs, ms_per_step, ms_per_fs
@@ -269,7 +298,10 @@ fn bench_built(mut s: geom::Structure, label: &str, warmup: usize, timed: usize)
     let n = s.atom_count();
     let g = build_topology_graph(&s);
     let ff = standard_ff();
-    eprintln!("\n=== {label} — {n} atoms ({} residues) ===", s.residues.len());
+    eprintln!(
+        "\n=== {label} — {n} atoms ({} residues) ===",
+        s.residues.len()
+    );
     let t0 = Instant::now();
     relax(&mut s, &g, ff);
     eprintln!("  relaxed in {:.2} s", t0.elapsed().as_secs_f64());
@@ -360,19 +392,47 @@ fn bench_gpu_vs_cpu_across_sizes() {
     // 100-step trajectory, so larger samples bloat the bench.
     let warmup = 20;
     let timed = 100;
-    bench_one("../io/tests/fixtures/1L2Y_model1.pdb", "Trp-cage 1L2Y", warmup, timed);
-    bench_one("../io/tests/fixtures/1CRN_crambin.pdb", "Crambin 1CRN", warmup, timed);
-    bench_one("../io/tests/fixtures/2F4K_villin_hp35.pdb", "Villin HP-35 2F4K", warmup, timed);
-    bench_one("../io/tests/fixtures/2HIU_insulin.pdb", "Insulin 2HIU (first MODEL)", warmup, timed);
+    bench_one(
+        "../io/tests/fixtures/1L2Y_model1.pdb",
+        "Trp-cage 1L2Y",
+        warmup,
+        timed,
+    );
+    bench_one(
+        "../io/tests/fixtures/1CRN_crambin.pdb",
+        "Crambin 1CRN",
+        warmup,
+        timed,
+    );
+    bench_one(
+        "../io/tests/fixtures/2F4K_villin_hp35.pdb",
+        "Villin HP-35 2F4K",
+        warmup,
+        timed,
+    );
+    bench_one(
+        "../io/tests/fixtures/2HIU_insulin.pdb",
+        "Insulin 2HIU (first MODEL)",
+        warmup,
+        timed,
+    );
 
     // Synthetic above-crossover probes.  Built poly-(AGLEK)ₙ extended
     // chains so the sequence variety exercises every relevant atom
     // type and per-atom charge.  These never get to fold — we just
     // need realistic per-step pair-loop work at known size.
     let block: Vec<AminoAcid> = vec![
-        AminoAcid::Ala, AminoAcid::Gly, AminoAcid::Leu, AminoAcid::Glu, AminoAcid::Lys,
+        AminoAcid::Ala,
+        AminoAcid::Gly,
+        AminoAcid::Leu,
+        AminoAcid::Glu,
+        AminoAcid::Lys,
     ];
-    for (n_reps, label) in [(20, "~1300 atoms"), (40, "~2600 atoms"), (80, "~5300 atoms")] {
+    for (n_reps, label) in [
+        (20, "~1300 atoms"),
+        (40, "~2600 atoms"),
+        (80, "~5300 atoms"),
+    ] {
         let seq: Vec<AminoAcid> = block.iter().cloned().cycle().take(n_reps * 5).collect();
         let s = build_extended_chain(&seq).expect("build extended chain");
         let prefixed = format!("Built {n_reps}×AGLEK ({label})");

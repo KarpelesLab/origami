@@ -28,10 +28,15 @@ fn read_fixture(path: &str) -> geom::Structure {
 
 fn assert_native_better(name: &str, native_path: &str, expected_seq: &str, min_gap_kj_mol: f64) {
     let native = read_fixture(native_path);
-    let seq: String = native.residues.iter().map(|r| r.aa().one_letter()).collect();
+    let seq: String = native
+        .residues
+        .iter()
+        .map(|r| r.aa().one_letter())
+        .collect();
     assert_eq!(
         seq, expected_seq,
-        "{name}: parsed sequence ({}) != expected ({})", seq, expected_seq
+        "{name}: parsed sequence ({}) != expected ({})",
+        seq, expected_seq
     );
 
     let extended = build_extended_chain(
@@ -46,9 +51,7 @@ fn assert_native_better(name: &str, native_path: &str, expected_seq: &str, min_g
     let e_extended = total_energy_no_sasa(&extended);
     let gap = e_extended - e_native;
 
-    eprintln!(
-        "{name}: native = {e_native:.1}  extended = {e_extended:.1}  gap = {gap:.1} kJ/mol"
-    );
+    eprintln!("{name}: native = {e_native:.1}  extended = {e_extended:.1}  gap = {gap:.1} kJ/mol");
     assert!(
         gap > min_gap_kj_mol,
         "{name}: native should score at least {min_gap_kj_mol} below extended, got {gap}"
@@ -85,7 +88,11 @@ fn villin_hp35_native_beats_extended() {
     // the comparison is "native fold" vs "extended chain", not
     // "X-ray-reported coordinates" vs "extended chain".
     let mut native = read_fixture("tests/fixtures/2F4K_villin_hp35.pdb");
-    let seq: String = native.residues.iter().map(|r| r.aa().one_letter()).collect();
+    let seq: String = native
+        .residues
+        .iter()
+        .map(|r| r.aa().one_letter())
+        .collect();
     eprintln!("villin HP35 fixture seq ({} aa): {}", seq.len(), seq);
     assert!(seq.len() >= 30, "expected ≥30 residues, got {}", seq.len());
 
@@ -122,7 +129,9 @@ fn villin_hp35_native_beats_extended() {
     let e_native = total_energy_no_sasa(&native);
     let e_extended = total_energy_no_sasa(&extended);
     let gap = e_extended - e_native;
-    eprintln!("villin HP35: native (minimised) = {e_native:.1} extended = {e_extended:.1} gap = {gap:.1}");
+    eprintln!(
+        "villin HP35: native (minimised) = {e_native:.1} extended = {e_extended:.1} gap = {gap:.1}"
+    );
     assert!(
         gap > 10_000.0,
         "villin: native should score at least 10 000 kJ/mol below extended, got {gap}"

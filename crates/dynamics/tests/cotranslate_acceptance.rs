@@ -59,7 +59,11 @@ fn cotranslate_ala5_grows_to_five_residues() {
         assert!(c >= prev, "residue count went backwards: {} -> {}", prev, c);
         prev = c;
     }
-    assert!(residue_history.len() > 5, "expected several frames, got {}", residue_history.len());
+    assert!(
+        residue_history.len() > 5,
+        "expected several frames, got {}",
+        residue_history.len()
+    );
 }
 
 #[test]
@@ -114,6 +118,8 @@ fn cotranslate_with_tunnel_keeps_chain_inside_radius() {
     // shouldn't fly off.
     assert!(
         max_radial < tunnel.radius_a + 4.0,
-        "max radial distance {} > {} + slop", max_radial, tunnel.radius_a
+        "max radial distance {} > {} + slop",
+        max_radial,
+        tunnel.radius_a
     );
 }

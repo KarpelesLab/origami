@@ -21,7 +21,9 @@ use geom::builder::rna_ic::RnaTorsionSet;
 use geom::{build_rna_chain_with_torsions, build_topology_graph, Vec3};
 use std::f64::consts::PI;
 
-fn deg(d: f64) -> f64 { d * PI / 180.0 }
+fn deg(d: f64) -> f64 {
+    d * PI / 180.0
+}
 
 fn fit_helix_axis(p: &[Vec3]) -> (Vec3, Vec3) {
     let centroid: Vec3 = p.iter().sum::<Vec3>() / (p.len() as f64);
@@ -29,41 +31,53 @@ fn fit_helix_axis(p: &[Vec3]) -> (Vec3, Vec3) {
     for v in p {
         let c = v - centroid;
         let cs = [c.x, c.y, c.z];
-        for i in 0..3 { for j in 0..3 { m[i][j] += cs[i] * cs[j]; } }
+        for i in 0..3 {
+            for j in 0..3 {
+                m[i][j] += cs[i] * cs[j];
+            }
+        }
     }
     let mut axis = Vec3::new(1.0, 1.0, 1.0).normalize();
     for _ in 0..80 {
         let v = [axis.x, axis.y, axis.z];
         let next = Vec3::new(
-            m[0][0]*v[0] + m[0][1]*v[1] + m[0][2]*v[2],
-            m[1][0]*v[0] + m[1][1]*v[1] + m[1][2]*v[2],
-            m[2][0]*v[0] + m[2][1]*v[1] + m[2][2]*v[2],
+            m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+            m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+            m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
         );
         axis = next.normalize();
     }
-    let mean_rise: f64 = (1..p.len()).map(|i| (p[i] - p[i-1]).dot(&axis)).sum::<f64>()
+    let mean_rise: f64 = (1..p.len())
+        .map(|i| (p[i] - p[i - 1]).dot(&axis))
+        .sum::<f64>()
         / (p.len() - 1) as f64;
-    if mean_rise < 0.0 { axis = -axis; }
+    if mean_rise < 0.0 {
+        axis = -axis;
+    }
     (centroid, axis)
 }
 
 fn helix_metrics(s: &geom::Structure) -> (f64, f64, f64, f64) {
     // Returns (mean_rise, mean_twist_deg, mean_radius, max_ring_err).
-    let p: Vec<Vec3> = s.residues.iter()
-        .filter_map(|r| r.position("P")).collect();
+    let p: Vec<Vec3> = s.residues.iter().filter_map(|r| r.position("P")).collect();
     let (centroid, axis) = fit_helix_axis(&p);
-    let rises: Vec<f64> = (1..p.len()).map(|i| (p[i] - p[i-1]).dot(&axis)).collect();
+    let rises: Vec<f64> = (1..p.len()).map(|i| (p[i] - p[i - 1]).dot(&axis)).collect();
     let project = |v: Vec3| v - axis * v.dot(&axis);
-    let twists: Vec<f64> = (1..p.len()).map(|i| {
-        let a = project(p[i-1] - centroid);
-        let b = project(p[i] - centroid);
-        let cos_t = (a.dot(&b) / (a.norm() * b.norm())).clamp(-1.0, 1.0);
-        let sign = a.cross(&b).dot(&axis).signum();
-        sign * cos_t.acos().to_degrees()
-    }).collect();
+    let twists: Vec<f64> = (1..p.len())
+        .map(|i| {
+            let a = project(p[i - 1] - centroid);
+            let b = project(p[i] - centroid);
+            let cos_t = (a.dot(&b) / (a.norm() * b.norm())).clamp(-1.0, 1.0);
+            let sign = a.cross(&b).dot(&axis).signum();
+            sign * cos_t.acos().to_degrees()
+        })
+        .collect();
     let mean_rise = rises.iter().sum::<f64>() / rises.len() as f64;
     let mean_twist = twists.iter().sum::<f64>() / twists.len() as f64;
-    let radii: Vec<f64> = p.iter().map(|q| (q - centroid - axis*((q - centroid).dot(&axis))).norm()).collect();
+    let radii: Vec<f64> = p
+        .iter()
+        .map(|q| (q - centroid - axis * ((q - centroid).dot(&axis))).norm())
+        .collect();
     let mean_radius = radii.iter().sum::<f64>() / radii.len() as f64;
     let mut max_ring_err = 0.0_f64;
     for r in &s.residues {
@@ -77,22 +91,26 @@ fn helix_metrics(s: &geom::Structure) -> (f64, f64, f64, f64) {
 #[test]
 #[ignore]
 fn grid_search_gamma_epsilon_for_canonical_a_form() {
-    let block = [Nucleotide::Adenine, Nucleotide::Uracil,
-                 Nucleotide::Guanine, Nucleotide::Cytosine];
+    let block = [
+        Nucleotide::Adenine,
+        Nucleotide::Uracil,
+        Nucleotide::Guanine,
+        Nucleotide::Cytosine,
+    ];
     let seq: Vec<_> = block.iter().cloned().cycle().take(12).collect();
 
     // Canonical targets.
-    let r_target = 2.81;       // Å/nt rise
-    let t_target = 32.7;       // °/nt twist
-    let rad_target = 9.4;      // Å helix radius
+    let r_target = 2.81; // Å/nt rise
+    let t_target = 32.7; // °/nt twist
+    let rad_target = 9.4; // Å helix radius
 
     // Score: weighted sum of squared deviations.  Weights tuned by
     // hand so the three axes contribute comparable magnitudes near
     // the current builder's miss.
     let score = |r: f64, t: f64, rad: f64| -> f64 {
-        let w_r = 1.0;          // 0.1 Å miss → 0.01
-        let w_t = 0.01;         // 5°  miss → 0.25
-        let w_rad = 0.1;        // 1 Å miss → 0.1
+        let w_r = 1.0; // 0.1 Å miss → 0.01
+        let w_t = 0.01; // 5°  miss → 0.25
+        let w_rad = 0.1; // 1 Å miss → 0.1
         let dr = r - r_target;
         let dt = t - t_target;
         let drad = rad - rad_target;
@@ -138,9 +156,14 @@ fn grid_search_gamma_epsilon_for_canonical_a_form() {
                         o4_tors: deg(g_deg - 69.0),
                         ..base
                     };
-                    let Ok(s) = build_rna_chain_with_torsions(&seq, tors) else { continue };
+                    let Ok(s) = build_rna_chain_with_torsions(&seq, tors) else {
+                        continue;
+                    };
                     let (r, t, rad, ring) = helix_metrics(&s);
-                    if ring > 0.05 { rejected_ring += 1; continue; }
+                    if ring > 0.05 {
+                        rejected_ring += 1;
+                        continue;
+                    }
                     let geom_sc = score(r, t, rad);
                     let e = total_energy(&s);
                     // Combined: 1000 kJ/mol energy penalty = 1.0 on the

@@ -36,17 +36,16 @@ fn extended_trp_cage_minimises_to_low_energy() {
     );
     assert!(
         result.final_energy < 1000.0,
-        "minimised total {} > 1000 kJ/mol", result.final_energy,
+        "minimised total {} > 1000 kJ/mol",
+        result.final_energy,
     );
-    assert!(
-        result.steps < 500,
-        "took too many steps ({})", result.steps,
-    );
+    assert!(result.steps < 500, "took too many steps ({})", result.steps,);
 
     // Re-evaluate bonded breakdown on the final structure.
     let bonded = bonded_energy(&s, &g, ff);
     assert!(
         bonded.bond_kj_mol < 200.0,
-        "bond term {} > 200 kJ/mol after minimisation", bonded.bond_kj_mol,
+        "bond term {} > 200 kJ/mol after minimisation",
+        bonded.bond_kj_mol,
     );
 }

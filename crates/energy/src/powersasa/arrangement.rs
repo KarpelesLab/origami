@@ -153,9 +153,10 @@ pub fn find_boundary(caps: &[SmallCircle]) -> AtomBoundary {
         if verts.is_empty() {
             // Test one representative point on this circle.
             let probe = sample_circle_point(caps[k]);
-            let buried = caps.iter().enumerate().any(|(m, cap_m)| {
-                m != k && cap_m.contains_strict(probe)
-            });
+            let buried = caps
+                .iter()
+                .enumerate()
+                .any(|(m, cap_m)| m != k && cap_m.contains_strict(probe));
             if !buried {
                 // The whole circle is a boundary loop. Traverse CW around the
                 // cap (CCW around accessible region) → θ_arc = −2π.
@@ -193,9 +194,10 @@ pub fn find_boundary(caps: &[SmallCircle]) -> AtomBoundary {
                 continue;
             }
             let mid = midpoint_on_circle(a_pt, caps[k], ccw_norm / 2.0);
-            let mid_ok = !caps.iter().enumerate().any(|(idx, cap_m)| {
-                idx != k && cap_m.contains_strict(mid)
-            });
+            let mid_ok = !caps
+                .iter()
+                .enumerate()
+                .any(|(idx, cap_m)| idx != k && cap_m.contains_strict(mid));
             if !mid_ok {
                 continue;
             }
@@ -295,12 +297,7 @@ fn every_point_buried(caps: &[SmallCircle]) -> bool {
     for i in 0..200 {
         let phi = (i as f64) * 0.39 + 0.1;
         let theta = (i as f64) * 0.71 + 0.2;
-        let p = Vec3::new(
-            phi.sin() * theta.cos(),
-            phi.sin() * theta.sin(),
-            phi.cos(),
-        )
-        .normalize();
+        let p = Vec3::new(phi.sin() * theta.cos(), phi.sin() * theta.sin(), phi.cos()).normalize();
         if !caps.iter().any(|cap| cap.contains_strict(p)) {
             return false;
         }

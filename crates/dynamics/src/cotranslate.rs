@@ -112,16 +112,10 @@ impl CodonPacedRibosome {
     /// K-12 rarity factors.  Stops at the first stop codon.  Returns
     /// an error if the mRNA doesn't start with AUG, contains an
     /// invalid base, or has length not a multiple of 3.
-    pub fn from_mrna_ecoli(
-        mrna: &str,
-        base_interval_fs: f64,
-    ) -> Result<Self, MrnaParseError> {
+    pub fn from_mrna_ecoli(mrna: &str, base_interval_fs: f64) -> Result<Self, MrnaParseError> {
         let codons = parse_mrna_codons(mrna)?;
-        let ribosome = Self::from_codons_with_rarity(
-            &codons,
-            base_interval_fs,
-            chem::ecoli_k12_rarity_factor,
-        );
+        let ribosome =
+            Self::from_codons_with_rarity(&codons, base_interval_fs, chem::ecoli_k12_rarity_factor);
         if ribosome.sequence.is_empty() {
             return Err(MrnaParseError::Empty);
         }
@@ -170,9 +164,7 @@ impl Ribosome for CodonPacedRibosome {
         self.cumulative_times_fs
             .get(residue_idx)
             .copied()
-            .unwrap_or_else(|| {
-                self.cumulative_times_fs.last().copied().unwrap_or(0.0)
-            })
+            .unwrap_or_else(|| self.cumulative_times_fs.last().copied().unwrap_or(0.0))
     }
 }
 
@@ -187,10 +179,7 @@ pub enum MrnaParseError {
 }
 
 fn parse_mrna_codons(mrna: &str) -> Result<Vec<chem::Codon>, MrnaParseError> {
-    let bytes: Vec<u8> = mrna
-        .bytes()
-        .filter(|b| !b.is_ascii_whitespace())
-        .collect();
+    let bytes: Vec<u8> = mrna.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
     if bytes.len() % 3 != 0 {
         return Err(MrnaParseError::NotTripletAligned(bytes.len()));
     }
@@ -329,8 +318,14 @@ where
         clock_fs = clock_fs.max(emit_t);
 
         // Append the residue.
-        append_residue(&mut structure, seq[i], DEFAULT_PHI, DEFAULT_PSI, DEFAULT_OMEGA)
-            .expect("chain extension failed");
+        append_residue(
+            &mut structure,
+            seq[i],
+            DEFAULT_PHI,
+            DEFAULT_PSI,
+            DEFAULT_OMEGA,
+        )
+        .expect("chain extension failed");
         // Minimise after each append to relieve clashes between the
         // newly-placed residue (NeRF-built at idealised internal
         // coordinates) and the already-wiggled existing chain. Brief
@@ -522,10 +517,7 @@ mod tests {
 
     #[test]
     fn uniform_ribosome_emission_times() {
-        let r = UniformRibosome::new(
-            vec![AminoAcid::Ala, AminoAcid::Gly, AminoAcid::Ser],
-            500.0,
-        );
+        let r = UniformRibosome::new(vec![AminoAcid::Ala, AminoAcid::Gly, AminoAcid::Ser], 500.0);
         assert_eq!(r.emission_time_fs(0), 0.0);
         assert_eq!(r.emission_time_fs(1), 500.0);
         assert_eq!(r.emission_time_fs(2), 1000.0);
@@ -556,7 +548,10 @@ mod tests {
         //   AUG (Met) + AGG (Arg, 5×) + GCU (Ala, 1×)
         let base_fs = 1000.0;
         let r = CodonPacedRibosome::from_mrna_ecoli("AUGAGGGCU", base_fs).unwrap();
-        assert_eq!(r.sequence(), &[AminoAcid::Met, AminoAcid::Arg, AminoAcid::Ala]);
+        assert_eq!(
+            r.sequence(),
+            &[AminoAcid::Met, AminoAcid::Arg, AminoAcid::Ala]
+        );
         assert!((r.emission_time_fs(0) - 0.0).abs() < 1e-9);
         // After Met (1× base): residue 1 emitted at 1000 fs.
         assert!((r.emission_time_fs(1) - 1000.0).abs() < 1e-9);

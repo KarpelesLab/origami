@@ -82,8 +82,11 @@ impl NonbondedPipeline {
     pub fn new(ctx: &'static GpuContext, n_atoms: usize, setup: NonbondedSetup) -> Self {
         assert_eq!(setup.type_index.len(), n_atoms);
         assert_eq!(setup.charges.len(), n_atoms);
-        assert_eq!(setup.lj_params.len(), setup.lj_params_14.len(),
-            "lj_params and lj_params_14 must have the same per-type shape");
+        assert_eq!(
+            setup.lj_params.len(),
+            setup.lj_params_14.len(),
+            "lj_params and lj_params_14 must have the same per-type shape"
+        );
         let n_exclusion_words = (n_atoms * n_atoms).div_ceil(32);
         assert_eq!(setup.exclusions.len(), n_exclusion_words);
         assert_eq!(setup.one_four_mask.len(), n_exclusion_words);
@@ -170,15 +173,42 @@ impl NonbondedPipeline {
             label: Some("nb_bind_group"),
             layout: &bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: positions_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: type_index_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: lj_table_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: lj_table_14_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 5, resource: charges_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 6, resource: exclusions_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 7, resource: one_four_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 8, resource: forces_buf.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: positions_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: type_index_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: lj_table_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: lj_table_14_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: charges_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: exclusions_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: one_four_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: forces_buf.as_entire_binding(),
+                },
             ],
         });
 
@@ -204,9 +234,11 @@ impl NonbondedPipeline {
         for (i, p) in positions.iter().enumerate() {
             self.pos_padded[i] = [p[0], p[1], p[2], 0.0];
         }
-        self.ctx
-            .queue
-            .write_buffer(&self.positions_buf, 0, bytemuck::cast_slice(&self.pos_padded));
+        self.ctx.queue.write_buffer(
+            &self.positions_buf,
+            0,
+            bytemuck::cast_slice(&self.pos_padded),
+        );
     }
 
     /// Dispatch the compute pass and read back the per-atom force
@@ -236,7 +268,9 @@ impl NonbondedPipeline {
             let _ = tx.send(r);
         });
         let _ = device.poll(wgpu::Maintain::Wait);
-        rx.recv().expect("map_async sender dropped").expect("buffer map");
+        rx.recv()
+            .expect("map_async sender dropped")
+            .expect("buffer map");
         let data = slice.get_mapped_range();
         let padded: &[[f32; 4]] = bytemuck::cast_slice(&data);
         let out: Vec<[f32; 3]> = padded.iter().map(|v| [v[0], v[1], v[2]]).collect();

@@ -212,11 +212,7 @@ impl Nucleotide {
                 ("H5", Element::H),
                 ("H6", Element::H),
             ],
-            Self::Uracil => &[
-                ("H3", Element::H),
-                ("H5", Element::H),
-                ("H6", Element::H),
-            ],
+            Self::Uracil => &[("H3", Element::H), ("H5", Element::H), ("H6", Element::H)],
         }
     }
 
@@ -393,7 +389,10 @@ mod tests {
 
     #[test]
     fn dna_t_normalised_to_uracil() {
-        assert_eq!(Nucleotide::from_one_letter('T').unwrap(), Nucleotide::Uracil);
+        assert_eq!(
+            Nucleotide::from_one_letter('T').unwrap(),
+            Nucleotide::Uracil
+        );
     }
 
     #[test]

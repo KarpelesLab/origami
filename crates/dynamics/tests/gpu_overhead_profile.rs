@@ -20,7 +20,13 @@ use gpu::GpuContext;
 
 fn build_chain(n_residues: usize) -> geom::Structure {
     let mut seq = Vec::with_capacity(n_residues);
-    let block = [AminoAcid::Ala, AminoAcid::Gly, AminoAcid::Leu, AminoAcid::Glu, AminoAcid::Lys];
+    let block = [
+        AminoAcid::Ala,
+        AminoAcid::Gly,
+        AminoAcid::Leu,
+        AminoAcid::Glu,
+        AminoAcid::Lys,
+    ];
     for i in 0..n_residues {
         seq.push(block[i % block.len()]);
     }
@@ -35,7 +41,7 @@ fn profile_run_langevin_vs_bare_step_batch() {
         return;
     }
     // Big-N system where the overhead matters most.
-    let s = build_chain(400);  // ~5840 atoms
+    let s = build_chain(400); // ~5840 atoms
     let g = build_topology_graph(&s);
     let ff = standard_ff();
     let n = s.atom_count();
@@ -43,17 +49,22 @@ fn profile_run_langevin_vs_bare_step_batch() {
 
     // ---- Phase 1: construction ----
     let t0 = Instant::now();
-    let mut full = FullGpuIntegrator::new(&s, &g, ff, 1.0, 2.0, 310.0, 1)
-        .expect("construct");
+    let mut full = FullGpuIntegrator::new(&s, &g, ff, 1.0, 2.0, 310.0, 1).expect("construct");
     let construct_ms = t0.elapsed().as_secs_f64() * 1000.0;
-    eprintln!("Construction (FullGpuIntegrator::new): {:.2} ms", construct_ms);
+    eprintln!(
+        "Construction (FullGpuIntegrator::new): {:.2} ms",
+        construct_ms
+    );
 
     // ---- Phase 2: upload_initial_state (includes refresh_neighbour_lists) ----
     let velocities = vec![Vec3::zeros(); n];
     let t0 = Instant::now();
     full.upload_initial_state(&s, &velocities);
     let upload_ms = t0.elapsed().as_secs_f64() * 1000.0;
-    eprintln!("upload_initial_state (incl. initial nb/gb build): {:.2} ms", upload_ms);
+    eprintln!(
+        "upload_initial_state (incl. initial nb/gb build): {:.2} ms",
+        upload_ms
+    );
 
     // ---- Phase 3: warmup ----
     full.step_batch(20);
@@ -65,7 +76,8 @@ fn profile_run_langevin_vs_bare_step_batch() {
         let ms = t0.elapsed().as_secs_f64() * 1000.0;
         eprintln!(
             "step_batch({batch}): {:.2} ms total = {:.3} ms/step",
-            ms, ms / batch as f64
+            ms,
+            ms / batch as f64
         );
     }
 
@@ -137,6 +149,7 @@ fn profile_run_langevin_vs_bare_step_batch() {
     let run_ms = t0.elapsed().as_secs_f64() * 1000.0;
     eprintln!(
         "Full run_langevin(steps=100, save_every=25): {:.2} ms = {:.3} ms/step",
-        run_ms, run_ms / 100.0
+        run_ms,
+        run_ms / 100.0
     );
 }

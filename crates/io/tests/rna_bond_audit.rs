@@ -64,7 +64,11 @@ fn audit_extended_chain_bond_lengths() {
         // CHARMM convention: V = K (r − r₀)² (no ½ prefactor).
         let energy_kj = p.k * dev * dev * kcal_to_kj;
         total_kj += energy_kj;
-        let key = if (ta as u8) <= (tb as u8) { (ta, tb) } else { (tb, ta) };
+        let key = if (ta as u8) <= (tb as u8) {
+            (ta, tb)
+        } else {
+            (tb, ta)
+        };
         let s = per_pair.entry(key).or_default();
         s.count += 1;
         s.sum_deviation += dev.abs();

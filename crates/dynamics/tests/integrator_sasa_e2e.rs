@@ -21,9 +21,7 @@ fn gpu_integrator_with_sasa_runs_without_divergence() {
         eprintln!("GPU unavailable, skipping");
         return;
     }
-    let mut s = build_extended_chain(&[
-        AminoAcid::Ala, AminoAcid::Lys, AminoAcid::Glu,
-    ]).unwrap();
+    let mut s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Lys, AminoAcid::Glu]).unwrap();
     let g = build_topology_graph(&s);
     let ff = standard_ff();
     let n = s.atom_count();
@@ -32,9 +30,8 @@ fn gpu_integrator_with_sasa_runs_without_divergence() {
     let gamma_ps_inv = 2.0;
     let temperature_k = 310.0;
 
-    let mut full = FullGpuIntegrator::new(
-        &s, &g, ff, dt_fs, gamma_ps_inv, temperature_k, 7,
-    ).expect("FullGpuIntegrator construction");
+    let mut full = FullGpuIntegrator::new(&s, &g, ff, dt_fs, gamma_ps_inv, temperature_k, 7)
+        .expect("FullGpuIntegrator construction");
     // Build per-atom γ from the default table.
     let gammas = energy::powersasa::default_sasa_gammas(&s);
     full.enable_sasa_mode(&s, &gammas);
@@ -47,14 +44,17 @@ fn gpu_integrator_with_sasa_runs_without_divergence() {
     let elapsed = t0.elapsed().as_secs_f64();
     eprintln!(
         "GPU integrator + SASA on {n} atoms: {n_steps} steps in {:.3} s = {:.3} ms/step",
-        elapsed, elapsed * 1000.0 / n_steps as f64,
+        elapsed,
+        elapsed * 1000.0 / n_steps as f64,
     );
 
     full.download_positions_into(&mut s);
     for r in &s.residues {
         for a in &r.atoms {
-            assert!(a.position.x.is_finite() && a.position.y.is_finite() && a.position.z.is_finite(),
-                "non-finite position after SASA-mode integrator");
+            assert!(
+                a.position.x.is_finite() && a.position.y.is_finite() && a.position.z.is_finite(),
+                "non-finite position after SASA-mode integrator"
+            );
         }
     }
     // Soft sanity: velocity magnitudes should be in the Maxwell-Boltzmann
@@ -63,6 +63,8 @@ fn gpu_integrator_with_sasa_runs_without_divergence() {
     let vels = full.download_velocities();
     let max_v = vels.iter().map(|v| v.norm()).fold(0.0_f64, f64::max);
     eprintln!("max velocity magnitude: {max_v:.4} Å/fs");
-    assert!(max_v < 0.5,
-        "velocity blew up: max {max_v} Å/fs (should be < 0.5 Å/fs at 310 K with γ=2/ps)");
+    assert!(
+        max_v < 0.5,
+        "velocity blew up: max {max_v} Å/fs (should be < 0.5 Å/fs at 310 K with γ=2/ps)"
+    );
 }

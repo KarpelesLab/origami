@@ -33,11 +33,11 @@ pub const TILE_SIZE: usize = 64;
 /// result with 2 bits of zeros between each input bit.  Standard
 /// Morton-code primitive.
 fn part_1by2_u32(x: u32) -> u32 {
-    let mut x = x & 0x3FF;             // 10 bits
+    let mut x = x & 0x3FF; // 10 bits
     x = (x | (x << 16)) & 0x030000FF;
-    x = (x | (x << 8))  & 0x0300F00F;
-    x = (x | (x << 4))  & 0x030C30C3;
-    x = (x | (x << 2))  & 0x09249249;
+    x = (x | (x << 8)) & 0x0300F00F;
+    x = (x | (x << 4)) & 0x030C30C3;
+    x = (x | (x << 2)) & 0x09249249;
     x
 }
 
@@ -62,8 +62,12 @@ pub fn morton_permutation(positions_cpu_order: &[[f32; 3]]) -> (Vec<u32>, Vec<u3
     let mut mx = [f32::NEG_INFINITY; 3];
     for p in positions_cpu_order {
         for k in 0..3 {
-            if p[k] < mn[k] { mn[k] = p[k]; }
-            if p[k] > mx[k] { mx[k] = p[k]; }
+            if p[k] < mn[k] {
+                mn[k] = p[k];
+            }
+            if p[k] > mx[k] {
+                mx[k] = p[k];
+            }
         }
     }
     // Avoid divide-by-zero on degenerate axes.
@@ -112,8 +116,10 @@ mod tests {
         assert_eq!(cpu_to_gpu.len(), 100);
         for cpu_idx in 0..100u32 {
             let gpu_idx = cpu_to_gpu[cpu_idx as usize];
-            assert_eq!(gpu_to_cpu[gpu_idx as usize], cpu_idx,
-                "permutation not a bijection at cpu_idx={cpu_idx}");
+            assert_eq!(
+                gpu_to_cpu[gpu_idx as usize], cpu_idx,
+                "permutation not a bijection at cpu_idx={cpu_idx}"
+            );
         }
     }
 
@@ -134,13 +140,17 @@ mod tests {
         // CPU indices in the first cluster (0..50).
         for gpu_idx in 0..50 {
             let cpu_idx = gpu_to_cpu[gpu_idx];
-            assert!(cpu_idx < 50,
-                "gpu_idx={gpu_idx} should map to first cluster, got cpu_idx={cpu_idx}");
+            assert!(
+                cpu_idx < 50,
+                "gpu_idx={gpu_idx} should map to first cluster, got cpu_idx={cpu_idx}"
+            );
         }
         for gpu_idx in 50..100 {
             let cpu_idx = gpu_to_cpu[gpu_idx];
-            assert!(cpu_idx >= 50,
-                "gpu_idx={gpu_idx} should map to second cluster, got cpu_idx={cpu_idx}");
+            assert!(
+                cpu_idx >= 50,
+                "gpu_idx={gpu_idx} should map to second cluster, got cpu_idx={cpu_idx}"
+            );
         }
     }
 }

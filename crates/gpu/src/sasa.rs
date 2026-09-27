@@ -99,7 +99,9 @@ impl SasaPipeline {
         let device = &ctx.device;
         let params = Params {
             n_atoms: n_atoms as u32,
-            _pad0: 0, _pad1: 0, _pad2: 0,
+            _pad0: 0,
+            _pad1: 0,
+            _pad2: 0,
         };
         let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("sasa_params"),
@@ -201,9 +203,11 @@ impl SasaPipeline {
         for (i, p) in positions.iter().enumerate() {
             self.pos_padded[i] = [p[0], p[1], p[2], 0.0];
         }
-        self.ctx
-            .queue
-            .write_buffer(&self.positions_buf, 0, bytemuck::cast_slice(&self.pos_padded));
+        self.ctx.queue.write_buffer(
+            &self.positions_buf,
+            0,
+            bytemuck::cast_slice(&self.pos_padded),
+        );
     }
 
     pub fn update_neighbours(&mut self, counts: &[u32], starts: &[u32], indices: &[u32]) {
@@ -256,13 +260,23 @@ impl SasaPipeline {
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.dispatch_workgroups(self.n_atoms.div_ceil(64) as u32, 1, 1);
         }
-        encoder.copy_buffer_to_buffer(&self.per_atom_area_buf, 0, &self.readback_buf, 0, self.area_size);
+        encoder.copy_buffer_to_buffer(
+            &self.per_atom_area_buf,
+            0,
+            &self.readback_buf,
+            0,
+            self.area_size,
+        );
         queue.submit(Some(encoder.finish()));
         let slice = self.readback_buf.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
         let _ = device.poll(wgpu::Maintain::Wait);
-        rx.recv().expect("map_async sender dropped").expect("buffer map");
+        rx.recv()
+            .expect("map_async sender dropped")
+            .expect("buffer map");
         let data = slice.get_mapped_range();
         let out: Vec<f32> = bytemuck::cast_slice::<u8, f32>(&data).to_vec();
         drop(data);
@@ -288,14 +302,38 @@ fn create_bind_group(
         label: Some("sasa_bind_group"),
         layout,
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: positions.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: radii.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: dots.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 4, resource: nbr_count.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 5, resource: nbr_start.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 6, resource: nbr_indices.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 7, resource: per_atom_area.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: positions.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: radii.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: dots.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: nbr_count.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: nbr_start.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: nbr_indices.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: per_atom_area.as_entire_binding(),
+            },
         ],
     })
 }

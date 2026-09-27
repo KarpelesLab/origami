@@ -114,7 +114,10 @@ pub fn nonbonded_energy(
                     panic!("unclassified atom {:?} {}", residue.monomer, atom.name)
                 }),
             );
-            charges.push(ff.partial_charge_for(residue.monomer, atom.name).unwrap_or(0.0));
+            charges.push(
+                ff.partial_charge_for(residue.monomer, atom.name)
+                    .unwrap_or(0.0),
+            );
         }
     }
 

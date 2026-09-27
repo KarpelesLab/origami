@@ -30,10 +30,7 @@ pub fn radius_of_gyration_points(points: &[Vec3]) -> f64 {
     }
     let n = points.len() as f64;
     let centroid: Vec3 = points.iter().copied().sum::<Vec3>() / n;
-    let sq_sum: f64 = points
-        .iter()
-        .map(|p| (*p - centroid).norm_squared())
-        .sum();
+    let sq_sum: f64 = points.iter().map(|p| (*p - centroid).norm_squared()).sum();
     (sq_sum / n).sqrt()
 }
 

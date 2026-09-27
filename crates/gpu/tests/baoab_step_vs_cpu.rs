@@ -72,24 +72,31 @@ fn gpu_baoab_matches_cpu_deterministic() {
     // GPU kernel's arithmetic is correct.
     let ctx = match GpuContext::get() {
         Ok(c) => c,
-        Err(e) => { eprintln!("GPU unavailable: {e}"); return; }
+        Err(e) => {
+            eprintln!("GPU unavailable: {e}");
+            return;
+        }
     };
     let n = 10;
     // Synthetic atoms: linear chain of mass-12 atoms with small
     // displacements + small constant forces along x.
-    let mut positions_cpu: Vec<[f64; 3]> = (0..n)
-        .map(|i| [i as f64 * 1.5, 0.0, 0.0]).collect();
-    let mut velocities_cpu: Vec<[f64; 3]> = (0..n)
-        .map(|i| [0.01 * i as f64, 0.0, 0.0]).collect();
+    let mut positions_cpu: Vec<[f64; 3]> = (0..n).map(|i| [i as f64 * 1.5, 0.0, 0.0]).collect();
+    let mut velocities_cpu: Vec<[f64; 3]> = (0..n).map(|i| [0.01 * i as f64, 0.0, 0.0]).collect();
     let masses_cpu: Vec<f64> = (0..n).map(|_| 12.011).collect();
     let forces_cpu: Vec<[f64; 3]> = (0..n).map(|_| [50.0, 0.0, 0.0]).collect();
 
     let positions_gpu_f32: Vec<[f32; 3]> = positions_cpu
-        .iter().map(|p| [p[0] as f32, p[1] as f32, p[2] as f32]).collect();
+        .iter()
+        .map(|p| [p[0] as f32, p[1] as f32, p[2] as f32])
+        .collect();
     let velocities_gpu_f32: Vec<[f32; 3]> = velocities_cpu
-        .iter().map(|v| [v[0] as f32, v[1] as f32, v[2] as f32]).collect();
+        .iter()
+        .map(|v| [v[0] as f32, v[1] as f32, v[2] as f32])
+        .collect();
     let forces_gpu_f32: Vec<[f32; 3]> = forces_cpu
-        .iter().map(|f| [f[0] as f32, f[1] as f32, f[2] as f32]).collect();
+        .iter()
+        .map(|f| [f[0] as f32, f[1] as f32, f[2] as f32])
+        .collect();
     let masses_gpu_f32: Vec<f32> = masses_cpu.iter().map(|&m| m as f32).collect();
 
     let rng_state = make_rng_state(42, n);
@@ -100,7 +107,7 @@ fn gpu_baoab_matches_cpu_deterministic() {
 
     let dt = 1.0;
     let gamma = 2.0;
-    let kbt = 0.0;     // T = 0 → noise = 0
+    let kbt = 0.0; // T = 0 → noise = 0
     pipe.set_step_params(dt as f32, gamma as f32, kbt as f32);
 
     // Dispatch first + second half (same forces for both — at T = 0,
@@ -124,7 +131,9 @@ fn gpu_baoab_matches_cpu_deterministic() {
         &mut velocities_cpu,
         &masses_cpu,
         &forces_cpu,
-        dt, gamma, kbt,
+        dt,
+        gamma,
+        kbt,
     );
 
     let mut max_pos_err = 0.0_f64;
@@ -133,8 +142,12 @@ fn gpu_baoab_matches_cpu_deterministic() {
         for k in 0..3 {
             let pe = (new_pos_gpu[i][k] as f64 - positions_cpu[i][k]).abs();
             let ve = (new_vel_gpu[i][k] as f64 - velocities_cpu[i][k]).abs();
-            if pe > max_pos_err { max_pos_err = pe; }
-            if ve > max_vel_err { max_vel_err = ve; }
+            if pe > max_pos_err {
+                max_pos_err = pe;
+            }
+            if ve > max_vel_err {
+                max_vel_err = ve;
+            }
         }
     }
     eprintln!(
@@ -143,7 +156,10 @@ fn gpu_baoab_matches_cpu_deterministic() {
     );
     // f32 round-trip — should match to better than 1e-5.
     assert!(max_pos_err < 1e-4, "position drift {max_pos_err} > 1e-4 Å");
-    assert!(max_vel_err < 1e-4, "velocity drift {max_vel_err} > 1e-4 Å/fs");
+    assert!(
+        max_vel_err < 1e-4,
+        "velocity drift {max_vel_err} > 1e-4 Å/fs"
+    );
 }
 
 #[test]
@@ -154,7 +170,10 @@ fn gpu_baoab_stochastic_temperature_is_target() {
     // the per-atom kinetic energy should be (3/2) k_B T.
     let ctx = match GpuContext::get() {
         Ok(c) => c,
-        Err(e) => { eprintln!("GPU unavailable: {e}"); return; }
+        Err(e) => {
+            eprintln!("GPU unavailable: {e}");
+            return;
+        }
     };
     let n = 256;
     let masses_f32: Vec<f32> = (0..n).map(|_| 12.011_f32).collect();
@@ -204,6 +223,8 @@ fn gpu_baoab_stochastic_temperature_is_target() {
         t_inst, target_t
     );
     // ±10 % of target is comfortable for 256 atoms, 500 steps.
-    assert!((t_inst - target_t).abs() < 0.20 * target_t,
-        "GPU equilibrium T {t_inst} too far from target {target_t}");
+    assert!(
+        (t_inst - target_t).abs() < 0.20 * target_t,
+        "GPU equilibrium T {t_inst} too far from target {target_t}"
+    );
 }

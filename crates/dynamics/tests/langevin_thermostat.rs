@@ -43,9 +43,15 @@ fn ala3_holds_target_temperature_after_burn_in() {
 
     // Drop the burn-in: first 100 steps' worth of samples.
     let burn_in = 100usize;
-    let post: Vec<&(usize, f64, f64)> =
-        samples.iter().filter(|(step, _, _)| *step > burn_in).collect();
-    assert!(post.len() > 10, "not enough post-burn-in samples: {}", post.len());
+    let post: Vec<&(usize, f64, f64)> = samples
+        .iter()
+        .filter(|(step, _, _)| *step > burn_in)
+        .collect();
+    assert!(
+        post.len() > 10,
+        "not enough post-burn-in samples: {}",
+        post.len()
+    );
 
     let t_mean: f64 = post.iter().map(|(_, t, _)| *t).sum::<f64>() / post.len() as f64;
     assert!(
@@ -69,7 +75,11 @@ fn ala3_holds_target_temperature_after_burn_in() {
             assert!(a.position.x.is_finite());
             assert!(a.position.y.is_finite());
             assert!(a.position.z.is_finite());
-            assert!(a.position.norm() < 1000.0, "atom drifted too far: {:?}", a.position);
+            assert!(
+                a.position.norm() < 1000.0,
+                "atom drifted too far: {:?}",
+                a.position
+            );
         }
     }
 }
@@ -92,12 +102,20 @@ fn ala3_trajectory_round_trips_through_pdb() {
     run_langevin(&mut s, &graph, ff, opts, |frame| {
         frames.push(frame.structure.clone());
     });
-    assert!(frames.len() >= 8, "expected ≥8 saved frames, got {}", frames.len());
+    assert!(
+        frames.len() >= 8,
+        "expected ≥8 saved frames, got {}",
+        frames.len()
+    );
 
     let mut buf = Vec::new();
     write_pdb_trajectory(&mut buf, "round-trip test", frames.iter()).unwrap();
     let parsed = read_pdb_trajectory(buf.as_slice()).unwrap();
-    assert_eq!(parsed.len(), frames.len(), "frame count round-trip mismatch");
+    assert_eq!(
+        parsed.len(),
+        frames.len(),
+        "frame count round-trip mismatch"
+    );
     for p in &parsed {
         assert_eq!(p.atom_count(), initial_atoms);
     }

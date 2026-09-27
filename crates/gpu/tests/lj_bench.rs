@@ -26,9 +26,14 @@ fn cpu_lj_forces(
     let cutoff_sq = cutoff * cutoff;
     for i in 0..n {
         let pi = positions[i];
-        let (eps_i, rmin_half_i) = (lj_params[type_index[i] as usize][0], lj_params[type_index[i] as usize][1]);
+        let (eps_i, rmin_half_i) = (
+            lj_params[type_index[i] as usize][0],
+            lj_params[type_index[i] as usize][1],
+        );
         for j in 0..n {
-            if i == j { continue; }
+            if i == j {
+                continue;
+            }
             let bit = i * n + j;
             if exclusions[bit / 32] & (1u32 << (bit % 32)) != 0 {
                 continue;
@@ -42,7 +47,10 @@ fn cpu_lj_forces(
             if r2 > cutoff_sq || r2 < 1e-12 {
                 continue;
             }
-            let (eps_j, rmin_half_j) = (lj_params[type_index[j] as usize][0], lj_params[type_index[j] as usize][1]);
+            let (eps_j, rmin_half_j) = (
+                lj_params[type_index[j] as usize][0],
+                lj_params[type_index[j] as usize][1],
+            );
             let eps = (eps_i * eps_j).sqrt();
             let rmin = rmin_half_i + rmin_half_j;
             let r = r2.sqrt();
@@ -78,7 +86,9 @@ fn bench_lj_at_three_sizes() {
     eprintln!("  --------+----------+----------+--------");
     for repeats in [1, 3, 10] {
         let mut seq = Vec::with_capacity(base.len() * repeats);
-        for _ in 0..repeats { seq.extend(base.iter().copied()); }
+        for _ in 0..repeats {
+            seq.extend(base.iter().copied());
+        }
         let s = build_extended_chain(&seq).unwrap();
         let g = build_topology_graph(&s);
         let ff = standard_ff();
@@ -87,22 +97,34 @@ fn bench_lj_at_three_sizes() {
         let mut atom_types: Vec<AtomType> = Vec::with_capacity(n);
         for r in &s.residues {
             for a in &r.atoms {
-                positions.push([a.position.x as f32, a.position.y as f32, a.position.z as f32]);
+                positions.push([
+                    a.position.x as f32,
+                    a.position.y as f32,
+                    a.position.z as f32,
+                ]);
                 atom_types.push(classify_atom(r.monomer, a.name).unwrap());
             }
         }
         let mut unique = atom_types.clone();
         unique.sort();
         unique.dedup();
-        let type_index: Vec<u32> = atom_types.iter().map(|t| unique.iter().position(|x| x == t).unwrap() as u32).collect();
-        let lj_params: Vec<[f32; 2]> = unique.iter().map(|t| {
-            let p = ff.nonbonded(*t).unwrap();
-            [(p.epsilon as f32) * KCAL_TO_KJ, p.rmin_half as f32]
-        }).collect();
+        let type_index: Vec<u32> = atom_types
+            .iter()
+            .map(|t| unique.iter().position(|x| x == t).unwrap() as u32)
+            .collect();
+        let lj_params: Vec<[f32; 2]> = unique
+            .iter()
+            .map(|t| {
+                let p = ff.nonbonded(*t).unwrap();
+                [(p.epsilon as f32) * KCAL_TO_KJ, p.rmin_half as f32]
+            })
+            .collect();
         let mut exclusions = vec![0u32; (n * n).div_ceil(32)];
         for i in 0..n {
             for j in 0..n {
-                if i == j { continue; }
+                if i == j {
+                    continue;
+                }
                 if g.is_bonded(i, j) || g.is_one_three(i, j) || g.is_one_four(i, j) {
                     let bit = i * n + j;
                     exclusions[bit / 32] |= 1u32 << (bit % 32);
@@ -110,17 +132,42 @@ fn bench_lj_at_three_sizes() {
             }
         }
         // Warm up.
-        let _ = lj_force_gpu(ctx, LjInput { positions: &positions, type_index: &type_index, lj_params: &lj_params, exclusions: &exclusions, cutoff_a: CUTOFF_A });
+        let _ = lj_force_gpu(
+            ctx,
+            LjInput {
+                positions: &positions,
+                type_index: &type_index,
+                lj_params: &lj_params,
+                exclusions: &exclusions,
+                cutoff_a: CUTOFF_A,
+            },
+        );
         let _ = cpu_lj_forces(&positions, &type_index, &lj_params, &exclusions, CUTOFF_A);
         // Time.
         let iters = if n < 500 { 50 } else { 10 };
         let t0 = Instant::now();
-        for _ in 0..iters { let _ = cpu_lj_forces(&positions, &type_index, &lj_params, &exclusions, CUTOFF_A); }
+        for _ in 0..iters {
+            let _ = cpu_lj_forces(&positions, &type_index, &lj_params, &exclusions, CUTOFF_A);
+        }
         let cpu_ms = t0.elapsed().as_secs_f64() * 1000.0 / iters as f64;
         let t0 = Instant::now();
-        for _ in 0..iters { let _ = lj_force_gpu(ctx, LjInput { positions: &positions, type_index: &type_index, lj_params: &lj_params, exclusions: &exclusions, cutoff_a: CUTOFF_A }); }
+        for _ in 0..iters {
+            let _ = lj_force_gpu(
+                ctx,
+                LjInput {
+                    positions: &positions,
+                    type_index: &type_index,
+                    lj_params: &lj_params,
+                    exclusions: &exclusions,
+                    cutoff_a: CUTOFF_A,
+                },
+            );
+        }
         let gpu_ms = t0.elapsed().as_secs_f64() * 1000.0 / iters as f64;
         let speedup = cpu_ms / gpu_ms;
-        eprintln!("  {:>7} | {:>8.2} | {:>8.2} | {:.2}×", n, cpu_ms, gpu_ms, speedup);
+        eprintln!(
+            "  {:>7} | {:>8.2} | {:>8.2} | {:.2}×",
+            n, cpu_ms, gpu_ms, speedup
+        );
     }
 }

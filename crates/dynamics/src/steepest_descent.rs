@@ -62,7 +62,13 @@ pub fn steepest_descent(
 ) -> SdResult {
     let n_atoms = structure.atom_count();
     let n_dofs = n_atoms * 3;
-    let initial_energy = total_energy_with_options(structure, graph, ff, options.include_sasa, options.include_cmap);
+    let initial_energy = total_energy_with_options(
+        structure,
+        graph,
+        ff,
+        options.include_sasa,
+        options.include_cmap,
+    );
     let mut e_prev = initial_energy;
     let mut gradient_flat = vec![0.0_f64; n_dofs];
     let mut direction_flat = vec![0.0_f64; n_dofs];
@@ -73,7 +79,13 @@ pub fn steepest_descent(
 
     for step in 0..options.max_steps {
         steps = step;
-        let forces = total_force_opts(structure, graph, ff, options.include_sasa, options.include_cmap);
+        let forces = total_force_opts(
+            structure,
+            graph,
+            ff,
+            options.include_sasa,
+            options.include_cmap,
+        );
         // gradient = -force; descent direction = -gradient = +force.
         flatten_vec3(&forces, &mut direction_flat);
         // gradient_flat is the negative of direction_flat for line search:
@@ -95,7 +107,13 @@ pub fn steepest_descent(
             ls_options.alpha0 = ls_options.alpha0.min(options.max_step_a / max_dir);
         }
 
-        let e_now = total_energy_with_options(structure, graph, ff, options.include_sasa, options.include_cmap);
+        let e_now = total_energy_with_options(
+            structure,
+            graph,
+            ff,
+            options.include_sasa,
+            options.include_cmap,
+        );
         let res = backtracking(
             structure,
             graph,
@@ -123,7 +141,13 @@ pub fn steepest_descent(
     }
     SdResult {
         steps,
-        final_energy: total_energy_with_options(structure, graph, ff, options.include_sasa, options.include_cmap),
+        final_energy: total_energy_with_options(
+            structure,
+            graph,
+            ff,
+            options.include_sasa,
+            options.include_cmap,
+        ),
         initial_energy,
         max_force,
         converged,
@@ -146,8 +170,16 @@ mod tests {
             residues: vec![PlacedResidue {
                 monomer: geom::structure::Monomer::Protein(AminoAcid::Ala),
                 atoms: vec![
-                    PlacedAtom { name: "N", element: Element::N, position: Vec3::zeros() },
-                    PlacedAtom { name: "CA", element: Element::C, position: Vec3::new(1.7, 0.0, 0.0) },
+                    PlacedAtom {
+                        name: "N",
+                        element: Element::N,
+                        position: Vec3::zeros(),
+                    },
+                    PlacedAtom {
+                        name: "CA",
+                        element: Element::C,
+                        position: Vec3::new(1.7, 0.0, 0.0),
+                    },
                 ],
                 chain: 'A',
             }],
@@ -167,13 +199,15 @@ mod tests {
         let r = (ca_pos - n_pos).norm();
         assert!(
             (r - 1.430).abs() < 0.05,
-            "final bond length {} should be near r₀ = 1.43", r
+            "final bond length {} should be near r₀ = 1.43",
+            r
         );
     }
 
     #[test]
     fn ala3_chain_energy_drops() {
-        let mut s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
+        let mut s =
+            build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
         let g = build_topology_graph(&s);
         let ff = standard_ff();
         let opts = SdOptions {
@@ -184,7 +218,9 @@ mod tests {
         let res = steepest_descent(&mut s, &g, ff, opts);
         assert!(
             res.final_energy < res.initial_energy,
-            "energy didn't drop: {} → {}", res.initial_energy, res.final_energy
+            "energy didn't drop: {} → {}",
+            res.initial_energy,
+            res.final_energy
         );
     }
 }

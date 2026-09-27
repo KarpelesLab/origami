@@ -27,13 +27,13 @@
 //! a manual opt-in for now — auto-thresholding is step 3g.
 
 use chem::{classify_atom, AtomType, ForceField};
-use energy::scratch::{ForceScratch, ONE_FOUR_BIT, EXCLUDED_BIT};
+use energy::forces_gb::GB_DEFAULT_CUTOFF_A_PUB;
 use energy::forces_nonbonded::ensure_verlet_list;
 use energy::gb::{
     ensure_gb_verlet_list, hct_scale_pub, intrinsic_radius_pub, BORN_RADIUS_CUTOFF_A_PUB,
     OBC_OFFSET_PUB,
 };
-use energy::forces_gb::GB_DEFAULT_CUTOFF_A_PUB;
+use energy::scratch::{ForceScratch, EXCLUDED_BIT, ONE_FOUR_BIT};
 use geom::Structure;
 use gpu::{
     pair_list_to_csr, GbPipeline, GbSetup, GpuContext, VerletNonbondedPipeline,
@@ -90,9 +90,8 @@ impl GpuAccelerator {
         let mut scale: Vec<f32> = Vec::with_capacity(n);
         for r in &structure.residues {
             for a in &r.atoms {
-                let t = classify_atom(r.monomer, a.name).unwrap_or_else(|| {
-                    panic!("unclassified atom {:?} {}", r.monomer, a.name)
-                });
+                let t = classify_atom(r.monomer, a.name)
+                    .unwrap_or_else(|| panic!("unclassified atom {:?} {}", r.monomer, a.name));
                 atom_types.push(t);
                 charges.push(ff.partial_charge_for(r.monomer, a.name).unwrap_or(0.0) as f32);
                 let r0 = intrinsic_radius_pub(a.element);
@@ -108,9 +107,9 @@ impl GpuAccelerator {
         let atom_lj_data: Vec<[f32; 4]> = atom_types
             .iter()
             .map(|t| {
-                let p = ff.nonbonded(*t).unwrap_or_else(|| {
-                    panic!("no nonbonded params for {:?}", t)
-                });
+                let p = ff
+                    .nonbonded(*t)
+                    .unwrap_or_else(|| panic!("no nonbonded params for {:?}", t));
                 let eps14 = p.epsilon_14.unwrap_or(p.epsilon);
                 let rmh14 = p.rmin_half_14.unwrap_or(p.rmin_half);
                 [
@@ -127,7 +126,9 @@ impl GpuAccelerator {
         let mut one_four = vec![0u32; n_words];
         for i in 0..n {
             for j in 0..n {
-                if i == j { continue; }
+                if i == j {
+                    continue;
+                }
                 let bit = i * n + j;
                 if graph.is_bonded(i, j) || graph.is_one_three(i, j) {
                     exclusions[bit / 32] |= 1u32 << (bit % 32);
@@ -215,16 +216,12 @@ impl GpuAccelerator {
         let gb_rebuilt = ensure_gb_verlet_list(scratch, BORN_RADIUS_CUTOFF_A_PUB);
 
         if nb_rebuilt || self.nb_counts.is_empty() {
-            let (counts, starts, indices) =
-                pair_list_to_csr(self.n_atoms, &scratch.verlet_pairs);
+            let (counts, starts, indices) = pair_list_to_csr(self.n_atoms, &scratch.verlet_pairs);
             self.nb_counts = counts;
             self.nb_starts = starts;
             self.nb_indices = indices;
-            self.nonbonded.update_neighbours(
-                &self.nb_counts,
-                &self.nb_starts,
-                &self.nb_indices,
-            );
+            self.nonbonded
+                .update_neighbours(&self.nb_counts, &self.nb_starts, &self.nb_indices);
         }
         if gb_rebuilt || self.gb_counts.is_empty() {
             let (counts, starts, indices) =
@@ -232,11 +229,8 @@ impl GpuAccelerator {
             self.gb_counts = counts;
             self.gb_starts = starts;
             self.gb_indices = indices;
-            self.gb.update_neighbours(
-                &self.gb_counts,
-                &self.gb_starts,
-                &self.gb_indices,
-            );
+            self.gb
+                .update_neighbours(&self.gb_counts, &self.gb_starts, &self.gb_indices);
         }
 
         // Pack f64 SoA → f32 AoS for the GPU upload.  This is the
@@ -286,8 +280,14 @@ impl GpuAccelerator {
         let nb_rx = self.nonbonded.begin_readback();
         let gb_rx = self.gb.begin_readback();
         let _ = device.poll(gpu::wgpu::Maintain::Wait);
-        nb_rx.recv().expect("nb map_async sender dropped").expect("nb buffer map");
-        gb_rx.recv().expect("gb map_async sender dropped").expect("gb buffer map");
+        nb_rx
+            .recv()
+            .expect("nb map_async sender dropped")
+            .expect("nb buffer map");
+        gb_rx
+            .recv()
+            .expect("gb map_async sender dropped")
+            .expect("gb buffer map");
         let nb_f = self.nonbonded.take_readback();
         let gb_f = self.gb.take_readback();
 

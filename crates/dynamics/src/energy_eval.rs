@@ -53,7 +53,14 @@ pub fn total_force_opts(
     include_sasa: bool,
     include_cmap: bool,
 ) -> Vec<Vec3> {
-    total_force_with_options(structure, graph, ff, DEFAULT_CUTOFF_A, include_sasa, include_cmap)
+    total_force_with_options(
+        structure,
+        graph,
+        ff,
+        DEFAULT_CUTOFF_A,
+        include_sasa,
+        include_cmap,
+    )
 }
 
 /// Apply a flat displacement vector (3N entries) to a structure.

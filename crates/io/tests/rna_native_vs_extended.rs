@@ -59,8 +59,8 @@ fn brief_minimise(s: &mut geom::Structure, steps: usize) {
 #[test]
 fn uucg_hairpin_native_beats_extended() {
     // ---- Load native structure ----
-    let pdb = std::fs::read_to_string("tests/fixtures/2KOC_uucg_hairpin.pdb")
-        .expect("read 2KOC fixture");
+    let pdb =
+        std::fs::read_to_string("tests/fixtures/2KOC_uucg_hairpin.pdb").expect("read 2KOC fixture");
     let mut native = read_pdb(pdb.as_bytes()).expect("parse 2KOC");
 
     // Verify we got the expected 14-nt UUCG hairpin.
@@ -70,13 +70,13 @@ fn uucg_hairpin_native_beats_extended() {
         .iter()
         .filter_map(|r| r.monomer.as_nucleotide().map(|n| n.one_letter()))
         .collect();
-    assert_eq!(
-        seq, "GGCACUUCGGUGCC",
-        "fixture sequence mismatch"
-    );
+    assert_eq!(seq, "GGCACUUCGGUGCC", "fixture sequence mismatch");
 
     // ---- Build extended chain from the same sequence ----
-    let nts: Vec<Nucleotide> = seq.chars().map(|c| Nucleotide::from_one_letter(c).unwrap()).collect();
+    let nts: Vec<Nucleotide> = seq
+        .chars()
+        .map(|c| Nucleotide::from_one_letter(c).unwrap())
+        .collect();
     let mut extended = build_extended_rna_chain(&nts).expect("build extended");
     assert_eq!(extended.residues.len(), 14);
 
@@ -137,8 +137,10 @@ fn gnra_hairpin_native_beats_extended() {
     assert_eq!(seq, "GGGCGCAAGCCU", "1ZIH sequence mismatch");
 
     // ---- Build extended chain from the same sequence ----
-    let nts: Vec<Nucleotide> = seq.chars()
-        .map(|c| Nucleotide::from_one_letter(c).unwrap()).collect();
+    let nts: Vec<Nucleotide> = seq
+        .chars()
+        .map(|c| Nucleotide::from_one_letter(c).unwrap())
+        .collect();
     let mut extended = build_extended_rna_chain(&nts).expect("build extended");
 
     brief_minimise(&mut native, 100);
@@ -169,8 +171,8 @@ fn sarcin_ricin_loop_native_beats_extended() {
     // 27-nt sarcin/ricin loop from E. coli 23S rRNA.  X-ray with no
     // hydrogens — we add them with `add_rna_hydrogens` before
     // scoring.
-    let pdb = std::fs::read_to_string("tests/fixtures/483D_sarcin_ricin.pdb")
-        .expect("read 483D fixture");
+    let pdb =
+        std::fs::read_to_string("tests/fixtures/483D_sarcin_ricin.pdb").expect("read 483D fixture");
     let mut native = read_pdb(pdb.as_bytes()).expect("parse 483D");
 
     assert_eq!(native.residues.len(), 27, "expected 27 residues");
@@ -185,12 +187,17 @@ fn sarcin_ricin_loop_native_beats_extended() {
     // (backbone 7 H + base 2-4 H).
     let h_summary = geom::add_rna_hydrogens(&mut native);
     eprintln!("SRL H-addition: {h_summary:?}");
-    assert!(h_summary.h_added >= 200,
-        "expected ~250 H atoms added on 27-nt SRL, got {}", h_summary.h_added);
+    assert!(
+        h_summary.h_added >= 200,
+        "expected ~250 H atoms added on 27-nt SRL, got {}",
+        h_summary.h_added
+    );
 
     // ---- Build extended chain from the same sequence ----
-    let nts: Vec<Nucleotide> = seq.chars()
-        .map(|c| Nucleotide::from_one_letter(c).unwrap()).collect();
+    let nts: Vec<Nucleotide> = seq
+        .chars()
+        .map(|c| Nucleotide::from_one_letter(c).unwrap())
+        .collect();
     let mut extended = build_extended_rna_chain(&nts).expect("build extended");
 
     // X-ray bond lengths can drift ~0.05 Å from CHARMM r₀; minimise

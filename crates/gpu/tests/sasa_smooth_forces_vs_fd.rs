@@ -8,9 +8,7 @@
 
 use chem::{standard_ff, AminoAcid, Element};
 use geom::{build_extended_chain, Vec3};
-use gpu::{
-    GpuContext, SasaSmoothPipeline, SasaSmoothSetup, SASA_SMOOTH_DEFAULT_SIGMA_A,
-};
+use gpu::{GpuContext, SasaSmoothPipeline, SasaSmoothSetup, SASA_SMOOTH_DEFAULT_SIGMA_A};
 
 const PROBE_RADIUS_A: f64 = 1.4;
 
@@ -25,10 +23,7 @@ fn vdw_radius(e: Element) -> f64 {
     }
 }
 
-fn build_csr(
-    positions_f64: &[Vec3],
-    radii_f64: &[f64],
-) -> (Vec<u32>, Vec<u32>, Vec<u32>) {
+fn build_csr(positions_f64: &[Vec3], radii_f64: &[f64]) -> (Vec<u32>, Vec<u32>, Vec<u32>) {
     let n = positions_f64.len();
     let mut counts = vec![0u32; n];
     let mut per_atom_nbrs: Vec<Vec<u32>> = vec![Vec::new(); n];
@@ -37,7 +32,9 @@ fn build_csr(
     let skin = 1.0;
     for i in 0..n {
         for j in 0..n {
-            if i == j { continue; }
+            if i == j {
+                continue;
+            }
             let d = (positions_f64[i] - positions_f64[j]).norm();
             if d <= radii_f64[i] + radii_f64[j] + skin {
                 per_atom_nbrs[i].push(j as u32);
@@ -52,7 +49,9 @@ fn build_csr(
         total += counts[i];
     }
     let mut indices_flat: Vec<u32> = Vec::with_capacity(total as usize);
-    for v in &per_atom_nbrs { indices_flat.extend_from_slice(v); }
+    for v in &per_atom_nbrs {
+        indices_flat.extend_from_slice(v);
+    }
     (counts, starts, indices_flat)
 }
 
@@ -68,11 +67,12 @@ fn area_total_with_gammas(areas: &[f32], gammas: &[f32]) -> f64 {
 fn gpu_sasa_smooth_force_matches_central_difference() {
     let ctx = match GpuContext::get() {
         Ok(c) => c,
-        Err(e) => { eprintln!("GPU unavailable: {e}"); return; }
+        Err(e) => {
+            eprintln!("GPU unavailable: {e}");
+            return;
+        }
     };
-    let s = build_extended_chain(&[
-        AminoAcid::Ala, AminoAcid::Lys, AminoAcid::Glu,
-    ]).unwrap();
+    let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Lys, AminoAcid::Glu]).unwrap();
     let ff = standard_ff();
     let n = s.atom_count();
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(n);
@@ -81,7 +81,11 @@ fn gpu_sasa_smooth_force_matches_central_difference() {
     let mut radii_f64: Vec<f64> = Vec::with_capacity(n);
     for r in &s.residues {
         for a in &r.atoms {
-            positions.push([a.position.x as f32, a.position.y as f32, a.position.z as f32]);
+            positions.push([
+                a.position.x as f32,
+                a.position.y as f32,
+                a.position.z as f32,
+            ]);
             positions_f64.push(a.position);
             let exp = vdw_radius(a.element) + PROBE_RADIUS_A;
             radii_f32.push(exp as f32);
@@ -92,12 +96,16 @@ fn gpu_sasa_smooth_force_matches_central_difference() {
     let gammas: Vec<f32> = gammas_f64.iter().map(|&g| g as f32).collect();
     let (counts, starts, indices) = build_csr(&positions_f64, &radii_f64);
 
-    let mut pipe = SasaSmoothPipeline::new(ctx, n, SasaSmoothSetup {
-        radii: &radii_f32,
-        gammas: &gammas,
-        sigma_a: SASA_SMOOTH_DEFAULT_SIGMA_A,
-        initial_indices_capacity: indices.len().max(64),
-    });
+    let mut pipe = SasaSmoothPipeline::new(
+        ctx,
+        n,
+        SasaSmoothSetup {
+            radii: &radii_f32,
+            gammas: &gammas,
+            sigma_a: SASA_SMOOTH_DEFAULT_SIGMA_A,
+            initial_indices_capacity: indices.len().max(64),
+        },
+    );
     pipe.update_neighbours(&counts, &starts, &indices);
 
     // Analytical forces.
@@ -147,7 +155,9 @@ fn gpu_sasa_smooth_force_matches_central_difference() {
     // Tolerance: f32 round-off + ε² truncation in central differences
     // dominate; 1 kJ/mol/Å is generous.  A real bug (sign, factor)
     // would land orders of magnitude above this.
-    assert!(max_err < 1.0,
-        "analytical gradient disagrees with central differences: {argmax}");
+    assert!(
+        max_err < 1.0,
+        "analytical gradient disagrees with central differences: {argmax}"
+    );
     let _ = ff;
 }

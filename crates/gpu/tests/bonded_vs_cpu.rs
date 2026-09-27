@@ -30,40 +30,53 @@ fn build_atom_types(s: &Structure) -> Vec<AtomType> {
     out
 }
 
-fn build_bonds(graph: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType], n: usize)
-    -> (Vec<BondTerm>, Vec<u32>, Vec<u32>, Vec<u32>)
-{
+fn build_bonds(
+    graph: &TopologyGraph,
+    ff: &ForceField,
+    atom_types: &[AtomType],
+    n: usize,
+) -> (Vec<BondTerm>, Vec<u32>, Vec<u32>, Vec<u32>) {
     let mut terms: Vec<BondTerm> = Vec::new();
     let mut per_atom: Vec<Vec<u32>> = vec![Vec::new(); n];
     for b in &graph.bonds {
-        let Some(p) = ff.bond(atom_types[b.a], atom_types[b.b]) else { continue };
+        let Some(p) = ff.bond(atom_types[b.a], atom_types[b.b]) else {
+            continue;
+        };
         let idx = terms.len() as u32;
         terms.push(BondTerm {
-            a: b.a as u32, b: b.b as u32,
+            a: b.a as u32,
+            b: b.b as u32,
             k_kj: kcal_to_kj(p.k) as f32,
             r0_a: p.r0 as f32,
         });
         per_atom[b.a].push(idx);
         per_atom[b.b].push(idx);
     }
-    flatten_csr(per_atom, n)
-        .map_terms(terms)
+    flatten_csr(per_atom, n).map_terms(terms)
 }
 
-fn build_angles(graph: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType], n: usize)
-    -> (Vec<AngleTerm>, Vec<u32>, Vec<u32>, Vec<u32>)
-{
+fn build_angles(
+    graph: &TopologyGraph,
+    ff: &ForceField,
+    atom_types: &[AtomType],
+    n: usize,
+) -> (Vec<AngleTerm>, Vec<u32>, Vec<u32>, Vec<u32>) {
     let mut terms: Vec<AngleTerm> = Vec::new();
     let mut per_atom: Vec<Vec<u32>> = vec![Vec::new(); n];
     for ang in &graph.angles {
-        let Some(p) = ff.angle(atom_types[ang.a], atom_types[ang.b], atom_types[ang.c])
-        else { continue };
+        let Some(p) = ff.angle(atom_types[ang.a], atom_types[ang.b], atom_types[ang.c]) else {
+            continue;
+        };
         let idx = terms.len() as u32;
         terms.push(AngleTerm {
-            a: ang.a as u32, b: ang.b as u32, c: ang.c as u32, _pad: 0,
+            a: ang.a as u32,
+            b: ang.b as u32,
+            c: ang.c as u32,
+            _pad: 0,
             k_kj: kcal_to_kj(p.k) as f32,
             theta0_rad: deg_to_rad(p.theta0_deg) as f32,
-            _pad2: 0.0, _pad3: 0.0,
+            _pad2: 0.0,
+            _pad3: 0.0,
         });
         per_atom[ang.a].push(idx);
         per_atom[ang.b].push(idx);
@@ -72,23 +85,56 @@ fn build_angles(graph: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType],
     flatten_csr(per_atom, n).map_terms(terms)
 }
 
-fn build_dihedrals(graph: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType], n: usize)
-    -> (Vec<DihedralTerm>, Vec<u32>, Vec<u32>, Vec<u32>)
-{
+fn build_dihedrals(
+    graph: &TopologyGraph,
+    ff: &ForceField,
+    atom_types: &[AtomType],
+    n: usize,
+) -> (Vec<DihedralTerm>, Vec<u32>, Vec<u32>, Vec<u32>) {
     let mut terms: Vec<DihedralTerm> = Vec::new();
     let mut per_atom: Vec<Vec<u32>> = vec![Vec::new(); n];
     for d in &graph.dihedrals {
         let Some(pterms) = ff.dihedral(
-            atom_types[d.a], atom_types[d.b], atom_types[d.c], atom_types[d.d],
-        ) else { continue };
+            atom_types[d.a],
+            atom_types[d.b],
+            atom_types[d.c],
+            atom_types[d.d],
+        ) else {
+            continue;
+        };
         let mut packed = DihedralTerm {
-            a: d.a as u32, b: d.b as u32, c: d.c as u32, d: d.d as u32,
+            a: d.a as u32,
+            b: d.b as u32,
+            c: d.c as u32,
+            d: d.d as u32,
             n_terms: pterms.len().min(4) as u32,
-            _pad0: 0, _pad1: 0, _pad2: 0,
-            term0: PeriodicTerm { k_kj: 0.0, n: 0.0, delta_rad: 0.0, _pad: 0.0 },
-            term1: PeriodicTerm { k_kj: 0.0, n: 0.0, delta_rad: 0.0, _pad: 0.0 },
-            term2: PeriodicTerm { k_kj: 0.0, n: 0.0, delta_rad: 0.0, _pad: 0.0 },
-            term3: PeriodicTerm { k_kj: 0.0, n: 0.0, delta_rad: 0.0, _pad: 0.0 },
+            _pad0: 0,
+            _pad1: 0,
+            _pad2: 0,
+            term0: PeriodicTerm {
+                k_kj: 0.0,
+                n: 0.0,
+                delta_rad: 0.0,
+                _pad: 0.0,
+            },
+            term1: PeriodicTerm {
+                k_kj: 0.0,
+                n: 0.0,
+                delta_rad: 0.0,
+                _pad: 0.0,
+            },
+            term2: PeriodicTerm {
+                k_kj: 0.0,
+                n: 0.0,
+                delta_rad: 0.0,
+                _pad: 0.0,
+            },
+            term3: PeriodicTerm {
+                k_kj: 0.0,
+                n: 0.0,
+                delta_rad: 0.0,
+                _pad: 0.0,
+            },
         };
         for (i, t) in pterms.iter().take(4).enumerate() {
             let pt = PeriodicTerm {
@@ -114,21 +160,33 @@ fn build_dihedrals(graph: &TopologyGraph, ff: &ForceField, atom_types: &[AtomTyp
     flatten_csr(per_atom, n).map_terms(terms)
 }
 
-fn build_impropers(graph: &TopologyGraph, ff: &ForceField, atom_types: &[AtomType], n: usize)
-    -> (Vec<ImproperTerm>, Vec<u32>, Vec<u32>, Vec<u32>)
-{
+fn build_impropers(
+    graph: &TopologyGraph,
+    ff: &ForceField,
+    atom_types: &[AtomType],
+    n: usize,
+) -> (Vec<ImproperTerm>, Vec<u32>, Vec<u32>, Vec<u32>) {
     let mut terms: Vec<ImproperTerm> = Vec::new();
     let mut per_atom: Vec<Vec<u32>> = vec![Vec::new(); n];
     for imp in &graph.impropers {
         let Some(p) = ff.improper(
-            atom_types[imp.a], atom_types[imp.b], atom_types[imp.c], atom_types[imp.d],
-        ) else { continue };
+            atom_types[imp.a],
+            atom_types[imp.b],
+            atom_types[imp.c],
+            atom_types[imp.d],
+        ) else {
+            continue;
+        };
         let idx = terms.len() as u32;
         terms.push(ImproperTerm {
-            a: imp.a as u32, b: imp.b as u32, c: imp.c as u32, d: imp.d as u32,
+            a: imp.a as u32,
+            b: imp.b as u32,
+            c: imp.c as u32,
+            d: imp.d as u32,
             k_kj: kcal_to_kj(p.k) as f32,
             omega0_rad: deg_to_rad(p.psi0_deg) as f32,
-            _pad0: 0.0, _pad1: 0.0,
+            _pad0: 0.0,
+            _pad1: 0.0,
         });
         per_atom[imp.a].push(idx);
         per_atom[imp.b].push(idx);
@@ -138,7 +196,11 @@ fn build_impropers(graph: &TopologyGraph, ff: &ForceField, atom_types: &[AtomTyp
     flatten_csr(per_atom, n).map_terms(terms)
 }
 
-struct CsrParts { counts: Vec<u32>, starts: Vec<u32>, indices: Vec<u32> }
+struct CsrParts {
+    counts: Vec<u32>,
+    starts: Vec<u32>,
+    indices: Vec<u32>,
+}
 impl CsrParts {
     fn map_terms<T>(self, terms: Vec<T>) -> (Vec<T>, Vec<u32>, Vec<u32>, Vec<u32>) {
         (terms, self.counts, self.starts, self.indices)
@@ -160,16 +222,34 @@ fn flatten_csr(per_atom: Vec<Vec<u32>>, n: usize) -> CsrParts {
             indices[base + k] = v;
         }
     }
-    CsrParts { counts, starts, indices }
+    CsrParts {
+        counts,
+        starts,
+        indices,
+    }
 }
 
-fn setup_and_run(s: &Structure, g: &TopologyGraph, ff: &ForceField, ctx: &'static GpuContext)
-    -> (BondedPipeline, wgpu_lite::PositionsForces)
-{
+fn setup_and_run(
+    s: &Structure,
+    g: &TopologyGraph,
+    ff: &ForceField,
+    ctx: &'static GpuContext,
+) -> (BondedPipeline, wgpu_lite::PositionsForces) {
     let n = s.atom_count();
     let atom_types = build_atom_types(s);
-    let positions_f32: Vec<[f32; 4]> = s.residues.iter()
-        .flat_map(|r| r.atoms.iter().map(|a| [a.position.x as f32, a.position.y as f32, a.position.z as f32, 0.0]))
+    let positions_f32: Vec<[f32; 4]> = s
+        .residues
+        .iter()
+        .flat_map(|r| {
+            r.atoms.iter().map(|a| {
+                [
+                    a.position.x as f32,
+                    a.position.y as f32,
+                    a.position.z as f32,
+                    0.0,
+                ]
+            })
+        })
         .collect();
     let device = &ctx.device;
     let queue = &ctx.queue;
@@ -200,7 +280,10 @@ fn setup_and_run(s: &Structure, g: &TopologyGraph, ff: &ForceField, ctx: &'stati
     let (improper_terms, ai_count, ai_start, ai_index) = build_impropers(g, ff, &atom_types, n);
 
     let pipe = BondedPipeline::new(
-        ctx, n, &positions_buf, &forces_buf,
+        ctx,
+        n,
+        &positions_buf,
+        &forces_buf,
         BondedSetup {
             bond_terms: &bond_terms,
             atom_bond_count: &ab_count,
@@ -220,9 +303,16 @@ fn setup_and_run(s: &Structure, g: &TopologyGraph, ff: &ForceField, ctx: &'stati
             atom_improper_index: &ai_index,
         },
     );
-    (pipe, wgpu_lite::PositionsForces {
-        positions_buf, forces_buf, readback_buf, size: positions_size, n,
-    })
+    (
+        pipe,
+        wgpu_lite::PositionsForces {
+            positions_buf,
+            forces_buf,
+            readback_buf,
+            size: positions_size,
+            n,
+        },
+    )
 }
 
 mod wgpu_lite {
@@ -244,7 +334,9 @@ mod wgpu_lite {
             queue.submit(Some(encoder.finish()));
             let slice = self.readback_buf.slice(..);
             let (tx, rx) = std::sync::mpsc::channel();
-            slice.map_async(gpu::wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+            slice.map_async(gpu::wgpu::MapMode::Read, move |r| {
+                let _ = tx.send(r);
+            });
             let _ = device.poll(gpu::wgpu::Maintain::Wait);
             rx.recv().unwrap().unwrap();
             let data = slice.get_mapped_range();
@@ -288,7 +380,10 @@ fn compare_against_cpu(label: &str, gpu_f: &[[f32; 3]], cpu_f: &[Vec3]) -> f64 {
             }
         }
     }
-    eprintln!("{label}: max GPU-vs-CPU discrepancy {:.3e} kJ/mol/Å — {argmax}", max_err);
+    eprintln!(
+        "{label}: max GPU-vs-CPU discrepancy {:.3e} kJ/mol/Å — {argmax}",
+        max_err
+    );
     max_err
 }
 
@@ -296,15 +391,21 @@ fn compare_against_cpu(label: &str, gpu_f: &[[f32; 3]], cpu_f: &[Vec3]) -> f64 {
 fn gpu_bonded_kernels_match_cpu_on_ala_lys_glu() {
     let ctx = match GpuContext::get() {
         Ok(c) => c,
-        Err(e) => { eprintln!("GPU unavailable: {e}"); return; }
+        Err(e) => {
+            eprintln!("GPU unavailable: {e}");
+            return;
+        }
     };
     let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Lys, AminoAcid::Glu]).unwrap();
     let g = build_topology_graph(&s);
     let ff = standard_ff();
     let n = s.atom_count();
     let atom_types = build_atom_types(&s);
-    let positions: Vec<Vec3> = s.residues.iter()
-        .flat_map(|r| r.atoms.iter().map(|a| a.position)).collect();
+    let positions: Vec<Vec3> = s
+        .residues
+        .iter()
+        .flat_map(|r| r.atoms.iter().map(|a| a.position))
+        .collect();
 
     let (pipe, bufs) = setup_and_run(&s, &g, ff, ctx);
 
@@ -330,7 +431,10 @@ fn gpu_bonded_kernels_match_cpu_on_ala_lys_glu() {
     let mut cpu_f = vec![Vec3::zeros(); n];
     energy::forces_bonded::add_dihedral_forces(&positions, &g, ff, &atom_types, &mut cpu_f);
     let err = compare_against_cpu("DIHEDRAL", &gpu_f, &cpu_f);
-    assert!(err < 1.0, "dihedral force mismatch — tolerance loose because f32 trig accumulates");
+    assert!(
+        err < 1.0,
+        "dihedral force mismatch — tolerance loose because f32 trig accumulates"
+    );
 
     // ---- Improper ----
     dispatch_zero_plus_one(ctx, &pipe, |p, e| p.record_improper(e));
@@ -377,10 +481,14 @@ fn gpu_bonded_kernels_match_cpu_on_ala_lys_glu() {
     for (a, b) in gpu_total.iter().zip(gpu_fused.iter()) {
         for axis in 0..3 {
             let d = (a[axis] - b[axis]).abs();
-            if d > max_split_fused { max_split_fused = d; }
+            if d > max_split_fused {
+                max_split_fused = d;
+            }
         }
     }
     eprintln!("max split-vs-fused disagreement: {:.3e}", max_split_fused);
-    assert!(max_split_fused < 1e-3,
-        "fused bonded force should match split-kernel result bit-for-bit");
+    assert!(
+        max_split_fused < 1e-3,
+        "fused bonded force should match split-kernel result bit-for-bit"
+    );
 }

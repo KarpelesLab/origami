@@ -128,10 +128,8 @@ mod tests {
         // For each AA's most-used codon, w = 1.0 → factor = 1.0.
         for &c in &[
             // most-frequent codons across the 18 multi-codon AAs
-            "UUC", "CUG", "AUC", "GUG", "AGC", "CCG", "ACC", "GCU",
-            "UAC", "CAC", "CAG", "AAC", "AAA", "GAC", "GAA", "UGC",
-            "CGU", "GGC",
-            // single-codon AAs (Met and Trp)
+            "UUC", "CUG", "AUC", "GUG", "AGC", "CCG", "ACC", "GCU", "UAC", "CAC", "CAG", "AAC",
+            "AAA", "GAC", "GAA", "UGC", "CGU", "GGC", // single-codon AAs (Met and Trp)
             "AUG", "UGG",
         ] {
             let codon = parse(c);

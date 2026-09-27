@@ -19,15 +19,14 @@ fn gpu_integrator_matches_cpu_temperature_on_ala_lys_glu() {
         eprintln!("GPU unavailable, skipping");
         return;
     }
-    let make_struct = || build_extended_chain(&[
-        AminoAcid::Ala, AminoAcid::Lys, AminoAcid::Glu,
-    ]).unwrap();
+    let make_struct =
+        || build_extended_chain(&[AminoAcid::Ala, AminoAcid::Lys, AminoAcid::Glu]).unwrap();
 
     let template = LangevinOptions {
         dt_fs: 1.0,
         temperature_k: 310.0,
         friction_ps_inv: 2.0,
-        steps: 1000,           // long enough to clear burn-in
+        steps: 1000, // long enough to clear burn-in
         save_every: 100,
         seed: 17,
         randomise_initial_velocities: true,
@@ -64,16 +63,24 @@ fn gpu_integrator_matches_cpu_temperature_on_ala_lys_glu() {
     // Both should be in spec for a 1000-step trajectory after the
     // ~100-step burn-in.  Loose ±100 K — accepts the natural
     // single-trajectory variance at 47 atoms.
-    assert!((sum_cpu.temperature_mean_k - 310.0).abs() < 100.0,
-        "CPU T_mean {:.1} far from target", sum_cpu.temperature_mean_k);
-    assert!((sum_gpu.temperature_mean_k - 310.0).abs() < 100.0,
-        "GPU T_mean {:.1} far from target", sum_gpu.temperature_mean_k);
+    assert!(
+        (sum_cpu.temperature_mean_k - 310.0).abs() < 100.0,
+        "CPU T_mean {:.1} far from target",
+        sum_cpu.temperature_mean_k
+    );
+    assert!(
+        (sum_gpu.temperature_mean_k - 310.0).abs() < 100.0,
+        "GPU T_mean {:.1} far from target",
+        sum_gpu.temperature_mean_k
+    );
 
     // No atom catastrophe — final positions should be finite.
     for r in &s_gpu.residues {
         for a in &r.atoms {
-            assert!(a.position.x.is_finite() && a.position.y.is_finite() && a.position.z.is_finite(),
-                "non-finite final position");
+            assert!(
+                a.position.x.is_finite() && a.position.y.is_finite() && a.position.z.is_finite(),
+                "non-finite final position"
+            );
         }
     }
 }

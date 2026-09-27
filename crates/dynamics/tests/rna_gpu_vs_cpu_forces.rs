@@ -40,16 +40,22 @@ fn gpu_force_eval_matches_cpu_on_rna_chain() {
         Nucleotide::Cytosine,
         Nucleotide::Adenine,
         Nucleotide::Guanine,
-    ]).unwrap();
+    ])
+    .unwrap();
     let g = build_topology_graph(&s);
     let ff = standard_ff();
 
-    minimize(&mut s, &g, ff, MinimizeOptions {
-        algorithm: Algorithm::Lbfgs,
-        max_steps: 1000,
-        gradient_tol: 0.1,
-        ..MinimizeOptions::default()
-    });
+    minimize(
+        &mut s,
+        &g,
+        ff,
+        MinimizeOptions {
+            algorithm: Algorithm::Lbfgs,
+            max_steps: 1000,
+            gradient_tol: 0.1,
+            ..MinimizeOptions::default()
+        },
+    );
     let n = s.atom_count();
 
     // CPU reference.
@@ -57,9 +63,10 @@ fn gpu_force_eval_matches_cpu_on_rna_chain() {
 
     // GPU: one BAOAB step at γ=0, T=0, v0=0 → pure velocity-Verlet.
     let mut integ = FullGpuIntegrator::new(
-        &s, &g, ff, DT_FS, /*gamma_ps_inv=*/ 0.0,
-        /*temperature_k=*/ 0.0, /*seed=*/ 31,
-    ).expect("FullGpuIntegrator::new on RNA");
+        &s, &g, ff, DT_FS, /*gamma_ps_inv=*/ 0.0, /*temperature_k=*/ 0.0,
+        /*seed=*/ 31,
+    )
+    .expect("FullGpuIntegrator::new on RNA");
     let velocities = vec![Vec3::zeros(); n];
     integ.upload_initial_state(&s, &velocities);
     let before = s.clone();
@@ -68,8 +75,12 @@ fn gpu_force_eval_matches_cpu_on_rna_chain() {
     integ.download_positions_into(&mut after);
 
     let dt_sq = DT_FS * DT_FS;
-    let masses: Vec<f64> = s.residues.iter().flat_map(|r| r.atoms.iter())
-        .map(|a| a.element.mass_da() as f64).collect();
+    let masses: Vec<f64> = s
+        .residues
+        .iter()
+        .flat_map(|r| r.atoms.iter())
+        .map(|a| a.element.mass_da() as f64)
+        .collect();
 
     let mut max_abs = 0.0_f64;
     let mut worst = 0usize;
@@ -85,7 +96,10 @@ fn gpu_force_eval_matches_cpu_on_rna_chain() {
         gpu_forces.push(f_gpu);
         total_cpu_mag += cpu_forces[i].norm();
         let diff = (cpu_forces[i] - f_gpu).norm();
-        if diff > max_abs { max_abs = diff; worst = i; }
+        if diff > max_abs {
+            max_abs = diff;
+            worst = i;
+        }
     }
 
     // Resolve the worst atom for the diagnostic message.
@@ -94,7 +108,9 @@ fn gpu_force_eval_matches_cpu_on_rna_chain() {
         let mut hit = (0usize, "?");
         for (ri, r) in s.residues.iter().enumerate() {
             for a in &r.atoms {
-                if k == worst { hit = (ri, a.name); }
+                if k == worst {
+                    hit = (ri, a.name);
+                }
                 k += 1;
             }
         }
@@ -103,7 +119,8 @@ fn gpu_force_eval_matches_cpu_on_rna_chain() {
     eprintln!(
         "UCAG ({n} atoms): mean |F_cpu|={:.2} kJ/mol/Å, max |ΔF|={max_abs:.3e} on \
          atom {worst} ({} of res {worst_res})",
-        total_cpu_mag / n as f64, worst_name,
+        total_cpu_mag / n as f64,
+        worst_name,
     );
 
     // Phosphorus has q = +1.5 e in CHARMM27 NA — the largest partial
@@ -113,7 +130,9 @@ fn gpu_force_eval_matches_cpu_on_rna_chain() {
     // kJ/mol/Å absolute error.  Pre-FEAT.gpu.26 this test saw
     // ~10 kJ/mol/Å on backbone O3' atoms due to truncated dihedrals;
     // post-fix the floor is ~2 kJ/mol/Å on the phosphorus.
-    assert!(max_abs < 3.0,
+    assert!(
+        max_abs < 3.0,
         "GPU and CPU forces diverge on RNA: max |ΔF|={max_abs} on atom {worst} \
-         ({worst_name} of res {worst_res})");
+         ({worst_name} of res {worst_res})"
+    );
 }

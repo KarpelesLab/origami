@@ -47,7 +47,10 @@ pub fn translate_codons(seq: &[u8]) -> Result<TranslationOutcome, TranslationErr
         }
         i += 3;
     }
-    Ok(TranslationOutcome { protein, terminated })
+    Ok(TranslationOutcome {
+        protein,
+        terminated,
+    })
 }
 
 /// Convenience: render a list of amino acids as a one-letter string.

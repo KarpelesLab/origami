@@ -20,15 +20,20 @@ fn all_twenty_amino_acids_are_reachable() {
             seen.insert(aa);
         }
     }
-    assert_eq!(seen.len(), 20, "missing AAs: {:?}",
-        AminoAcid::ALL.iter().filter(|a| !seen.contains(a)).collect::<Vec<_>>());
+    assert_eq!(
+        seen.len(),
+        20,
+        "missing AAs: {:?}",
+        AminoAcid::ALL
+            .iter()
+            .filter(|a| !seen.contains(a))
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]
 fn three_stop_codons() {
-    let stops: Vec<Codon> = Codon::all()
-        .filter(|c| c.translate().is_stop())
-        .collect();
+    let stops: Vec<Codon> = Codon::all().filter(|c| c.translate().is_stop()).collect();
     assert_eq!(stops.len(), 3);
     let stop_strs: HashSet<String> = stops.iter().map(|c| c.to_string()).collect();
     assert!(stop_strs.contains("UAA"));

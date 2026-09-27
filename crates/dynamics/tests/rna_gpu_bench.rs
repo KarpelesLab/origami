@@ -19,8 +19,10 @@ use gpu::GpuContext;
 
 fn build_rna(n: usize) -> geom::Structure {
     let block = [
-        Nucleotide::Adenine, Nucleotide::Uracil,
-        Nucleotide::Guanine, Nucleotide::Cytosine,
+        Nucleotide::Adenine,
+        Nucleotide::Uracil,
+        Nucleotide::Guanine,
+        Nucleotide::Cytosine,
     ];
     let seq: Vec<Nucleotide> = block.iter().cloned().cycle().take(n).collect();
     build_extended_rna_chain(&seq).expect("build")
@@ -43,18 +45,24 @@ fn bench_gpu_integrator_on_rna() {
         let ff = standard_ff();
         // Cheap minimisation so the first step doesn't see extended-NeRF
         // strain.  Real production workloads would minimise harder.
-        minimize(&mut s, &g, ff, MinimizeOptions {
-            algorithm: Algorithm::Lbfgs,
-            max_steps: 200,
-            ..MinimizeOptions::default()
-        });
+        minimize(
+            &mut s,
+            &g,
+            ff,
+            MinimizeOptions {
+                algorithm: Algorithm::Lbfgs,
+                max_steps: 200,
+                ..MinimizeOptions::default()
+            },
+        );
         let n = s.atom_count();
 
-        let mut integ = match FullGpuIntegrator::new(
-            &s, &g, ff, 1.0, 2.0, 310.0, 1,
-        ) {
+        let mut integ = match FullGpuIntegrator::new(&s, &g, ff, 1.0, 2.0, 310.0, 1) {
             Ok(x) => x,
-            Err(e) => { eprintln!("{n_residues:3} residues: GPU init failed: {e}"); continue }
+            Err(e) => {
+                eprintln!("{n_residues:3} residues: GPU init failed: {e}");
+                continue;
+            }
         };
         let velocities = vec![Vec3::zeros(); n];
         integ.upload_initial_state(&s, &velocities);
@@ -79,8 +87,6 @@ fn bench_gpu_integrator_on_rna() {
         }
         assert!(!any_nan, "RNA trajectory diverged at {n_residues} residues");
 
-        eprintln!(
-            "{n_residues:3} residues / {n:5} atoms  |  {ms_per_step:7.3} ms/step",
-        );
+        eprintln!("{n_residues:3} residues / {n:5} atoms  |  {ms_per_step:7.3} ms/step",);
     }
 }

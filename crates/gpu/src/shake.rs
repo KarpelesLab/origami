@@ -182,13 +182,34 @@ impl ShakePipeline {
             label: Some("shake_bind_group"),
             layout: &bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: positions_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: ref_positions_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: inv_mass_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: h_count_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 5, resource: per_atom_h_atoms_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 6, resource: per_atom_h_d_sq_buf.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: positions_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: ref_positions_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: inv_mass_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: h_count_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: per_atom_h_atoms_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: per_atom_h_d_sq_buf.as_entire_binding(),
+                },
             ],
         });
 

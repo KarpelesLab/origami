@@ -65,7 +65,13 @@ pub fn find_orfs(seq: &[u8], min_aa: usize) -> Vec<Orf> {
                 Err(_) => {
                     if let Some((start, protein)) = current.take() {
                         if protein.len() >= min_aa {
-                            out.push(Orf { frame, start, end: i, protein, terminated: false });
+                            out.push(Orf {
+                                frame,
+                                start,
+                                end: i,
+                                protein,
+                                terminated: false,
+                            });
                         }
                     }
                     i += 3;
@@ -98,7 +104,13 @@ pub fn find_orfs(seq: &[u8], min_aa: usize) -> Vec<Orf> {
         }
         if let Some((start, protein)) = current.take() {
             if protein.len() >= min_aa {
-                out.push(Orf { frame, start, end: seq.len(), protein, terminated: false });
+                out.push(Orf {
+                    frame,
+                    start,
+                    end: seq.len(),
+                    protein,
+                    terminated: false,
+                });
             }
         }
     }
@@ -120,7 +132,10 @@ mod tests {
         assert_eq!(f0.end, 12);
         assert!(f0.terminated);
         assert_eq!(f0.len(), 3);
-        assert_eq!(f0.protein, vec![AminoAcid::Met, AminoAcid::Ala, AminoAcid::Trp]);
+        assert_eq!(
+            f0.protein,
+            vec![AminoAcid::Met, AminoAcid::Ala, AminoAcid::Trp]
+        );
     }
 
     #[test]
@@ -129,15 +144,21 @@ mod tests {
         // out-of-frame Met at position 5 in +2 (→MV, unterminated).
         let orfs = find_orfs(b"AUGGCAUGGUAA", 1);
         assert_eq!(orfs.len(), 2);
-        assert!(orfs.iter().any(|o| o.frame == Frame::Plus0 && o.protein.len() == 3));
-        assert!(orfs.iter().any(|o| o.frame == Frame::Plus2 && o.protein.len() == 2));
+        assert!(orfs
+            .iter()
+            .any(|o| o.frame == Frame::Plus0 && o.protein.len() == 3));
+        assert!(orfs
+            .iter()
+            .any(|o| o.frame == Frame::Plus2 && o.protein.len() == 2));
     }
 
     #[test]
     fn finds_orf_with_leading_utr() {
         // CC-AUG-GCA-UAA: Met-Ala then stop, in frame +2
         let orfs = find_orfs(b"CCAUGGCAUAA", 1);
-        assert!(orfs.iter().any(|o| o.frame == Frame::Plus2 && o.protein.len() == 2));
+        assert!(orfs
+            .iter()
+            .any(|o| o.frame == Frame::Plus2 && o.protein.len() == 2));
     }
 
     #[test]

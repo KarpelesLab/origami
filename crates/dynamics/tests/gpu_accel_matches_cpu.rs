@@ -10,20 +10,16 @@
 //! force readback + accumulate).
 
 use chem::{standard_ff, AminoAcid};
-use energy::scratch::ForceScratch;
 use energy::forces_gb::add_gb_forces_soa;
 use energy::forces_nonbonded::add_nonbonded_forces_soa;
+use energy::scratch::ForceScratch;
 use energy::DEFAULT_CUTOFF_A;
 use geom::{build_extended_chain, build_topology_graph};
 
 #[test]
 fn gpu_accel_matches_cpu_nonbonded_plus_gb_on_ala_lys_glu() {
     // Build the system + topology + scratch (same path every CPU call uses).
-    let s = build_extended_chain(&[
-        AminoAcid::Ala,
-        AminoAcid::Lys,
-        AminoAcid::Glu,
-    ]).unwrap();
+    let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Lys, AminoAcid::Glu]).unwrap();
     let g = build_topology_graph(&s);
     let ff = standard_ff();
     let n = s.atom_count();
@@ -34,13 +30,21 @@ fn gpu_accel_matches_cpu_nonbonded_plus_gb_on_ala_lys_glu() {
     cpu_scratch.sync_positions(&s);
     cpu_scratch.zero_forces();
     add_nonbonded_forces_soa(&mut cpu_scratch, DEFAULT_CUTOFF_A);
-    add_gb_forces_soa(&mut cpu_scratch, &s, ff, energy::forces_gb::GB_DEFAULT_CUTOFF_A_PUB);
+    add_gb_forces_soa(
+        &mut cpu_scratch,
+        &s,
+        ff,
+        energy::forces_gb::GB_DEFAULT_CUTOFF_A_PUB,
+    );
 
     // GPU candidate: build the accelerator, run its combined call on a
     // fresh scratch.
     let mut gpu = match dynamics::GpuAccelerator::new(&s, &g, ff, DEFAULT_CUTOFF_A) {
         Ok(a) => a,
-        Err(e) => { eprintln!("GPU unavailable: {e}"); return; }
+        Err(e) => {
+            eprintln!("GPU unavailable: {e}");
+            return;
+        }
     };
     let mut gpu_scratch = ForceScratch::new(&s, &g, ff);
     gpu_scratch.sync_positions(&s);
@@ -91,7 +95,10 @@ fn gpu_accel_persists_neighbour_list_across_static_calls() {
 
     let mut gpu = match dynamics::GpuAccelerator::new(&s, &g, ff, DEFAULT_CUTOFF_A) {
         Ok(a) => a,
-        Err(e) => { eprintln!("GPU unavailable: {e}"); return; }
+        Err(e) => {
+            eprintln!("GPU unavailable: {e}");
+            return;
+        }
     };
 
     let mut sc1 = ForceScratch::new(&s, &g, ff);
@@ -105,8 +112,17 @@ fn gpu_accel_persists_neighbour_list_across_static_calls() {
     gpu.add_nonbonded_and_gb(&mut sc2);
 
     for i in 0..n {
-        assert!((sc1.fxs[i] - sc2.fxs[i]).abs() < 1e-9, "atom {i} fx drift between calls");
-        assert!((sc1.fys[i] - sc2.fys[i]).abs() < 1e-9, "atom {i} fy drift between calls");
-        assert!((sc1.fzs[i] - sc2.fzs[i]).abs() < 1e-9, "atom {i} fz drift between calls");
+        assert!(
+            (sc1.fxs[i] - sc2.fxs[i]).abs() < 1e-9,
+            "atom {i} fx drift between calls"
+        );
+        assert!(
+            (sc1.fys[i] - sc2.fys[i]).abs() < 1e-9,
+            "atom {i} fy drift between calls"
+        );
+        assert!(
+            (sc1.fzs[i] - sc2.fzs[i]).abs() < 1e-9,
+            "atom {i} fz drift between calls"
+        );
     }
 }

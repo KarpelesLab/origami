@@ -61,11 +61,7 @@ pub struct TileNonbondedPipeline {
 }
 
 impl TileNonbondedPipeline {
-    pub fn new(
-        ctx: &'static GpuContext,
-        n_atoms: usize,
-        setup: TileNonbondedSetup,
-    ) -> Self {
+    pub fn new(ctx: &'static GpuContext, n_atoms: usize, setup: TileNonbondedSetup) -> Self {
         let positions_size = (n_atoms * std::mem::size_of::<[f32; 4]>()) as u64;
         let positions_buf = Arc::new(ctx.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("tnb_positions"),
@@ -265,7 +261,11 @@ impl TileNonbondedPipeline {
         queue.write_buffer(&self.tile_count_buf, 0, bytemuck::cast_slice(tile_count));
         queue.write_buffer(&self.tile_start_buf, 0, bytemuck::cast_slice(tile_start));
         if !tile_indices.is_empty() {
-            queue.write_buffer(&self.tile_indices_buf, 0, bytemuck::cast_slice(tile_indices));
+            queue.write_buffer(
+                &self.tile_indices_buf,
+                0,
+                bytemuck::cast_slice(tile_indices),
+            );
         }
     }
 
@@ -274,16 +274,16 @@ impl TileNonbondedPipeline {
         for (i, p) in positions.iter().enumerate() {
             self.pos_padded[i] = [p[0], p[1], p[2], 0.0];
         }
-        self.ctx
-            .queue
-            .write_buffer(&self.positions_buf, 0, bytemuck::cast_slice(&self.pos_padded));
+        self.ctx.queue.write_buffer(
+            &self.positions_buf,
+            0,
+            bytemuck::cast_slice(&self.pos_padded),
+        );
     }
 
     pub fn clear_forces(&self) {
         let zeroes = vec![0u8; self.forces_size as usize];
-        self.ctx
-            .queue
-            .write_buffer(&self.forces_buf, 0, &zeroes);
+        self.ctx.queue.write_buffer(&self.forces_buf, 0, &zeroes);
     }
 
     pub fn record_compute(&self, encoder: &mut wgpu::CommandEncoder) {
@@ -314,9 +314,13 @@ impl TileNonbondedPipeline {
         queue.submit(Some(encoder.finish()));
         let slice = self.readback_buf.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
         let _ = device.poll(wgpu::Maintain::Wait);
-        rx.recv().expect("map_async sender dropped").expect("buffer map");
+        rx.recv()
+            .expect("map_async sender dropped")
+            .expect("buffer map");
         let data = slice.get_mapped_range();
         let padded: &[[f32; 4]] = bytemuck::cast_slice(&data);
         let out: Vec<[f32; 3]> = padded.iter().map(|v| [v[0], v[1], v[2]]).collect();
@@ -325,7 +329,9 @@ impl TileNonbondedPipeline {
         out
     }
 
-    pub fn n_tiles(&self) -> usize { self.n_tiles }
+    pub fn n_tiles(&self) -> usize {
+        self.n_tiles
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -347,16 +353,46 @@ fn create_bind_group(
         label: Some("tnb_bind_group"),
         layout,
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: positions.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: atom_lj.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: charges.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 4, resource: exclusions.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 5, resource: one_four.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 6, resource: tile_count.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 7, resource: tile_start.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 8, resource: tile_indices.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 9, resource: forces.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: positions.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: atom_lj.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: charges.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: exclusions.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: one_four.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: tile_count.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: tile_start.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 8,
+                resource: tile_indices.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 9,
+                resource: forces.as_entire_binding(),
+            },
         ],
     })
 }

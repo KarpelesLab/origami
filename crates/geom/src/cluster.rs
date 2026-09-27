@@ -95,7 +95,10 @@ pub fn cluster_trajectory(frames: &[Structure], cutoff_a: f64) -> Vec<usize> {
         .enumerate()
         .map(|(new, (old, _))| (*old, new))
         .collect();
-    cluster.iter().map(|c| *remap.get(c).unwrap_or(&0)).collect()
+    cluster
+        .iter()
+        .map(|c| *remap.get(c).unwrap_or(&0))
+        .collect()
 }
 
 /// For each cluster, pick the medoid frame — the frame whose summed
@@ -161,12 +164,7 @@ mod tests {
 
     #[test]
     fn identical_frames_one_cluster() {
-        let s = build_extended_chain(&[
-            AminoAcid::Ala,
-            AminoAcid::Gly,
-            AminoAcid::Ala,
-        ])
-        .unwrap();
+        let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Gly, AminoAcid::Ala]).unwrap();
         let frames = vec![s.clone(), s.clone(), s.clone()];
         let labels = cluster_trajectory(&frames, 0.1);
         assert_eq!(labels, vec![0, 0, 0]);
@@ -194,6 +192,9 @@ mod tests {
         let frames = vec![s_base.clone(), s_warped.clone(), s_base.clone()];
         let labels = cluster_trajectory(&frames, 1.0);
         let sizes = cluster_sizes(&labels);
-        assert_eq!(sizes.iter().map(|(_, n)| *n).collect::<Vec<_>>(), vec![2, 1]);
+        assert_eq!(
+            sizes.iter().map(|(_, n)| *n).collect::<Vec<_>>(),
+            vec![2, 1]
+        );
     }
 }

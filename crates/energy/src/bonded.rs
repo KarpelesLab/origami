@@ -31,7 +31,11 @@ impl BondedBreakdown {
 
 /// Compute every bonded energy term for the structure. Atom types are
 /// looked up from the structure; parameters from the supplied force field.
-pub fn bonded_energy(structure: &Structure, graph: &TopologyGraph, ff: &ForceField) -> BondedBreakdown {
+pub fn bonded_energy(
+    structure: &Structure,
+    graph: &TopologyGraph,
+    ff: &ForceField,
+) -> BondedBreakdown {
     let atom_types = build_atom_types(structure);
     let mut br = BondedBreakdown::default();
 
@@ -133,14 +137,20 @@ pub fn dihedral_energy(
     let mut total_kcal = 0.0;
     for d in &graph.dihedrals {
         let (ta, tb, tc, td) = (
-            atom_types[d.a], atom_types[d.b], atom_types[d.c], atom_types[d.d],
+            atom_types[d.a],
+            atom_types[d.b],
+            atom_types[d.c],
+            atom_types[d.d],
         );
         let Some(terms) = ff.dihedral(ta, tb, tc, td) else {
             br.missing_count += 1;
             continue;
         };
         let chi = measure::dihedral(
-            positions[d.a], positions[d.b], positions[d.c], positions[d.d],
+            positions[d.a],
+            positions[d.b],
+            positions[d.c],
+            positions[d.d],
         );
         for term in terms {
             let delta = deg_to_rad(term.delta_deg);
@@ -167,14 +177,20 @@ pub fn improper_energy(
     let mut total_kcal = 0.0;
     for imp in &graph.impropers {
         let (ta, tb, tc, td) = (
-            atom_types[imp.a], atom_types[imp.b], atom_types[imp.c], atom_types[imp.d],
+            atom_types[imp.a],
+            atom_types[imp.b],
+            atom_types[imp.c],
+            atom_types[imp.d],
         );
         let Some(p) = ff.improper(ta, tb, tc, td) else {
             br.missing_count += 1;
             continue;
         };
         let omega = measure::dihedral(
-            positions[imp.a], positions[imp.b], positions[imp.c], positions[imp.d],
+            positions[imp.a],
+            positions[imp.b],
+            positions[imp.c],
+            positions[imp.d],
         );
         let omega0 = deg_to_rad(p.psi0_deg);
         // Wrap difference into [-π, π]
@@ -212,15 +228,18 @@ mod tests {
         assert!(br.total_kj_mol().is_finite());
         assert!(
             br.bond_kj_mol < 100.0,
-            "bond term {} unexpectedly large", br.bond_kj_mol,
+            "bond term {} unexpectedly large",
+            br.bond_kj_mol,
         );
         assert!(
             br.angle_kj_mol < 200.0,
-            "angle term {} unexpectedly large", br.angle_kj_mol,
+            "angle term {} unexpectedly large",
+            br.angle_kj_mol,
         );
         assert!(
             br.improper_kj_mol < 50.0,
-            "improper term {} should be near zero at planar built geometry", br.improper_kj_mol,
+            "improper term {} should be near zero at planar built geometry",
+            br.improper_kj_mol,
         );
     }
 
@@ -252,7 +271,8 @@ mod tests {
     fn dihedral_term_traces_periodic_function() {
         // Build an Ala dipeptide at default φ, then measure how the dihedral
         // energy changes when we shift φ. It should be smooth and periodic.
-        let s_default = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
+        let s_default =
+            build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
         let g = build_topology_graph(&s_default);
         let ff = standard_ff();
         let atom_types = build_atom_types(&s_default);
@@ -261,7 +281,9 @@ mod tests {
         assert!(e_default.is_finite());
     }
 
-    fn g_ref(g: &TopologyGraph) -> &TopologyGraph { g }
+    fn g_ref(g: &TopologyGraph) -> &TopologyGraph {
+        g
+    }
 
     #[test]
     fn improper_at_planar_geometry_is_small() {
@@ -275,7 +297,11 @@ mod tests {
         let mut br = BondedBreakdown::default();
         let e = improper_energy(&s, &g, ff, &atom_types, &mut br);
         // Per-improper energy ≤ a few kJ/mol when planar.
-        assert!(e.abs() < 20.0, "improper term {} unexpectedly large at planar geom", e);
+        assert!(
+            e.abs() < 20.0,
+            "improper term {} unexpectedly large at planar geom",
+            e
+        );
     }
 
     #[test]

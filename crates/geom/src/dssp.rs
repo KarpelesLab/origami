@@ -118,7 +118,9 @@ pub fn find_hbonds(structure: &Structure) -> HBondTable {
             if r_on < 0.5 || r_ch < 0.5 || r_oh < 0.5 || r_cn < 0.5 {
                 continue;
             }
-            let e_hb = Q_DONOR * Q_ACCEPTOR * COULOMB_CONST
+            let e_hb = Q_DONOR
+                * Q_ACCEPTOR
+                * COULOMB_CONST
                 * (1.0 / r_on + 1.0 / r_ch - 1.0 / r_oh - 1.0 / r_cn);
             if e_hb < HBOND_E_THRESHOLD {
                 table.donor_to_acceptors[i].push(j);
@@ -186,12 +188,8 @@ pub fn assign_dssp(structure: &Structure, hbonds: &HBondTable) -> Vec<DsspType> 
                 continue;
             }
             let antipar = hbonds.donates_to(i, j) && hbonds.donates_to(j, i);
-            let par_a = hbonds.donates_to(i, j)
-                && i + 2 < n
-                && hbonds.donates_to(j, i + 2);
-            let par_b = j + 2 < n
-                && hbonds.donates_to(i, j + 2)
-                && hbonds.donates_to(j, i);
+            let par_a = hbonds.donates_to(i, j) && i + 2 < n && hbonds.donates_to(j, i + 2);
+            let par_b = j + 2 < n && hbonds.donates_to(i, j + 2) && hbonds.donates_to(j, i);
             if antipar || par_a || par_b {
                 out[i] = DsspType::Strand;
                 out[j] = DsspType::Strand;
@@ -258,12 +256,7 @@ mod tests {
 
     #[test]
     fn dssp_string_length_matches_residue_count() {
-        let s = build_extended_chain(&[
-            AminoAcid::Ala,
-            AminoAcid::Ala,
-            AminoAcid::Ala,
-        ])
-        .unwrap();
+        let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
         let ss = dssp_string(&s);
         assert_eq!(ss.len(), s.residues.len());
         // Three-residue extended chain: nothing classifies as anything.

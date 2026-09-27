@@ -1,5 +1,5 @@
-use translate::{parse_fasta, translate_codons};
 use translate::translate::one_letter_string;
+use translate::{parse_fasta, translate_codons};
 
 /// Human preproinsulin (UniProt P01308). The reference protein sequence below
 /// is the canonical 110-residue translation product including the signal

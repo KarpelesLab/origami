@@ -30,9 +30,14 @@ fn cpu_lj_forces(
     let cutoff_sq = cutoff * cutoff;
     for i in 0..n {
         let pi = positions[i];
-        let (eps_i, rmin_half_i) = (lj_params[type_index[i] as usize][0], lj_params[type_index[i] as usize][1]);
+        let (eps_i, rmin_half_i) = (
+            lj_params[type_index[i] as usize][0],
+            lj_params[type_index[i] as usize][1],
+        );
         for j in 0..n {
-            if i == j { continue; }
+            if i == j {
+                continue;
+            }
             let bit = i * n + j;
             if exclusions[bit / 32] & (1u32 << (bit % 32)) != 0 {
                 continue;
@@ -46,7 +51,10 @@ fn cpu_lj_forces(
             if r2 > cutoff_sq || r2 < 1e-12 {
                 continue;
             }
-            let (eps_j, rmin_half_j) = (lj_params[type_index[j] as usize][0], lj_params[type_index[j] as usize][1]);
+            let (eps_j, rmin_half_j) = (
+                lj_params[type_index[j] as usize][0],
+                lj_params[type_index[j] as usize][1],
+            );
             let eps = (eps_i * eps_j).sqrt();
             let rmin = rmin_half_i + rmin_half_j;
             let r = r2.sqrt();
@@ -78,7 +86,8 @@ fn gpu_lj_matches_cpu_on_ala3() {
         chem::AminoAcid::Ala,
         chem::AminoAcid::Ala,
         chem::AminoAcid::Ala,
-    ]).unwrap();
+    ])
+    .unwrap();
     let g = build_topology_graph(&s);
     let ff = standard_ff();
 
@@ -88,7 +97,11 @@ fn gpu_lj_matches_cpu_on_ala3() {
     let mut atom_types: Vec<AtomType> = Vec::with_capacity(n);
     for r in &s.residues {
         for a in &r.atoms {
-            positions.push([a.position.x as f32, a.position.y as f32, a.position.z as f32]);
+            positions.push([
+                a.position.x as f32,
+                a.position.y as f32,
+                a.position.z as f32,
+            ]);
             atom_types.push(classify_atom(r.monomer, a.name).unwrap());
         }
     }
@@ -116,7 +129,9 @@ fn gpu_lj_matches_cpu_on_ala3() {
     let mut exclusions = vec![0u32; n_bits.div_ceil(32)];
     for i in 0..n {
         for j in 0..n {
-            if i == j { continue; }
+            if i == j {
+                continue;
+            }
             if g.is_bonded(i, j) || g.is_one_three(i, j) || g.is_one_four(i, j) {
                 let bit = i * n + j;
                 exclusions[bit / 32] |= 1u32 << (bit % 32);
@@ -126,13 +141,16 @@ fn gpu_lj_matches_cpu_on_ala3() {
 
     let cpu_forces = cpu_lj_forces(&positions, &type_index, &lj_params, &exclusions, CUTOFF_A);
 
-    let gpu_forces = lj_force_gpu(ctx, LjInput {
-        positions: &positions,
-        type_index: &type_index,
-        lj_params: &lj_params,
-        exclusions: &exclusions,
-        cutoff_a: CUTOFF_A,
-    });
+    let gpu_forces = lj_force_gpu(
+        ctx,
+        LjInput {
+            positions: &positions,
+            type_index: &type_index,
+            lj_params: &lj_params,
+            exclusions: &exclusions,
+            cutoff_a: CUTOFF_A,
+        },
+    );
 
     assert_eq!(cpu_forces.len(), gpu_forces.len());
     let mut max_err = 0.0_f32;
@@ -156,7 +174,10 @@ fn gpu_lj_matches_cpu_on_ala3() {
         gpu_forces[argmax_i][argmax_axis],
         max_err,
     );
-    eprintln!("max GPU-vs-CPU LJ force discrepancy on Ala₃ ({} atoms): {} kJ/mol/Å — {}", n, max_err, label);
+    eprintln!(
+        "max GPU-vs-CPU LJ force discrepancy on Ala₃ ({} atoms): {} kJ/mol/Å — {}",
+        n, max_err, label
+    );
     assert!(max_err < 1e-2, "GPU and CPU LJ disagree: {label}");
 
     // Bonus sanity: forces sum to ~zero (Newton's third law on every
@@ -165,7 +186,10 @@ fn gpu_lj_matches_cpu_on_ala3() {
         [acc[0] + f[0], acc[1] + f[1], acc[2] + f[2]]
     });
     let net_mag = (net[0] * net[0] + net[1] * net[1] + net[2] * net[2]).sqrt();
-    assert!(net_mag < 1e-3, "GPU LJ forces don't sum to zero: net = {net:?}");
+    assert!(
+        net_mag < 1e-3,
+        "GPU LJ forces don't sum to zero: net = {net:?}"
+    );
 
     let _ = Vec3::zeros(); // keep `geom::Vec3` use alive
 }

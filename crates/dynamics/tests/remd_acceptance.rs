@@ -33,7 +33,11 @@ fn ala3_remd_4_replicas_swaps_correctly() {
 
     assert_eq!(summary.n_replicas, 4);
     for r in &summary.per_replica {
-        assert!(!r.diverged, "replica at T={:.0} K diverged", r.temperature_k);
+        assert!(
+            !r.diverged,
+            "replica at T={:.0} K diverged",
+            r.temperature_k
+        );
     }
     assert_eq!(summary.swap_attempts.len(), 3);
     for &att in &summary.swap_attempts {

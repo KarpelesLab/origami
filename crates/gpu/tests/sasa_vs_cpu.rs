@@ -24,11 +24,12 @@ fn vdw_radius(e: Element) -> f64 {
 fn gpu_sasa_matches_cpu_on_ala_lys_glu() {
     let ctx = match GpuContext::get() {
         Ok(c) => c,
-        Err(e) => { eprintln!("GPU unavailable: {e}"); return; }
+        Err(e) => {
+            eprintln!("GPU unavailable: {e}");
+            return;
+        }
     };
-    let s = build_extended_chain(&[
-        AminoAcid::Ala, AminoAcid::Lys, AminoAcid::Glu,
-    ]).unwrap();
+    let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Lys, AminoAcid::Glu]).unwrap();
     let n = s.atom_count();
 
     // Per-atom expanded radii.
@@ -38,7 +39,11 @@ fn gpu_sasa_matches_cpu_on_ala_lys_glu() {
     let mut radii_f64: Vec<f64> = Vec::with_capacity(n);
     for r in &s.residues {
         for a in &r.atoms {
-            positions.push([a.position.x as f32, a.position.y as f32, a.position.z as f32]);
+            positions.push([
+                a.position.x as f32,
+                a.position.y as f32,
+                a.position.z as f32,
+            ]);
             positions_f64.push(a.position);
             let exp = vdw_radius(a.element) + PROBE_RADIUS_A;
             radii_f32.push(exp as f32);
@@ -55,7 +60,9 @@ fn gpu_sasa_matches_cpu_on_ala_lys_glu() {
     let mut per_atom_nbrs: Vec<Vec<u32>> = vec![Vec::new(); n];
     for i in 0..n {
         for j in 0..n {
-            if i == j { continue; }
+            if i == j {
+                continue;
+            }
             let d = (positions_f64[i] - positions_f64[j]).norm();
             if d <= radii_f64[i] + radii_f64[j] {
                 per_atom_nbrs[i].push(j as u32);
@@ -69,12 +76,18 @@ fn gpu_sasa_matches_cpu_on_ala_lys_glu() {
         total += counts[i];
     }
     indices_flat.reserve(total as usize);
-    for v in &per_atom_nbrs { indices_flat.extend_from_slice(v); }
+    for v in &per_atom_nbrs {
+        indices_flat.extend_from_slice(v);
+    }
 
-    let mut pipe = SasaPipeline::new(ctx, n, SasaSetup {
-        radii: &radii_f32,
-        initial_indices_capacity: indices_flat.len().max(64),
-    });
+    let mut pipe = SasaPipeline::new(
+        ctx,
+        n,
+        SasaSetup {
+            radii: &radii_f32,
+            initial_indices_capacity: indices_flat.len().max(64),
+        },
+    );
     pipe.update_positions(&positions);
     pipe.update_neighbours(&counts, &starts, &indices_flat);
     let gpu_areas = pipe.compute_area();
@@ -107,8 +120,10 @@ fn gpu_sasa_matches_cpu_on_ala_lys_glu() {
     // absolute, whichever is larger.
     let cpu_at_argmax = cpu_areas.iter().cloned().fold(0.0_f64, f64::max);
     let rel_tol = 0.03 * cpu_at_argmax.max(2.0).max(1.0);
-    assert!(max_err < rel_tol.max(2.0),
-        "GPU SASA area diverges from CPU past tolerance ({argmax})");
+    assert!(
+        max_err < rel_tol.max(2.0),
+        "GPU SASA area diverges from CPU past tolerance ({argmax})"
+    );
 
     // Totals — same precision argument applies, but averaged over N
     // atoms the noise should cancel substantially.
@@ -120,6 +135,8 @@ fn gpu_sasa_matches_cpu_on_ala_lys_glu() {
         "total area — CPU: {cpu_total:.2} Å²  GPU: {gpu_total:.2} Å²  rel err {:.3}%",
         100.0 * total_rel
     );
-    assert!(total_rel < 0.02,
-        "total area differs by > 2 %: {cpu_total} vs {gpu_total}");
+    assert!(
+        total_rel < 0.02,
+        "total area differs by > 2 %: {cpu_total} vs {gpu_total}"
+    );
 }

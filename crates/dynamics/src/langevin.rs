@@ -34,8 +34,8 @@
 //! [`AccelConstants`] so the integrator inner loop stays clean.
 
 use chem::ForceField;
-use energy::{total_force_with_scratch, ForceScratch};
 use energy::DEFAULT_CUTOFF_A;
+use energy::{total_force_with_scratch, ForceScratch};
 use geom::{Structure, TopologyGraph, Vec3};
 
 use crate::rng::Xoshiro256pp;
@@ -308,8 +308,7 @@ where
         // O: v ← α v + σ ξ, σ² = (1 − α²) k_B T / m · ACCEL_FACTOR
         let one_minus_alpha2 = 1.0 - alpha * alpha;
         for i in 0..n {
-            let sigma =
-                (one_minus_alpha2 * kbt * dof_correction * ACCEL_FACTOR / masses[i]).sqrt();
+            let sigma = (one_minus_alpha2 * kbt * dof_correction * ACCEL_FACTOR / masses[i]).sqrt();
             let xi_x = rng.gaussian();
             let xi_y = rng.gaussian();
             let xi_z = rng.gaussian();
@@ -389,7 +388,11 @@ where
         }
     }
 
-    let mean = if samples > 0 { sum_t / samples as f64 } else { 0.0 };
+    let mean = if samples > 0 {
+        sum_t / samples as f64
+    } else {
+        0.0
+    };
     let var = if samples > 0 {
         (sum_t2 / samples as f64 - mean * mean).max(0.0)
     } else {
@@ -436,21 +439,22 @@ fn run_langevin_gpu_integrator(
     }
     // Try to construct the integrator; fall back to CPU if GPU init fails.
     let mut full = match FullGpuIntegrator::new(
-        structure, graph, ff,
-        opts.dt_fs, opts.friction_ps_inv, opts.temperature_k, opts.seed,
+        structure,
+        graph,
+        ff,
+        opts.dt_fs,
+        opts.friction_ps_inv,
+        opts.temperature_k,
+        opts.seed,
     ) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!(
-                "warning: GPU integrator requested but unavailable ({e}); using CPU"
-            );
+            eprintln!("warning: GPU integrator requested but unavailable ({e}); using CPU");
             let mut opts2 = opts;
             opts2.use_gpu_integrator = false;
             // Re-invoke run_langevin via a non-generic adapter so we
             // don't trigger the monomorphisation recursion.
-            return run_langevin(structure, graph, ff, opts2, |frame| {
-                (**callback)(frame)
-            });
+            return run_langevin(structure, graph, ff, opts2, |frame| (**callback)(frame));
         }
     };
     full.upload_initial_state(structure, &velocities);
@@ -477,7 +481,11 @@ fn run_langevin_gpu_integrator(
         });
     }
 
-    let batch = if opts.save_every == 0 { opts.steps } else { opts.save_every };
+    let batch = if opts.save_every == 0 {
+        opts.steps
+    } else {
+        opts.save_every
+    };
     let mut step_done = 0usize;
     while step_done < opts.steps {
         let this_batch = batch.min(opts.steps - step_done);
@@ -506,7 +514,11 @@ fn run_langevin_gpu_integrator(
         }
     }
 
-    let mean = if samples > 0 { sum_t / samples as f64 } else { 0.0 };
+    let mean = if samples > 0 {
+        sum_t / samples as f64
+    } else {
+        0.0
+    };
     let var = if samples > 0 {
         (sum_t2 / samples as f64 - mean * mean).max(0.0)
     } else {
@@ -597,8 +609,20 @@ fn eval_forces(
                 // Main thread: CPU bonded forces.
                 energy::forces_bonded::add_bond_forces(&positions, graph, ff, &atom_types, forces);
                 energy::forces_bonded::add_angle_forces(&positions, graph, ff, &atom_types, forces);
-                energy::forces_bonded::add_dihedral_forces(&positions, graph, ff, &atom_types, forces);
-                energy::forces_bonded::add_improper_forces(&positions, graph, ff, &atom_types, forces);
+                energy::forces_bonded::add_dihedral_forces(
+                    &positions,
+                    graph,
+                    ff,
+                    &atom_types,
+                    forces,
+                );
+                energy::forces_bonded::add_improper_forces(
+                    &positions,
+                    graph,
+                    ff,
+                    &atom_types,
+                    forces,
+                );
             });
         } else {
             // Sequential fallback: bonded first (CPU only), then GPU

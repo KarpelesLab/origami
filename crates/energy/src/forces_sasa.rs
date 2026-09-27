@@ -15,8 +15,8 @@
 use chem::{Element, ForceField};
 use geom::{Structure, Vec3};
 
-use crate::powersasa::arrangement::{build_caps, count_accessible_components, find_boundary};
 use crate::powersasa::area::accessible_area_with_components;
+use crate::powersasa::arrangement::{build_caps, count_accessible_components, find_boundary};
 use crate::powersasa::{surface_tension_kcal, vdw_radius, PROBE_RADIUS_A};
 use crate::units::kcal_to_kj;
 
@@ -202,7 +202,11 @@ mod tests {
         let ff = standard_ff();
         let mut forces = vec![Vec3::zeros(); 1];
         add_sasa_forces(&s, ff, &mut forces);
-        assert!(forces[0].norm() < 1e-8, "expected ~0 force, got {:?}", forces[0]);
+        assert!(
+            forces[0].norm() < 1e-8,
+            "expected ~0 force, got {:?}",
+            forces[0]
+        );
     }
 
     #[test]

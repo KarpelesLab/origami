@@ -15,7 +15,13 @@ use geom::{build_extended_chain, build_topology_graph, Vec3};
 use gpu::GpuContext;
 
 fn build_chain(n_residues: usize) -> geom::Structure {
-    let block = [AminoAcid::Ala, AminoAcid::Gly, AminoAcid::Leu, AminoAcid::Glu, AminoAcid::Lys];
+    let block = [
+        AminoAcid::Ala,
+        AminoAcid::Gly,
+        AminoAcid::Leu,
+        AminoAcid::Glu,
+        AminoAcid::Lys,
+    ];
     let seq: Vec<AminoAcid> = block.iter().cloned().cycle().take(n_residues).collect();
     build_extended_chain(&seq).expect("build")
 }

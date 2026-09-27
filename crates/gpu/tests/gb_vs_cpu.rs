@@ -8,8 +8,8 @@
 //! the gb_born kernel.
 
 use chem::{standard_ff, AminoAcid, Element};
-use energy::gb::{intrinsic_radius_pub, hct_scale_pub, OBC_OFFSET_PUB, BORN_RADIUS_CUTOFF_A_PUB};
 use energy::forces_gb::GB_DEFAULT_CUTOFF_A_PUB;
+use energy::gb::{hct_scale_pub, intrinsic_radius_pub, BORN_RADIUS_CUTOFF_A_PUB, OBC_OFFSET_PUB};
 use geom::{build_extended_chain, build_topology_graph, Vec3};
 use gpu::{pair_list_to_csr, GbPipeline, GbSetup, GpuContext};
 
@@ -17,14 +17,13 @@ use gpu::{pair_list_to_csr, GbPipeline, GbSetup, GpuContext};
 fn gpu_gb_matches_cpu_on_ala_lys_glu() {
     let ctx = match GpuContext::get() {
         Ok(c) => c,
-        Err(e) => { eprintln!("GPU unavailable: {e}"); return; }
+        Err(e) => {
+            eprintln!("GPU unavailable: {e}");
+            return;
+        }
     };
 
-    let s = build_extended_chain(&[
-        AminoAcid::Ala,
-        AminoAcid::Lys,
-        AminoAcid::Glu,
-    ]).unwrap();
+    let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Lys, AminoAcid::Glu]).unwrap();
     let _g = build_topology_graph(&s);
     let ff = standard_ff();
 
@@ -36,7 +35,11 @@ fn gpu_gb_matches_cpu_on_ala_lys_glu() {
     let mut charges: Vec<f32> = Vec::with_capacity(n);
     for r in &s.residues {
         for a in &r.atoms {
-            positions.push([a.position.x as f32, a.position.y as f32, a.position.z as f32]);
+            positions.push([
+                a.position.x as f32,
+                a.position.y as f32,
+                a.position.z as f32,
+            ]);
             let r0 = intrinsic_radius_pub(a.element);
             rho.push(r0 as f32);
             rho_tilde.push((r0 - OBC_OFFSET_PUB) as f32);
@@ -63,15 +66,19 @@ fn gpu_gb_matches_cpu_on_ala_lys_glu() {
     }
     let (counts, starts, indices) = pair_list_to_csr(n, &pairs);
 
-    let mut pipe = GbPipeline::new(ctx, n, GbSetup {
-        rho: &rho,
-        rho_tilde: &rho_tilde,
-        scale: &scale,
-        charges: &charges,
-        cutoff_a: BORN_RADIUS_CUTOFF_A_PUB as f32,
-        pair_cutoff_a: GB_DEFAULT_CUTOFF_A_PUB as f32,
-        initial_indices_capacity: indices.len().max(64),
-    });
+    let mut pipe = GbPipeline::new(
+        ctx,
+        n,
+        GbSetup {
+            rho: &rho,
+            rho_tilde: &rho_tilde,
+            scale: &scale,
+            charges: &charges,
+            cutoff_a: BORN_RADIUS_CUTOFF_A_PUB as f32,
+            pair_cutoff_a: GB_DEFAULT_CUTOFF_A_PUB as f32,
+            initial_indices_capacity: indices.len().max(64),
+        },
+    );
     pipe.update_neighbours(&counts, &starts, &indices);
     pipe.update_positions(&positions);
     let gpu_forces = pipe.compute_forces();
@@ -89,9 +96,7 @@ fn gpu_gb_matches_cpu_on_ala_lys_glu() {
             let err = (gv - cv).abs();
             if err > max_err {
                 max_err = err;
-                label = format!(
-                    "atom {i} axis {axis}: cpu={cv:.6} gpu={gv:.6} err={err:.6}"
-                );
+                label = format!("atom {i} axis {axis}: cpu={cv:.6} gpu={gv:.6} err={err:.6}");
             }
         }
     }

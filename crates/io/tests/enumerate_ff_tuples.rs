@@ -26,10 +26,20 @@ fn enumerate_required_force_field_tuples() {
         }
     }
 
-    let canonical_pair = |a: AtomType, b: AtomType| if (a as u8) <= (b as u8) { (a, b) } else { (b, a) };
+    let canonical_pair = |a: AtomType, b: AtomType| {
+        if (a as u8) <= (b as u8) {
+            (a, b)
+        } else {
+            (b, a)
+        }
+    };
     let canonical_triple = |a: AtomType, b: AtomType, c: AtomType| {
         // Central atom b is fixed; canonicalise a/c so the smaller-discriminant comes first.
-        if (a as u8) <= (c as u8) { (a, b, c) } else { (c, b, a) }
+        if (a as u8) <= (c as u8) {
+            (a, b, c)
+        } else {
+            (c, b, a)
+        }
     };
     let canonical_quad = |a: AtomType, b: AtomType, c: AtomType, d: AtomType| {
         // Central pair (b,c) determines orientation. If (b,c) > (c,b) by canonical
@@ -49,14 +59,19 @@ fn enumerate_required_force_field_tuples() {
     let mut angles: BTreeSet<(AtomType, AtomType, AtomType)> = BTreeSet::new();
     for ang in &g.angles {
         angles.insert(canonical_triple(
-            atom_types[ang.a], atom_types[ang.b], atom_types[ang.c],
+            atom_types[ang.a],
+            atom_types[ang.b],
+            atom_types[ang.c],
         ));
     }
 
     let mut dihedrals: BTreeSet<(AtomType, AtomType, AtomType, AtomType)> = BTreeSet::new();
     for d in &g.dihedrals {
         dihedrals.insert(canonical_quad(
-            atom_types[d.a], atom_types[d.b], atom_types[d.c], atom_types[d.d],
+            atom_types[d.a],
+            atom_types[d.b],
+            atom_types[d.c],
+            atom_types[d.d],
         ));
     }
 
@@ -148,7 +163,10 @@ fn every_force_field_tuple_has_parameters() {
     let mut missing_dihedrals = Vec::new();
     for d in &g.dihedrals {
         let (ta, tb, tc, td) = (
-            atom_types[d.a], atom_types[d.b], atom_types[d.c], atom_types[d.d]
+            atom_types[d.a],
+            atom_types[d.b],
+            atom_types[d.c],
+            atom_types[d.d],
         );
         if ff.dihedral(ta, tb, tc, td).is_none() {
             missing_dihedrals.push((ta, tb, tc, td));
@@ -160,7 +178,10 @@ fn every_force_field_tuple_has_parameters() {
     let mut missing_impropers = Vec::new();
     for imp in &g.impropers {
         let (ta, tb, tc, td) = (
-            atom_types[imp.a], atom_types[imp.b], atom_types[imp.c], atom_types[imp.d]
+            atom_types[imp.a],
+            atom_types[imp.b],
+            atom_types[imp.c],
+            atom_types[imp.d],
         );
         if ff.improper(ta, tb, tc, td).is_none() {
             missing_impropers.push((ta, tb, tc, td));
@@ -218,9 +239,12 @@ fn every_force_field_tuple_has_parameters() {
         }
         panic!(
             "Missing: {} bonds, {} angles, {} dihedrals, {} impropers, {} nonbonded, {} charges",
-            missing_bonds.len(), missing_angles.len(),
-            missing_dihedrals.len(), missing_impropers.len(),
-            missing_nonbonded.len(), missing_charges.len()
+            missing_bonds.len(),
+            missing_angles.len(),
+            missing_dihedrals.len(),
+            missing_impropers.len(),
+            missing_nonbonded.len(),
+            missing_charges.len()
         );
     }
 }

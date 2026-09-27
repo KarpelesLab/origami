@@ -26,9 +26,8 @@ fn ala_lys_glu_gpu_run_tracks_cpu() {
         eprintln!("GPU unavailable, skipping");
         return;
     }
-    let make_struct = || build_extended_chain(&[
-        AminoAcid::Ala, AminoAcid::Lys, AminoAcid::Glu,
-    ]).unwrap();
+    let make_struct =
+        || build_extended_chain(&[AminoAcid::Ala, AminoAcid::Lys, AminoAcid::Glu]).unwrap();
 
     let template = LangevinOptions {
         dt_fs: 1.0,
@@ -75,11 +74,13 @@ fn ala_lys_glu_gpu_run_tracks_cpu() {
     // order of ±30 K).
     assert!(
         (sum_cpu.temperature_mean_k - 310.0).abs() < 80.0,
-        "CPU T_mean far from target: {}", sum_cpu.temperature_mean_k
+        "CPU T_mean far from target: {}",
+        sum_cpu.temperature_mean_k
     );
     assert!(
         (sum_gpu.temperature_mean_k - 310.0).abs() < 80.0,
-        "GPU T_mean far from target: {}", sum_gpu.temperature_mean_k
+        "GPU T_mean far from target: {}",
+        sum_gpu.temperature_mean_k
     );
 
     // Trajectory divergence after 400 steps at f32 is expected, but
@@ -97,7 +98,10 @@ fn ala_lys_glu_gpu_run_tracks_cpu() {
             }
         }
     }
-    eprintln!("max per-atom GPU vs CPU final-position drift: {:.3} Å", max_drift);
+    eprintln!(
+        "max per-atom GPU vs CPU final-position drift: {:.3} Å",
+        max_drift
+    );
     assert!(
         max_drift < 5.0,
         "GPU trajectory drifted too far from CPU: {max_drift:.2} Å"

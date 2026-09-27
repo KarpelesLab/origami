@@ -23,7 +23,10 @@ const KCAL_TO_KJ: f32 = 4.184;
 fn gpu_verlet_matches_cpu_on_ala3() {
     let ctx = match GpuContext::get() {
         Ok(c) => c,
-        Err(e) => { eprintln!("GPU unavailable: {e}"); return; }
+        Err(e) => {
+            eprintln!("GPU unavailable: {e}");
+            return;
+        }
     };
 
     let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
@@ -37,7 +40,11 @@ fn gpu_verlet_matches_cpu_on_ala3() {
     let mut positions_f64: Vec<Vec3> = Vec::with_capacity(n);
     for r in &s.residues {
         for a in &r.atoms {
-            positions.push([a.position.x as f32, a.position.y as f32, a.position.z as f32]);
+            positions.push([
+                a.position.x as f32,
+                a.position.y as f32,
+                a.position.z as f32,
+            ]);
             positions_f64.push(a.position);
             let t = classify_atom(r.monomer, a.name).unwrap();
             atom_types.push(t);
@@ -62,7 +69,9 @@ fn gpu_verlet_matches_cpu_on_ala3() {
     let mut one_four = vec![0u32; (n * n).div_ceil(32)];
     for i in 0..n {
         for j in 0..n {
-            if i == j { continue; }
+            if i == j {
+                continue;
+            }
             let bit = i * n + j;
             if g.is_bonded(i, j) || g.is_one_three(i, j) {
                 exclusions[bit / 32] |= 1u32 << (bit % 32);
@@ -84,7 +93,12 @@ fn gpu_verlet_matches_cpu_on_ala3() {
             }
         }
     }
-    eprintln!("Ala₃: {} atoms, {} verlet pairs at cutoff {:.1} Å", n, pairs.len(), cutoff);
+    eprintln!(
+        "Ala₃: {} atoms, {} verlet pairs at cutoff {:.1} Å",
+        n,
+        pairs.len(),
+        cutoff
+    );
     let (counts, starts, indices) = pair_list_to_csr(n, &pairs);
 
     let mut pipe = VerletNonbondedPipeline::new(
@@ -104,9 +118,7 @@ fn gpu_verlet_matches_cpu_on_ala3() {
     let gpu_forces = pipe.compute();
 
     let mut cpu_forces = vec![Vec3::zeros(); n];
-    energy::forces_nonbonded::add_nonbonded_forces(
-        &s, &g, ff, DEFAULT_CUTOFF_A, &mut cpu_forces,
-    );
+    energy::forces_nonbonded::add_nonbonded_forces(&s, &g, ff, DEFAULT_CUTOFF_A, &mut cpu_forces);
 
     assert_eq!(gpu_forces.len(), cpu_forces.len());
     let mut max_err = 0.0_f64;
@@ -118,9 +130,7 @@ fn gpu_verlet_matches_cpu_on_ala3() {
             let err = (gv - cv).abs();
             if err > max_err {
                 max_err = err;
-                label = format!(
-                    "atom {i} axis {axis}: cpu={cv:.6} gpu={gv:.6} err={err:.6}"
-                );
+                label = format!("atom {i} axis {axis}: cpu={cv:.6} gpu={gv:.6} err={err:.6}");
             }
         }
     }
@@ -138,7 +148,10 @@ fn gpu_verlet_handles_buffer_growth() {
     // transparently and the second compute() must still match.
     let ctx = match GpuContext::get() {
         Ok(c) => c,
-        Err(e) => { eprintln!("GPU unavailable: {e}"); return; }
+        Err(e) => {
+            eprintln!("GPU unavailable: {e}");
+            return;
+        }
     };
 
     let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
@@ -152,7 +165,11 @@ fn gpu_verlet_handles_buffer_growth() {
     let mut positions_f64: Vec<Vec3> = Vec::with_capacity(n);
     for r in &s.residues {
         for a in &r.atoms {
-            positions.push([a.position.x as f32, a.position.y as f32, a.position.z as f32]);
+            positions.push([
+                a.position.x as f32,
+                a.position.y as f32,
+                a.position.z as f32,
+            ]);
             positions_f64.push(a.position);
             let t = classify_atom(r.monomer, a.name).unwrap();
             atom_types.push(t);
@@ -175,7 +192,9 @@ fn gpu_verlet_handles_buffer_growth() {
     let mut one_four = vec![0u32; (n * n).div_ceil(32)];
     for i in 0..n {
         for j in 0..n {
-            if i == j { continue; }
+            if i == j {
+                continue;
+            }
             let bit = i * n + j;
             if g.is_bonded(i, j) || g.is_one_three(i, j) {
                 exclusions[bit / 32] |= 1u32 << (bit % 32);
@@ -223,6 +242,9 @@ fn gpu_verlet_handles_buffer_growth() {
         sum += f[0].abs() + f[1].abs() + f[2].abs();
     }
     assert!(sum.is_finite(), "non-finite forces after buffer grow");
-    assert!(sum > 0.0, "zero forces — buffer-grow path broke the bind group");
+    assert!(
+        sum > 0.0,
+        "zero forces — buffer-grow path broke the bind group"
+    );
     eprintln!("buffer-grow path OK: |F| sum {sum:.2}, atoms {n}");
 }

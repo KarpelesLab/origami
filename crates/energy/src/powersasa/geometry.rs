@@ -24,7 +24,10 @@ pub struct SmallCircle {
 
 impl SmallCircle {
     pub fn new(axis: Vec3, cos_alpha: f64) -> Self {
-        SmallCircle { axis: axis.normalize(), cos_alpha }
+        SmallCircle {
+            axis: axis.normalize(),
+            cos_alpha,
+        }
     }
 
     /// Sine of the cone half-angle (always non-negative for α ∈ [0, π]).
@@ -176,14 +179,20 @@ mod tests {
         // Two small caps, one near the north pole, one near the south.
         let c1 = SmallCircle::new(v(0.0, 0.0, 1.0), 0.9);
         let c2 = SmallCircle::new(v(0.0, 0.0, -1.0), 0.9);
-        assert!(matches!(intersect_circles(c1, c2), CircleIntersection::Disjoint));
+        assert!(matches!(
+            intersect_circles(c1, c2),
+            CircleIntersection::Disjoint
+        ));
     }
 
     #[test]
     fn coincident_circles() {
         let c1 = SmallCircle::new(v(0.0, 0.0, 1.0), 0.5);
         let c2 = SmallCircle::new(v(0.0, 0.0, 1.0), 0.5);
-        assert!(matches!(intersect_circles(c1, c2), CircleIntersection::Coincident));
+        assert!(matches!(
+            intersect_circles(c1, c2),
+            CircleIntersection::Coincident
+        ));
     }
 
     #[test]
@@ -194,7 +203,10 @@ mod tests {
         // Both circles are the latitude z = 0.5.
         let c1 = SmallCircle::new(v(0.0, 0.0, 1.0), 0.5);
         let c2 = SmallCircle::new(v(0.0, 0.0, -1.0), -0.5);
-        assert!(matches!(intersect_circles(c1, c2), CircleIntersection::Coincident));
+        assert!(matches!(
+            intersect_circles(c1, c2),
+            CircleIntersection::Coincident
+        ));
     }
 
     #[test]

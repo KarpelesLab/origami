@@ -23,7 +23,13 @@ use geom::{build_extended_chain, build_topology_graph, Vec3};
 use gpu::GpuContext;
 
 fn build_chain(n_residues: usize) -> geom::Structure {
-    let block = [AminoAcid::Ala, AminoAcid::Gly, AminoAcid::Leu, AminoAcid::Glu, AminoAcid::Lys];
+    let block = [
+        AminoAcid::Ala,
+        AminoAcid::Gly,
+        AminoAcid::Leu,
+        AminoAcid::Glu,
+        AminoAcid::Lys,
+    ];
     let seq: Vec<AminoAcid> = block.iter().cloned().cycle().take(n_residues).collect();
     build_extended_chain(&seq).expect("build")
 }
@@ -87,17 +93,24 @@ fn tile_vs_verlet_at_large_n() {
         eprintln!("  minimised in {:.1} s", t0.elapsed().as_secs_f64());
         let verlet_ms = match time_path(&s, &g, ff, false, warmup, timed) {
             Ok(ms) => ms,
-            Err(e) => { eprintln!("  Verlet: {e}"); continue; }
+            Err(e) => {
+                eprintln!("  Verlet: {e}");
+                continue;
+            }
         };
         let tile_ms = match time_path(&s, &g, ff, true, warmup, timed) {
             Ok(ms) => ms,
-            Err(e) => { eprintln!("  Tile: {e}"); continue; }
+            Err(e) => {
+                eprintln!("  Tile: {e}");
+                continue;
+            }
         };
         let ratio = verlet_ms / tile_ms;
         let winner = if ratio > 1.0 { "TILE" } else { "VERLET" };
         eprintln!(
             "  Verlet {:.3} ms/step | Tile {:.3} ms/step | {winner} wins {:.2}×",
-            verlet_ms, tile_ms,
+            verlet_ms,
+            tile_ms,
             if ratio > 1.0 { ratio } else { 1.0 / ratio }
         );
     }

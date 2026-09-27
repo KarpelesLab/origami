@@ -230,8 +230,12 @@ pub fn read_pdb<R: Read>(reader: R) -> Result<Structure, PdbReadError> {
         let element = if let Some(e) = parse_element(&rec.element) {
             e
         } else {
-            element_from_atom_name(canonical_name)
-                .ok_or_else(|| PdbReadError::Malformed(lineno, format!("can't determine element for atom {canonical_name:?}")))?
+            element_from_atom_name(canonical_name).ok_or_else(|| {
+                PdbReadError::Malformed(
+                    lineno,
+                    format!("can't determine element for atom {canonical_name:?}"),
+                )
+            })?
         };
 
         let key = (rec.chain, rec.res_seq);
@@ -338,10 +342,21 @@ fn is_terminal_patch_atom(name: &str) -> bool {
     // names collide with guanine's imine H1 and adenine's H2 — those
     // residues are looked up by `canonical_rna_atom_name` *before*
     // this check fires, so the collision is harmless in practice.
-    matches!(name, "H1" | "H2" | "H3" | "OXT" | "HXT"
-        | "OP3" | "HOP3"
-        | "H5T" | "HO5'" | "HO5"
-        | "H3T" | "HO3'" | "HO3")
+    matches!(
+        name,
+        "H1" | "H2"
+            | "H3"
+            | "OXT"
+            | "HXT"
+            | "OP3"
+            | "HOP3"
+            | "H5T"
+            | "HO5'"
+            | "HO5"
+            | "H3T"
+            | "HO3'"
+            | "HO3"
+    )
 }
 
 /// Convert a PDB atom name to wwPDB v3.3 form (digit-suffixed).
@@ -407,8 +422,7 @@ fn canonical_rna_atom_name(nt: Nucleotide, name: &str) -> Option<&'static str> {
 fn canonical_atom_name(aa: AminoAcid, name: &str) -> Option<&'static str> {
     // Backbone atoms.
     match name {
-        "N" | "CA" | "C" | "O" | "H" | "HA" | "HA2" | "HA3"
-        | "OXT" | "H1" | "H2" | "H3" => {
+        "N" | "CA" | "C" | "O" | "H" | "HA" | "HA2" | "HA3" | "OXT" | "H1" | "H2" | "H3" => {
             // Map common PDB synonyms; we ignore terminal-residue extras for now.
             match name {
                 "N" => return Some("N"),
@@ -467,7 +481,8 @@ mod tests {
     #[test]
     fn round_trip_alanine_chain() {
         // Build an Ala-Ala-Ala chain, write to PDB, read back, compare atom counts.
-        let original = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
+        let original =
+            build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
         let mut buf = Vec::new();
         crate::write_pdb(&mut buf, &original, "round-trip").unwrap();
         let parsed = read_pdb(buf.as_slice()).expect("read back");
@@ -506,7 +521,8 @@ mod tests {
 
     #[test]
     fn rejects_unknown_residue() {
-        let pdb = "ATOM      1  N   XXX A   1       0.000   0.000   0.000  1.00  0.00           N\n";
+        let pdb =
+            "ATOM      1  N   XXX A   1       0.000   0.000   0.000  1.00  0.00           N\n";
         let err = read_pdb(pdb.as_bytes()).unwrap_err();
         assert!(matches!(err, PdbReadError::UnknownResidue(_, _)));
     }
@@ -551,8 +567,8 @@ mod tests {
             }
         }
         // The second frame's first atom should be offset by ~0.5 Å along x.
-        let dx = parsed[1].residues[0].atoms[0].position.x
-            - parsed[0].residues[0].atoms[0].position.x;
+        let dx =
+            parsed[1].residues[0].atoms[0].position.x - parsed[0].residues[0].atoms[0].position.x;
         assert!((dx - 0.5).abs() < 1e-3);
     }
 

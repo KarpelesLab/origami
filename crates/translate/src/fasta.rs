@@ -39,9 +39,7 @@ pub fn parse_fasta(input: &str) -> Result<Vec<Record>, FastaError> {
                 sequence: Vec::new(),
             });
         } else {
-            let rec = current
-                .as_mut()
-                .ok_or(FastaError::SequenceBeforeHeader)?;
+            let rec = current.as_mut().ok_or(FastaError::SequenceBeforeHeader)?;
             for ch in line.chars() {
                 if ch.is_ascii_whitespace() {
                     continue;

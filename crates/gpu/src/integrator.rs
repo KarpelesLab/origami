@@ -112,34 +112,44 @@ impl IntegratorPipeline {
 
         // Pass Arc clones — each sub-pipeline keeps a live reference.
         // BondedPipeline takes &Buffer; deref the Arc to get one.
-        let bonded = BondedPipeline::new(
-            ctx,
-            n_atoms,
-            &positions_buf,
-            &forces_buf,
-            bonded_setup,
-        );
+        let bonded = BondedPipeline::new(ctx, n_atoms, &positions_buf, &forces_buf, bonded_setup);
         // (BondedPipeline retains the &Buffer internally via its bind
         // group; the Arc here keeps the underlying buffer alive even
         // after this function returns because BAOAB / nb / gb also hold
         // Arc clones.)
         let nonbonded = VerletNonbondedPipeline::new_with_external_buffers(
-            ctx, n_atoms, nb_setup, positions_buf.clone(), Some(forces_buf.clone()),
+            ctx,
+            n_atoms,
+            nb_setup,
+            positions_buf.clone(),
+            Some(forces_buf.clone()),
         );
         let gb = GbPipeline::new_with_external_buffers(
-            ctx, n_atoms, gb_setup, positions_buf.clone(), Some(forces_buf.clone()),
+            ctx,
+            n_atoms,
+            gb_setup,
+            positions_buf.clone(),
+            Some(forces_buf.clone()),
         );
 
         let rng_state = make_rng_state(rng_seed, n_atoms);
         let baoab = BaoabPipeline::new_with_external_buffers(
-            ctx, n_atoms, masses_da, &rng_state,
-            Some(positions_buf), Some(velocities_buf), Some(forces_buf),
+            ctx,
+            n_atoms,
+            masses_da,
+            &rng_state,
+            Some(positions_buf),
+            Some(velocities_buf),
+            Some(forces_buf),
         );
 
         Self {
-            n_atoms, bonded, nonbonded,
+            n_atoms,
+            bonded,
+            nonbonded,
             tile_nb: None,
-            gb, baoab,
+            gb,
+            baoab,
             shake: None,
             sasa: None,
             ref_positions_buf: None,
@@ -154,19 +164,16 @@ impl IntegratorPipeline {
     /// its per-step force evaluation.
     pub fn enable_sasa(&mut self, setup: SasaSmoothSetup) {
         let sasa = SasaSmoothPipeline::new_with_external_buffers(
-            self.ctx, self.n_atoms, setup,
+            self.ctx,
+            self.n_atoms,
+            setup,
             self.baoab.positions_buffer_arc(),
             Some(self.baoab.forces_buffer_arc()),
         );
         self.sasa = Some(sasa);
     }
 
-    pub fn update_sasa_neighbours(
-        &mut self,
-        counts: &[u32],
-        starts: &[u32],
-        indices: &[u32],
-    ) {
+    pub fn update_sasa_neighbours(&mut self, counts: &[u32], starts: &[u32], indices: &[u32]) {
         self.sasa
             .as_mut()
             .expect("call enable_sasa first")
@@ -184,7 +191,9 @@ impl IntegratorPipeline {
     /// allocations).
     pub fn enable_tile_nb(&mut self, setup: TileNonbondedSetup) {
         let tile = TileNonbondedPipeline::new_with_external_buffers(
-            self.ctx, self.n_atoms, setup,
+            self.ctx,
+            self.n_atoms,
+            setup,
             self.baoab.positions_buffer_arc(),
             Some(self.baoab.forces_buffer_arc()),
         );
@@ -416,5 +425,7 @@ impl IntegratorPipeline {
         self.baoab.download_velocities()
     }
 
-    pub fn n_atoms(&self) -> usize { self.n_atoms }
+    pub fn n_atoms(&self) -> usize {
+        self.n_atoms
+    }
 }

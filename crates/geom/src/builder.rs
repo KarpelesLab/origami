@@ -113,9 +113,21 @@ fn build_residue(
         let dx = -CA_C * n_ca_c.cos(); // points from CA away from N along x
         let dy = CA_C * n_ca_c.sin(); // and "up" in y
         let c = Vec3::new(ca.x + dx, ca.y + dy, 0.0);
-        residue.atoms.push(PlacedAtom { name: "N", element: Element::N, position: n });
-        residue.atoms.push(PlacedAtom { name: "CA", element: Element::C, position: ca });
-        residue.atoms.push(PlacedAtom { name: "C", element: Element::C, position: c });
+        residue.atoms.push(PlacedAtom {
+            name: "N",
+            element: Element::N,
+            position: n,
+        });
+        residue.atoms.push(PlacedAtom {
+            name: "CA",
+            element: Element::C,
+            position: ca,
+        });
+        residue.atoms.push(PlacedAtom {
+            name: "C",
+            element: Element::C,
+            position: c,
+        });
         (n, ca, c)
     } else {
         let prev = &structure.residues[idx - 1];
@@ -128,15 +140,31 @@ fn build_residue(
         let ca = place_atom(prev_ca, prev_c, n, N_CA, C_N_CA_ANGLE, omega);
         // C(i): bond to CA(i), angle at N(i), dihedral φ(i).
         let c = place_atom(prev_c, n, ca, CA_C, bb_angle::N_CA_C, phi);
-        residue.atoms.push(PlacedAtom { name: "N", element: Element::N, position: n });
-        residue.atoms.push(PlacedAtom { name: "CA", element: Element::C, position: ca });
-        residue.atoms.push(PlacedAtom { name: "C", element: Element::C, position: c });
+        residue.atoms.push(PlacedAtom {
+            name: "N",
+            element: Element::N,
+            position: n,
+        });
+        residue.atoms.push(PlacedAtom {
+            name: "CA",
+            element: Element::C,
+            position: ca,
+        });
+        residue.atoms.push(PlacedAtom {
+            name: "C",
+            element: Element::C,
+            position: c,
+        });
         (n, ca, c)
     };
 
     // O(i): N-CA-C-O dihedral = ψ + 180° (O is trans to N(i+1) across C).
     let o = place_atom(n_pos, ca_pos, c_pos, C_O, CA_C_O_ANGLE, psi + PI);
-    residue.atoms.push(PlacedAtom { name: "O", element: Element::O, position: o });
+    residue.atoms.push(PlacedAtom {
+        name: "O",
+        element: Element::O,
+        position: o,
+    });
 
     // HN amide hydrogen — skipped for Pro and for the N-terminus.
     if topo.has_amide_h && idx > 0 {
@@ -145,7 +173,11 @@ fn build_residue(
         let prev_o = prev.position("O").unwrap();
         // dihedral O(i-1)-C(i-1)-N(i)-H = 180° (H trans to O across C-N peptide bond).
         let h = place_atom(prev_o, prev_c, n_pos, N_H_AMIDE, HN_BOND_ANGLE, PI);
-        residue.atoms.push(PlacedAtom { name: "H", element: Element::H, position: h });
+        residue.atoms.push(PlacedAtom {
+            name: "H",
+            element: Element::H,
+            position: h,
+        });
     } else if topo.has_amide_h && idx == 0 {
         // First residue: place a single representative HN at the standard
         // angle. Real N-terminus has NH3⁺ (3 H's); a more complete treatment
@@ -153,7 +185,11 @@ fn build_residue(
         // dihedral C-N-CA where CA-N-H = 120° and dihedral C(i)-CA(i)-N(i)-H is set so H is opposite to C in the N–CA bond.
         let h_dihedral = PI; // H trans to C across N
         let h = place_atom(c_pos, ca_pos, n_pos, N_H_AMIDE, HN_BOND_ANGLE, h_dihedral);
-        residue.atoms.push(PlacedAtom { name: "H", element: Element::H, position: h });
+        residue.atoms.push(PlacedAtom {
+            name: "H",
+            element: Element::H,
+            position: h,
+        });
     }
 
     // HA: opposite side from CB.
@@ -161,11 +197,23 @@ fn build_residue(
         // Two HAs at ±122.55°.
         let ha2 = place_atom(c_pos, n_pos, ca_pos, CA_HA, HA_BOND_ANGLE, -CB_DIHEDRAL_RAD);
         let ha3 = place_atom(c_pos, n_pos, ca_pos, CA_HA, HA_BOND_ANGLE, CB_DIHEDRAL_RAD);
-        residue.atoms.push(PlacedAtom { name: "HA2", element: Element::H, position: ha2 });
-        residue.atoms.push(PlacedAtom { name: "HA3", element: Element::H, position: ha3 });
+        residue.atoms.push(PlacedAtom {
+            name: "HA2",
+            element: Element::H,
+            position: ha2,
+        });
+        residue.atoms.push(PlacedAtom {
+            name: "HA3",
+            element: Element::H,
+            position: ha3,
+        });
     } else {
         let ha = place_atom(c_pos, n_pos, ca_pos, CA_HA, HA_BOND_ANGLE, -CB_DIHEDRAL_RAD);
-        residue.atoms.push(PlacedAtom { name: "HA", element: Element::H, position: ha });
+        residue.atoms.push(PlacedAtom {
+            name: "HA",
+            element: Element::H,
+            position: ha,
+        });
     }
 
     // ---------------- Side chain ----------------
@@ -250,7 +298,7 @@ pub mod rna_ic {
     pub const C2_C1: f64 = 1.450; // CN7B-CN7B (RNA-specific short bond)
     pub const C1_N: f64 = 1.456; // CN7B-NN2 / NN2B glycosidic
     pub const O3_P: f64 = 1.600; // ON2-P inter-residue
-    // Bond angles.
+                                 // Bond angles.
     pub const O3_P_O5: f64 = deg(104.0);
     pub const C3_O3_P: f64 = deg(119.7);
     pub const P_O5_C5: f64 = deg(120.9);
@@ -414,7 +462,8 @@ pub mod rna_ic {
     // constants (N9-C8, N3-C4) are referenced only from the ring-
     // closure tests below — they aren't NeRF-placed, only used as
     // the canonical target the closure should land near.
-    #[allow(dead_code)] pub const N9_C8_BASE: f64 = 1.371;
+    #[allow(dead_code)]
+    pub const N9_C8_BASE: f64 = 1.371;
     pub const C8_N7_BASE: f64 = 1.305;
     pub const N7_C5_BASE: f64 = 1.388;
     pub const C5_C4_BASE: f64 = 1.409; // shared 5-ring / 6-ring edge
@@ -423,11 +472,13 @@ pub mod rna_ic {
     pub const C6_N1_PUR: f64 = 1.346;
     pub const N1_C2_PUR: f64 = 1.353;
     pub const C2_N3_PUR: f64 = 1.337;
-    #[allow(dead_code)] pub const N3_C4_PUR: f64 = 1.346; // 6-ring closure (target)
-    // Purine 5-ring interior angles (sum = 540°). The N9 vertex angle
-    // and the second N3-C4 ring-closure length are kept for the
-    // closure-bond test (they aren't directly placed).
-    #[allow(dead_code)] pub const ANG_C8_N9_C4: f64 = deg(105.8);
+    #[allow(dead_code)]
+    pub const N3_C4_PUR: f64 = 1.346; // 6-ring closure (target)
+                                      // Purine 5-ring interior angles (sum = 540°). The N9 vertex angle
+                                      // and the second N3-C4 ring-closure length are kept for the
+                                      // closure-bond test (they aren't directly placed).
+    #[allow(dead_code)]
+    pub const ANG_C8_N9_C4: f64 = deg(105.8);
     pub const ANG_N9_C8_N7: f64 = deg(113.6);
     pub const ANG_C8_N7_C5: f64 = deg(103.7);
     pub const ANG_N7_C5_C4: f64 = deg(110.7);
@@ -463,16 +514,18 @@ pub mod rna_ic {
     pub const N3_C4_PYR: f64 = 1.330;
     pub const C4_C5_PYR: f64 = 1.426;
     pub const C5_C6_PYR: f64 = 1.337;
-    #[allow(dead_code)] pub const C6_N1_PYR: f64 = 1.367; // 6-ring closure (implicit)
-    // Pyrimidine 6-ring interior angles (sum = 720°).
+    #[allow(dead_code)]
+    pub const C6_N1_PYR: f64 = 1.367; // 6-ring closure (implicit)
+                                      // Pyrimidine 6-ring interior angles (sum = 720°).
     pub const ANG_N1_C2_N3_PYR: f64 = deg(120.4);
     pub const ANG_C2_N3_C4_PYR: f64 = deg(119.6);
     pub const ANG_N3_C4_C5_PYR: f64 = deg(121.8);
     pub const ANG_C4_C5_C6_PYR: f64 = deg(117.4);
     pub const ANG_C5_C6_N1_PYR: f64 = deg(120.5);
-    #[allow(dead_code)] pub const ANG_C2_N1_C6_PYR: f64 = deg(120.3); // closure
-    // Pyrimidine glycosidic anchor — superseded by
-    // `RnaTorsionSet::pyrimidine_chi_c2`.
+    #[allow(dead_code)]
+    pub const ANG_C2_N1_C6_PYR: f64 = deg(120.3); // closure
+                                                  // Pyrimidine glycosidic anchor — superseded by
+                                                  // `RnaTorsionSet::pyrimidine_chi_c2`.
     #[allow(dead_code)]
     pub const PYRIMIDINE_CHI_C2: f64 = deg(-120.0);
     pub const ANG_C1P_N1_C2: f64 = deg(120.0);
@@ -536,7 +589,7 @@ fn place_sp3_two_h(c: Vec3, n1: Vec3, n2: Vec3, bond_length: f64) -> (Vec3, Vec3
     let normal = d1.cross(&d2).normalize();
     // cos(54.74°) = 1/√3 ≈ 0.5774, sin(54.74°) = √(2/3) ≈ 0.8165.
     const C: f64 = 0.577_350_269_189_625_8; // 1/√3
-    const S: f64 = 0.816_496_580_927_726;   // √(2/3)
+    const S: f64 = 0.816_496_580_927_726; // √(2/3)
     let h1_dir = -bisector * C + normal * S;
     let h2_dir = -bisector * C - normal * S;
     (c + h1_dir * bond_length, c + h2_dir * bond_length)
@@ -562,7 +615,11 @@ fn place_rna_backbone_hydrogens(
     n_glyc: Vec3,
 ) {
     let push = |atoms: &mut Vec<PlacedAtom>, name: &'static str, pos: Vec3| {
-        atoms.push(PlacedAtom { name, element: Element::H, position: pos });
+        atoms.push(PlacedAtom {
+            name,
+            element: Element::H,
+            position: pos,
+        });
     };
     // C5' has two H's; both other H-bearing carbons are sp³ with 3
     // placed heavy neighbours each.
@@ -605,54 +662,164 @@ fn place_purine_base(
     // Walk the fused 5-/6-ring with all dihedrals in the ring plane.
     // C4 anchors the base orientation; C8 closes the 5-ring; C6/N1/
     // C2/N3 trace the 6-ring back to its closure at C4.
-    let c4 = place_atom(c2p, c1p, n9, r("N9", "C4", rna_ic::N9_C4_PUR), rna_ic::ANG_C1P_N9_C4, chi_c4);
-    let c5 = place_atom(c1p, n9, c4, r("C5", "C4", rna_ic::C5_C4_BASE), rna_ic::ANG_C5_C4_N9, PI);
-    let n7 = place_atom(n9, c4, c5, r("N7", "C5", rna_ic::N7_C5_BASE), rna_ic::ANG_N7_C5_C4, 0.0);
-    let c8 = place_atom(c4, c5, n7, r("C8", "N7", rna_ic::C8_N7_BASE), rna_ic::ANG_C8_N7_C5, 0.0);
-    let c6 = place_atom(n7, c4, c5, r("C5", "C6", rna_ic::C5_C6_BASE), rna_ic::ANG_C4_C5_C6, PI);
-    let n1 = place_atom(c4, c5, c6, r("C6", "N1", rna_ic::C6_N1_PUR), rna_ic::ANG_C5_C6_N1_PUR, 0.0);
-    let c2 = place_atom(c5, c6, n1, r("N1", "C2", rna_ic::N1_C2_PUR), rna_ic::ANG_C6_N1_C2_PUR, 0.0);
-    let n3 = place_atom(c6, n1, c2, r("C2", "N3", rna_ic::C2_N3_PUR), rna_ic::ANG_N1_C2_N3_PUR, 0.0);
+    let c4 = place_atom(
+        c2p,
+        c1p,
+        n9,
+        r("N9", "C4", rna_ic::N9_C4_PUR),
+        rna_ic::ANG_C1P_N9_C4,
+        chi_c4,
+    );
+    let c5 = place_atom(
+        c1p,
+        n9,
+        c4,
+        r("C5", "C4", rna_ic::C5_C4_BASE),
+        rna_ic::ANG_C5_C4_N9,
+        PI,
+    );
+    let n7 = place_atom(
+        n9,
+        c4,
+        c5,
+        r("N7", "C5", rna_ic::N7_C5_BASE),
+        rna_ic::ANG_N7_C5_C4,
+        0.0,
+    );
+    let c8 = place_atom(
+        c4,
+        c5,
+        n7,
+        r("C8", "N7", rna_ic::C8_N7_BASE),
+        rna_ic::ANG_C8_N7_C5,
+        0.0,
+    );
+    let c6 = place_atom(
+        n7,
+        c4,
+        c5,
+        r("C5", "C6", rna_ic::C5_C6_BASE),
+        rna_ic::ANG_C4_C5_C6,
+        PI,
+    );
+    let n1 = place_atom(
+        c4,
+        c5,
+        c6,
+        r("C6", "N1", rna_ic::C6_N1_PUR),
+        rna_ic::ANG_C5_C6_N1_PUR,
+        0.0,
+    );
+    let c2 = place_atom(
+        c5,
+        c6,
+        n1,
+        r("N1", "C2", rna_ic::N1_C2_PUR),
+        rna_ic::ANG_C6_N1_C2_PUR,
+        0.0,
+    );
+    let n3 = place_atom(
+        c6,
+        n1,
+        c2,
+        r("C2", "N3", rna_ic::C2_N3_PUR),
+        rna_ic::ANG_N1_C2_N3_PUR,
+        0.0,
+    );
     // Exocyclic substituent at C6 (N6 for A, O6 for G) — coplanar
     // with the 6-ring, anti to N1 across the C5-C6 bond.
     let (exo_c6_name, exo_c6_el, exo_c6_pos) = match nt {
         Nucleotide::Adenine => (
             "N6",
             Element::N,
-            place_atom(n1, c5, c6, r("C6", "N6", rna_ic::C6_N6), rna_ic::ANG_C5_C6_N6, PI),
+            place_atom(
+                n1,
+                c5,
+                c6,
+                r("C6", "N6", rna_ic::C6_N6),
+                rna_ic::ANG_C5_C6_N6,
+                PI,
+            ),
         ),
         Nucleotide::Guanine => (
             "O6",
             Element::O,
-            place_atom(n1, c5, c6, r("C6", "O6", rna_ic::C6_O6), rna_ic::ANG_C5_C6_O6, PI),
+            place_atom(
+                n1,
+                c5,
+                c6,
+                r("C6", "O6", rna_ic::C6_O6),
+                rna_ic::ANG_C5_C6_O6,
+                PI,
+            ),
         ),
         _ => unreachable!("place_purine_base called with non-purine"),
     };
     // Exocyclic N2 only on guanine, off C2.
     let g_n2 = if matches!(nt, Nucleotide::Guanine) {
-        Some(place_atom(n3, n1, c2, r("C2", "N2", rna_ic::C2_N2), rna_ic::ANG_N1_C2_N2, PI))
+        Some(place_atom(
+            n3,
+            n1,
+            c2,
+            r("C2", "N2", rna_ic::C2_N2),
+            rna_ic::ANG_N1_C2_N2,
+            PI,
+        ))
     } else {
         None
     };
 
     let push_h = |atoms: &mut Vec<PlacedAtom>, name: &'static str, pos: Vec3| {
-        atoms.push(PlacedAtom { name, element: Element::H, position: pos });
+        atoms.push(PlacedAtom {
+            name,
+            element: Element::H,
+            position: pos,
+        });
     };
 
     // H8 — sp² at C8, in plane, anti to N9 across N7-C8.
-    let h8 = place_atom(n9, n7, c8, rna_ic::C_H_AROM, deg_from_120_sp2(rna_ic::ANG_N9_C8_N7), PI);
+    let h8 = place_atom(
+        n9,
+        n7,
+        c8,
+        rna_ic::C_H_AROM,
+        deg_from_120_sp2(rna_ic::ANG_N9_C8_N7),
+        PI,
+    );
     // Adenine H2 on C2 (sp², between N1 and N3).
     let a_h2 = if matches!(nt, Nucleotide::Adenine) {
-        Some(place_atom(c6, n1, c2, rna_ic::C_H_AROM, deg_from_120_sp2(rna_ic::ANG_N1_C2_N3_PUR), PI))
-    } else { None };
+        Some(place_atom(
+            c6,
+            n1,
+            c2,
+            rna_ic::C_H_AROM,
+            deg_from_120_sp2(rna_ic::ANG_N1_C2_N3_PUR),
+            PI,
+        ))
+    } else {
+        None
+    };
     // Guanine N1-H (amide, sp²).
     let g_h1 = if matches!(nt, Nucleotide::Guanine) {
-        Some(place_atom(c5, c6, n1, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI))
-    } else { None };
+        Some(place_atom(
+            c5,
+            c6,
+            n1,
+            rna_ic::N_H_AROM,
+            rna_ic::ANG_C_N_H,
+            PI,
+        ))
+    } else {
+        None
+    };
 
     // Push heavy atoms in `Nucleotide::base_heavy_atoms()` canonical order.
     let push_heavy = |atoms: &mut Vec<PlacedAtom>, name: &'static str, el: Element, pos: Vec3| {
-        atoms.push(PlacedAtom { name, element: el, position: pos });
+        atoms.push(PlacedAtom {
+            name,
+            element: el,
+            position: pos,
+        });
     };
     match nt {
         Nucleotide::Adenine => {
@@ -689,8 +856,22 @@ fn place_purine_base(
             push_heavy(atoms, "C4", Element::C, c4);
             push_h(atoms, "H8", h8);
             push_h(atoms, "H1", g_h1.unwrap());
-            let h21 = place_atom(n1, c2, g_n2.unwrap(), rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, 0.0);
-            let h22 = place_atom(n1, c2, g_n2.unwrap(), rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI);
+            let h21 = place_atom(
+                n1,
+                c2,
+                g_n2.unwrap(),
+                rna_ic::N_H_AROM,
+                rna_ic::ANG_C_N_H,
+                0.0,
+            );
+            let h22 = place_atom(
+                n1,
+                c2,
+                g_n2.unwrap(),
+                rna_ic::N_H_AROM,
+                rna_ic::ANG_C_N_H,
+                PI,
+            );
             push_h(atoms, "H21", h21);
             push_h(atoms, "H22", h22);
         }
@@ -713,33 +894,108 @@ fn place_pyrimidine_base(
     let r = |a: &str, b: &str, fb: f64| base_r0(ff, nt, a, b, fb);
     // 6-ring walk anchored on N1 (the glycosidic atom for pyrimidines).
     let c2 = place_atom(
-        c2p, c1p, n1,
-        r("N1", "C2", rna_ic::N1_C2_PYR), rna_ic::ANG_C1P_N1_C2, chi_c2,
+        c2p,
+        c1p,
+        n1,
+        r("N1", "C2", rna_ic::N1_C2_PYR),
+        rna_ic::ANG_C1P_N1_C2,
+        chi_c2,
     );
-    let n3 = place_atom(c1p, n1, c2, r("C2", "N3", rna_ic::C2_N3_PYR), rna_ic::ANG_N1_C2_N3_PYR, PI);
-    let c4 = place_atom(n1, c2, n3, r("N3", "C4", rna_ic::N3_C4_PYR), rna_ic::ANG_C2_N3_C4_PYR, 0.0);
-    let c5 = place_atom(c2, n3, c4, r("C4", "C5", rna_ic::C4_C5_PYR), rna_ic::ANG_N3_C4_C5_PYR, 0.0);
-    let c6 = place_atom(n3, c4, c5, r("C5", "C6", rna_ic::C5_C6_PYR), rna_ic::ANG_C4_C5_C6_PYR, 0.0);
+    let n3 = place_atom(
+        c1p,
+        n1,
+        c2,
+        r("C2", "N3", rna_ic::C2_N3_PYR),
+        rna_ic::ANG_N1_C2_N3_PYR,
+        PI,
+    );
+    let c4 = place_atom(
+        n1,
+        c2,
+        n3,
+        r("N3", "C4", rna_ic::N3_C4_PYR),
+        rna_ic::ANG_C2_N3_C4_PYR,
+        0.0,
+    );
+    let c5 = place_atom(
+        c2,
+        n3,
+        c4,
+        r("C4", "C5", rna_ic::C4_C5_PYR),
+        rna_ic::ANG_N3_C4_C5_PYR,
+        0.0,
+    );
+    let c6 = place_atom(
+        n3,
+        c4,
+        c5,
+        r("C5", "C6", rna_ic::C5_C6_PYR),
+        rna_ic::ANG_C4_C5_C6_PYR,
+        0.0,
+    );
     // Exocyclic substituents.
     let push_h = |atoms: &mut Vec<PlacedAtom>, name: &'static str, pos: Vec3| {
-        atoms.push(PlacedAtom { name, element: Element::H, position: pos });
+        atoms.push(PlacedAtom {
+            name,
+            element: Element::H,
+            position: pos,
+        });
     };
     let push_heavy = |atoms: &mut Vec<PlacedAtom>, name: &'static str, el: Element, pos: Vec3| {
-        atoms.push(PlacedAtom { name, element: el, position: pos });
+        atoms.push(PlacedAtom {
+            name,
+            element: el,
+            position: pos,
+        });
     };
     let o2 = match nt {
-        Nucleotide::Cytosine => place_atom(n1, n3, c2, r("C2", "O2", rna_ic::C2_O2_C), rna_ic::ANG_N3_C2_O2_C, PI),
-        Nucleotide::Uracil => place_atom(n1, n3, c2, r("C2", "O2", rna_ic::C2_O2_U), rna_ic::ANG_N3_C2_O2_U, PI),
+        Nucleotide::Cytosine => place_atom(
+            n1,
+            n3,
+            c2,
+            r("C2", "O2", rna_ic::C2_O2_C),
+            rna_ic::ANG_N3_C2_O2_C,
+            PI,
+        ),
+        Nucleotide::Uracil => place_atom(
+            n1,
+            n3,
+            c2,
+            r("C2", "O2", rna_ic::C2_O2_U),
+            rna_ic::ANG_N3_C2_O2_U,
+            PI,
+        ),
         _ => unreachable!(),
     };
     // H5 bonded to C5 (sp²), in plane, anti to N3 across C4-C5.
-    let h5 = place_atom(n3, c4, c5, rna_ic::C_H_AROM, deg_from_120_sp2(rna_ic::ANG_C4_C5_C6_PYR), PI);
+    let h5 = place_atom(
+        n3,
+        c4,
+        c5,
+        rna_ic::C_H_AROM,
+        deg_from_120_sp2(rna_ic::ANG_C4_C5_C6_PYR),
+        PI,
+    );
     // H6 bonded to C6 (sp²), in plane, anti to C4 across C5-C6.
-    let h6 = place_atom(c4, c5, c6, rna_ic::C_H_AROM, deg_from_120_sp2(rna_ic::ANG_C5_C6_N1_PYR), PI);
+    let h6 = place_atom(
+        c4,
+        c5,
+        c6,
+        rna_ic::C_H_AROM,
+        deg_from_120_sp2(rna_ic::ANG_C5_C6_N1_PYR),
+        PI,
+    );
 
     match nt {
         Nucleotide::Cytosine => {
-            let n4 = place_atom(n3, c5, c4, r("C4", "N4", rna_ic::C4_N4_C), rna_ic::ANG_N3_C4_N4_C, PI);
+            let n4 = place_atom(
+                n3,
+                c5,
+                c4,
+                r("C4", "N4", rna_ic::C4_N4_C),
+                rna_ic::ANG_N3_C4_N4_C,
+                PI,
+            );
             push_heavy(atoms, "N1", Element::N, n1);
             push_heavy(atoms, "C2", Element::C, c2);
             push_heavy(atoms, "O2", Element::O, o2);
@@ -757,7 +1013,14 @@ fn place_pyrimidine_base(
         }
         Nucleotide::Uracil => {
             // O4 carbonyl on C4 — anti to C2 across N3-C4 in plane.
-            let o4 = place_atom(c2, n3, c4, r("C4", "O4", rna_ic::C4_O4_U), rna_ic::ANG_N3_C4_O4_U, PI);
+            let o4 = place_atom(
+                c2,
+                n3,
+                c4,
+                r("C4", "O4", rna_ic::C4_O4_U),
+                rna_ic::ANG_N3_C4_O4_U,
+                PI,
+            );
             // N3-H amide (uracil only) — anchored at N3, in ring plane,
             // outside ring (anti to C5 across the C4-N3 axis).
             let h3 = place_atom(c5, c4, n3, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI);
@@ -812,7 +1075,9 @@ pub fn add_rna_hydrogens(structure: &mut Structure) -> HydrogenAddSummary {
     use crate::structure::Monomer;
     let mut s = HydrogenAddSummary::default();
     for res in &mut structure.residues {
-        let Monomer::Rna(nt) = res.monomer else { continue };
+        let Monomer::Rna(nt) = res.monomer else {
+            continue;
+        };
         s.residues_touched += 1;
         add_rna_residue_hydrogens(res, nt, &mut s);
     }
@@ -835,7 +1100,12 @@ fn add_rna_residue_hydrogens(
 ) {
     use chem::Nucleotide;
 
-    let pos = |name: &str| res.atoms.iter().find(|a| a.name == name).map(|a| a.position);
+    let pos = |name: &str| {
+        res.atoms
+            .iter()
+            .find(|a| a.name == name)
+            .map(|a| a.position)
+    };
     let has_h = |name: &str| res.atoms.iter().any(|a| a.name == name);
 
     // Reusable per-H emit helper: skip if already there, place via
@@ -853,9 +1123,15 @@ fn add_rna_residue_hydrogens(
     };
 
     // ---- Backbone hydrogens (shared by all four nucleotides) ----
-    let o5 = pos("O5'"); let c5 = pos("C5'"); let c4 = pos("C4'");
-    let o4 = pos("O4'"); let c3 = pos("C3'"); let o3 = pos("O3'");
-    let c2 = pos("C2'"); let o2 = pos("O2'"); let c1 = pos("C1'");
+    let o5 = pos("O5'");
+    let c5 = pos("C5'");
+    let c4 = pos("C4'");
+    let o4 = pos("O4'");
+    let c3 = pos("C3'");
+    let o3 = pos("O3'");
+    let c2 = pos("C2'");
+    let o2 = pos("O2'");
+    let c1 = pos("C1'");
     let n_glyc = match nt {
         Nucleotide::Adenine | Nucleotide::Guanine => pos("N9"),
         Nucleotide::Cytosine | Nucleotide::Uracil => pos("N1"),
@@ -874,80 +1150,156 @@ fn add_rna_residue_hydrogens(
     emit("H5''", h5_pair.map(|(_, b)| b));
     // H4', H3', H2', H1' — each is the unique tetrahedral 4th
     // substituent at an sp³ centre with three placed neighbours.
-    emit("H4'", match (c4, c5, o4, c3) {
-        (Some(c), Some(a), Some(b), Some(d)) => Some(place_sp3_one_h(c, [a, b, d], rna_ic::C_H_ALIPH)),
-        _ => None,
-    });
-    emit("H3'", match (c3, c4, o3, c2) {
-        (Some(c), Some(a), Some(b), Some(d)) => Some(place_sp3_one_h(c, [a, b, d], rna_ic::C_H_ALIPH)),
-        _ => None,
-    });
-    emit("H2'", match (c2, c3, o2, c1) {
-        (Some(c), Some(a), Some(b), Some(d)) => Some(place_sp3_one_h(c, [a, b, d], rna_ic::C_H_ALIPH)),
-        _ => None,
-    });
-    emit("H1'", match (c1, c2, o4, n_glyc) {
-        (Some(c), Some(a), Some(b), Some(d)) => Some(place_sp3_one_h(c, [a, b, d], rna_ic::C_H_ALIPH)),
-        _ => None,
-    });
+    emit(
+        "H4'",
+        match (c4, c5, o4, c3) {
+            (Some(c), Some(a), Some(b), Some(d)) => {
+                Some(place_sp3_one_h(c, [a, b, d], rna_ic::C_H_ALIPH))
+            }
+            _ => None,
+        },
+    );
+    emit(
+        "H3'",
+        match (c3, c4, o3, c2) {
+            (Some(c), Some(a), Some(b), Some(d)) => {
+                Some(place_sp3_one_h(c, [a, b, d], rna_ic::C_H_ALIPH))
+            }
+            _ => None,
+        },
+    );
+    emit(
+        "H2'",
+        match (c2, c3, o2, c1) {
+            (Some(c), Some(a), Some(b), Some(d)) => {
+                Some(place_sp3_one_h(c, [a, b, d], rna_ic::C_H_ALIPH))
+            }
+            _ => None,
+        },
+    );
+    emit(
+        "H1'",
+        match (c1, c2, o4, n_glyc) {
+            (Some(c), Some(a), Some(b), Some(d)) => {
+                Some(place_sp3_one_h(c, [a, b, d], rna_ic::C_H_ALIPH))
+            }
+            _ => None,
+        },
+    );
     // HO2' — anti to C1' across C2'-O2' (gauche to C3'), matching
     // the same dihedral the chain builder uses.
-    emit("HO2'", match (c1, c2, o2) {
-        (Some(a), Some(b), Some(c)) => Some(place_atom(a, b, c, rna_ic::O_H, rna_ic::ANG_C_O_H, PI)),
-        _ => None,
-    });
+    emit(
+        "HO2'",
+        match (c1, c2, o2) {
+            (Some(a), Some(b), Some(c)) => {
+                Some(place_atom(a, b, c, rna_ic::O_H, rna_ic::ANG_C_O_H, PI))
+            }
+            _ => None,
+        },
+    );
 
     // ---- Base hydrogens (per nucleotide) ----
     let push_base_purines = |emit: &mut dyn FnMut(&'static str, Option<Vec3>)| {
-        let n9 = pos("N9"); let c8 = pos("C8"); let n7 = pos("N7");
-        let c5b = pos("C5"); let c6 = pos("C6"); let n1 = pos("N1");
-        let c2b = pos("C2"); let n3 = pos("N3");
+        let n9 = pos("N9");
+        let c8 = pos("C8");
+        let n7 = pos("N7");
+        let c5b = pos("C5");
+        let c6 = pos("C6");
+        let n1 = pos("N1");
+        let c2b = pos("C2");
+        let n3 = pos("N3");
         // H8 on C8, sp² in plane anti to N9 across N7-C8.
-        emit("H8", match (n9, n7, c8) {
-            (Some(a), Some(b), Some(c)) => Some(place_atom(
-                a, b, c, rna_ic::C_H_AROM,
-                deg_from_120_sp2(rna_ic::ANG_N9_C8_N7), PI)),
-            _ => None,
-        });
+        emit(
+            "H8",
+            match (n9, n7, c8) {
+                (Some(a), Some(b), Some(c)) => Some(place_atom(
+                    a,
+                    b,
+                    c,
+                    rna_ic::C_H_AROM,
+                    deg_from_120_sp2(rna_ic::ANG_N9_C8_N7),
+                    PI,
+                )),
+                _ => None,
+            },
+        );
         match nt {
             Nucleotide::Adenine => {
                 // H2 on C2 (sp², between N1 and N3).
-                emit("H2", match (c6, n1, c2b) {
-                    (Some(a), Some(b), Some(c)) => Some(place_atom(
-                        a, b, c, rna_ic::C_H_AROM,
-                        deg_from_120_sp2(rna_ic::ANG_N1_C2_N3_PUR), PI)),
-                    _ => None,
-                });
+                emit(
+                    "H2",
+                    match (c6, n1, c2b) {
+                        (Some(a), Some(b), Some(c)) => Some(place_atom(
+                            a,
+                            b,
+                            c,
+                            rna_ic::C_H_AROM,
+                            deg_from_120_sp2(rna_ic::ANG_N1_C2_N3_PUR),
+                            PI,
+                        )),
+                        _ => None,
+                    },
+                );
                 let n6 = pos("N6");
-                emit("H61", match (c5b, c6, n6) {
-                    (Some(a), Some(b), Some(c)) => Some(place_atom(
-                        a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, 0.0)),
-                    _ => None,
-                });
-                emit("H62", match (c5b, c6, n6) {
-                    (Some(a), Some(b), Some(c)) => Some(place_atom(
-                        a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI)),
-                    _ => None,
-                });
+                emit(
+                    "H61",
+                    match (c5b, c6, n6) {
+                        (Some(a), Some(b), Some(c)) => Some(place_atom(
+                            a,
+                            b,
+                            c,
+                            rna_ic::N_H_AROM,
+                            rna_ic::ANG_C_N_H,
+                            0.0,
+                        )),
+                        _ => None,
+                    },
+                );
+                emit(
+                    "H62",
+                    match (c5b, c6, n6) {
+                        (Some(a), Some(b), Some(c)) => {
+                            Some(place_atom(a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI))
+                        }
+                        _ => None,
+                    },
+                );
             }
             Nucleotide::Guanine => {
                 // N1-H amide.
-                emit("H1", match (c5b, c6, n1) {
-                    (Some(a), Some(b), Some(c)) => Some(place_atom(
-                        a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI)),
-                    _ => None,
-                });
+                emit(
+                    "H1",
+                    match (c5b, c6, n1) {
+                        (Some(a), Some(b), Some(c)) => {
+                            Some(place_atom(a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI))
+                        }
+                        _ => None,
+                    },
+                );
                 let n2 = pos("N2");
-                emit("H21", match (n1, c2b, n2) {
-                    (Some(a), Some(b), Some(c)) => Some(place_atom(
-                        a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, 0.0)),
-                    _ => None,
-                });
-                emit("H22", match (n1, c2b, n2) {
-                    (Some(a), Some(b), Some(c)) => Some(place_atom(
-                        a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI)),
-                    _ => None,
-                });
+                emit(
+                    "H21",
+                    match (n1, c2b, n2) {
+                        (Some(a), Some(b), Some(c)) => Some(place_atom(
+                            a,
+                            b,
+                            c,
+                            rna_ic::N_H_AROM,
+                            rna_ic::ANG_C_N_H,
+                            0.0,
+                        )),
+                        _ => None,
+                    },
+                );
+                emit(
+                    "H22",
+                    match (n1, c2b, n2) {
+                        (Some(a), Some(b), Some(c)) => {
+                            Some(place_atom(a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI))
+                        }
+                        _ => None,
+                    },
+                );
                 let _ = n3;
             }
             _ => {}
@@ -955,43 +1307,80 @@ fn add_rna_residue_hydrogens(
     };
 
     let push_base_pyrimidines = |emit: &mut dyn FnMut(&'static str, Option<Vec3>)| {
-        let n1 = pos("N1"); let _c2b = pos("C2"); let n3 = pos("N3");
-        let c4b = pos("C4"); let c5b = pos("C5"); let c6 = pos("C6");
+        let n1 = pos("N1");
+        let _c2b = pos("C2");
+        let n3 = pos("N3");
+        let c4b = pos("C4");
+        let c5b = pos("C5");
+        let c6 = pos("C6");
         // H5 on C5, sp² in plane.
-        emit("H5", match (n3, c4b, c5b) {
-            (Some(a), Some(b), Some(c)) => Some(place_atom(
-                a, b, c, rna_ic::C_H_AROM,
-                deg_from_120_sp2(rna_ic::ANG_C4_C5_C6_PYR), PI)),
-            _ => None,
-        });
+        emit(
+            "H5",
+            match (n3, c4b, c5b) {
+                (Some(a), Some(b), Some(c)) => Some(place_atom(
+                    a,
+                    b,
+                    c,
+                    rna_ic::C_H_AROM,
+                    deg_from_120_sp2(rna_ic::ANG_C4_C5_C6_PYR),
+                    PI,
+                )),
+                _ => None,
+            },
+        );
         // H6 on C6, sp² in plane.
-        emit("H6", match (c4b, c5b, c6) {
-            (Some(a), Some(b), Some(c)) => Some(place_atom(
-                a, b, c, rna_ic::C_H_AROM,
-                deg_from_120_sp2(rna_ic::ANG_C5_C6_N1_PYR), PI)),
-            _ => None,
-        });
+        emit(
+            "H6",
+            match (c4b, c5b, c6) {
+                (Some(a), Some(b), Some(c)) => Some(place_atom(
+                    a,
+                    b,
+                    c,
+                    rna_ic::C_H_AROM,
+                    deg_from_120_sp2(rna_ic::ANG_C5_C6_N1_PYR),
+                    PI,
+                )),
+                _ => None,
+            },
+        );
         match nt {
             Nucleotide::Cytosine => {
                 let n4 = pos("N4");
-                emit("H41", match (c5b, c4b, n4) {
-                    (Some(a), Some(b), Some(c)) => Some(place_atom(
-                        a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, 0.0)),
-                    _ => None,
-                });
-                emit("H42", match (c5b, c4b, n4) {
-                    (Some(a), Some(b), Some(c)) => Some(place_atom(
-                        a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI)),
-                    _ => None,
-                });
+                emit(
+                    "H41",
+                    match (c5b, c4b, n4) {
+                        (Some(a), Some(b), Some(c)) => Some(place_atom(
+                            a,
+                            b,
+                            c,
+                            rna_ic::N_H_AROM,
+                            rna_ic::ANG_C_N_H,
+                            0.0,
+                        )),
+                        _ => None,
+                    },
+                );
+                emit(
+                    "H42",
+                    match (c5b, c4b, n4) {
+                        (Some(a), Some(b), Some(c)) => {
+                            Some(place_atom(a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI))
+                        }
+                        _ => None,
+                    },
+                );
             }
             Nucleotide::Uracil => {
                 // N3-H amide.
-                emit("H3", match (c5b, c4b, n3) {
-                    (Some(a), Some(b), Some(c)) => Some(place_atom(
-                        a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI)),
-                    _ => None,
-                });
+                emit(
+                    "H3",
+                    match (c5b, c4b, n3) {
+                        (Some(a), Some(b), Some(c)) => {
+                            Some(place_atom(a, b, c, rna_ic::N_H_AROM, rna_ic::ANG_C_N_H, PI))
+                        }
+                        _ => None,
+                    },
+                );
             }
             _ => {}
         }
@@ -1004,7 +1393,11 @@ fn add_rna_residue_hydrogens(
 
     drop(emit);
     for (name, position) in to_add {
-        res.atoms.push(PlacedAtom { name, element: Element::H, position });
+        res.atoms.push(PlacedAtom {
+            name,
+            element: Element::H,
+            position,
+        });
     }
 }
 
@@ -1015,9 +1408,7 @@ fn add_rna_residue_hydrogens(
 /// "Extended" here means γ = 180° (trans) — a near-linear single-strand
 /// chain with bases well separated.  For a canonical helical starting
 /// geometry use [`build_a_form_rna_chain`] instead.
-pub fn build_extended_rna_chain(
-    sequence: &[chem::Nucleotide],
-) -> Result<Structure, BuildError> {
+pub fn build_extended_rna_chain(sequence: &[chem::Nucleotide]) -> Result<Structure, BuildError> {
     build_rna_chain_with_torsions(sequence, rna_ic::RnaTorsionSet::extended())
 }
 
@@ -1030,9 +1421,7 @@ pub fn build_extended_rna_chain(
 ///
 /// Same atom roster as [`build_extended_rna_chain`]; only the per-atom
 /// internal-coordinate placement differs.
-pub fn build_a_form_rna_chain(
-    sequence: &[chem::Nucleotide],
-) -> Result<Structure, BuildError> {
+pub fn build_a_form_rna_chain(sequence: &[chem::Nucleotide]) -> Result<Structure, BuildError> {
     build_rna_chain_with_torsions(sequence, rna_ic::RnaTorsionSet::a_form())
 }
 
@@ -1045,8 +1434,8 @@ pub fn build_rna_chain_with_torsions(
     sequence: &[chem::Nucleotide],
     tors: rna_ic::RnaTorsionSet,
 ) -> Result<Structure, BuildError> {
-    use chem::Nucleotide;
     use crate::structure::Monomer;
+    use chem::Nucleotide;
     if sequence.is_empty() {
         return Err(BuildError::Empty);
     }
@@ -1058,7 +1447,11 @@ pub fn build_rna_chain_with_torsions(
     for (idx, &nt) in sequence.iter().enumerate() {
         let mut atoms: Vec<PlacedAtom> = Vec::with_capacity(13);
         let push = |atoms: &mut Vec<PlacedAtom>, name: &'static str, el: Element, pos: Vec3| {
-            atoms.push(PlacedAtom { name, element: el, position: pos });
+            atoms.push(PlacedAtom {
+                name,
+                element: el,
+                position: pos,
+            });
         };
 
         // ---- Anchor the phosphate-O5'-C5' triple ----
@@ -1067,11 +1460,7 @@ pub fn build_rna_chain_with_torsions(
             let o5 = Vec3::new(rna_ic::P_O5, 0.0, 0.0);
             // C5' in the xy-plane at ∠P-O5'-C5'.
             let a = PI - rna_ic::P_O5_C5;
-            let c5 = Vec3::new(
-                o5.x + rna_ic::O5_C5 * a.cos(),
-                rna_ic::O5_C5 * a.sin(),
-                0.0,
-            );
+            let c5 = Vec3::new(o5.x + rna_ic::O5_C5 * a.cos(), rna_ic::O5_C5 * a.sin(), 0.0);
             (p, o5, c5)
         } else {
             let prev = &structure.residues[idx - 1];
@@ -1259,10 +1648,7 @@ mod tests {
             );
             // Every named atom from the canonical roster is present.
             for (name, _) in nt.all_atoms() {
-                assert!(
-                    r.position(name).is_some(),
-                    "{nt:?} missing atom {name}"
-                );
+                assert!(r.position(name).is_some(), "{nt:?} missing atom {name}");
             }
         }
     }
@@ -1415,14 +1801,46 @@ mod tests {
         .unwrap();
         for (i, r) in s.residues.iter().enumerate() {
             let p = |n: &str| r.position(n).unwrap();
-            assert_relative_eq!(measure::distance(p("P"), p("O5'")), rna_ic::P_O5, epsilon = 1e-6);
-            assert_relative_eq!(measure::distance(p("O5'"), p("C5'")), rna_ic::O5_C5, epsilon = 1e-6);
-            assert_relative_eq!(measure::distance(p("C5'"), p("C4'")), rna_ic::C5_C4, epsilon = 1e-6);
-            assert_relative_eq!(measure::distance(p("C4'"), p("C3'")), rna_ic::C4_C3, epsilon = 1e-6);
-            assert_relative_eq!(measure::distance(p("C3'"), p("O3'")), rna_ic::C3_O3, epsilon = 1e-6);
-            assert_relative_eq!(measure::distance(p("P"), p("OP1")), rna_ic::P_OP, epsilon = 1e-6);
-            assert_relative_eq!(measure::distance(p("C4'"), p("O4'")), rna_ic::C4_O4, epsilon = 1e-6);
-            assert_relative_eq!(measure::distance(p("C2'"), p("C1'")), rna_ic::C2_C1, epsilon = 1e-6);
+            assert_relative_eq!(
+                measure::distance(p("P"), p("O5'")),
+                rna_ic::P_O5,
+                epsilon = 1e-6
+            );
+            assert_relative_eq!(
+                measure::distance(p("O5'"), p("C5'")),
+                rna_ic::O5_C5,
+                epsilon = 1e-6
+            );
+            assert_relative_eq!(
+                measure::distance(p("C5'"), p("C4'")),
+                rna_ic::C5_C4,
+                epsilon = 1e-6
+            );
+            assert_relative_eq!(
+                measure::distance(p("C4'"), p("C3'")),
+                rna_ic::C4_C3,
+                epsilon = 1e-6
+            );
+            assert_relative_eq!(
+                measure::distance(p("C3'"), p("O3'")),
+                rna_ic::C3_O3,
+                epsilon = 1e-6
+            );
+            assert_relative_eq!(
+                measure::distance(p("P"), p("OP1")),
+                rna_ic::P_OP,
+                epsilon = 1e-6
+            );
+            assert_relative_eq!(
+                measure::distance(p("C4'"), p("O4'")),
+                rna_ic::C4_O4,
+                epsilon = 1e-6
+            );
+            assert_relative_eq!(
+                measure::distance(p("C2'"), p("C1'")),
+                rna_ic::C2_C1,
+                epsilon = 1e-6
+            );
             // Inter-residue phosphodiester bond.
             if i > 0 {
                 let prev_o3 = s.residues[i - 1].position("O3'").unwrap();

@@ -231,8 +231,16 @@ mod tests {
             residues: vec![PlacedResidue {
                 monomer: geom::structure::Monomer::Protein(AminoAcid::Ala),
                 atoms: vec![
-                    PlacedAtom { name: "CB", element: Element::C, position: Vec3::zeros() },
-                    PlacedAtom { name: "CG", element: Element::C, position: Vec3::new(0.5, 0.0, 0.0) },
+                    PlacedAtom {
+                        name: "CB",
+                        element: Element::C,
+                        position: Vec3::zeros(),
+                    },
+                    PlacedAtom {
+                        name: "CG",
+                        element: Element::C,
+                        position: Vec3::new(0.5, 0.0, 0.0),
+                    },
                 ],
                 chain: 'A',
             }],
@@ -250,8 +258,16 @@ mod tests {
             residues: vec![PlacedResidue {
                 monomer: geom::structure::Monomer::Protein(AminoAcid::Ala),
                 atoms: vec![
-                    PlacedAtom { name: "CB", element: Element::C, position: Vec3::zeros() },
-                    PlacedAtom { name: "CG", element: Element::C, position: Vec3::new(50.0, 0.0, 0.0) },
+                    PlacedAtom {
+                        name: "CB",
+                        element: Element::C,
+                        position: Vec3::zeros(),
+                    },
+                    PlacedAtom {
+                        name: "CG",
+                        element: Element::C,
+                        position: Vec3::new(50.0, 0.0, 0.0),
+                    },
                 ],
                 chain: 'A',
             }],
@@ -271,8 +287,12 @@ mod tests {
         let br = sasa_energy(&s, ff);
         assert!(
             (1500.0..10000.0).contains(&br.total_area_a2),
-            "SASA total {} Å² out of expected range", br.total_area_a2,
+            "SASA total {} Å² out of expected range",
+            br.total_area_a2,
         );
-        assert!(br.sasa_kj_mol > 0.0, "hydrophobic energy should be positive");
+        assert!(
+            br.sasa_kj_mol > 0.0,
+            "hydrophobic energy should be positive"
+        );
     }
 }

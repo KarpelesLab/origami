@@ -53,7 +53,9 @@ pub fn add_bond_forces(
     forces: &mut [Vec3],
 ) {
     for b in &graph.bonds {
-        let Some(p) = ff.bond(atom_types[b.a], atom_types[b.b]) else { continue };
+        let Some(p) = ff.bond(atom_types[b.a], atom_types[b.b]) else {
+            continue;
+        };
         let d = positions[b.b] - positions[b.a];
         let r = d.norm();
         if r < 1e-9 {
@@ -179,11 +181,21 @@ pub fn add_dihedral_forces(
 ) {
     for d in &graph.dihedrals {
         let Some(terms) = ff.dihedral(
-            atom_types[d.a], atom_types[d.b], atom_types[d.c], atom_types[d.d],
-        ) else { continue };
+            atom_types[d.a],
+            atom_types[d.b],
+            atom_types[d.c],
+            atom_types[d.d],
+        ) else {
+            continue;
+        };
         let Some((da, db, dc, dd, phi)) = dihedral_gradient(
-            positions[d.a], positions[d.b], positions[d.c], positions[d.d],
-        ) else { continue };
+            positions[d.a],
+            positions[d.b],
+            positions[d.c],
+            positions[d.d],
+        ) else {
+            continue;
+        };
         // Sum dV/dφ across all periodic terms (in kcal/mol/rad).
         let mut dvdphi_kcal = 0.0;
         for term in terms {
@@ -214,11 +226,21 @@ pub fn add_improper_forces(
 ) {
     for imp in &graph.impropers {
         let Some(p) = ff.improper(
-            atom_types[imp.a], atom_types[imp.b], atom_types[imp.c], atom_types[imp.d],
-        ) else { continue };
+            atom_types[imp.a],
+            atom_types[imp.b],
+            atom_types[imp.c],
+            atom_types[imp.d],
+        ) else {
+            continue;
+        };
         let Some((da, db, dc, dd, omega)) = dihedral_gradient(
-            positions[imp.a], positions[imp.b], positions[imp.c], positions[imp.d],
-        ) else { continue };
+            positions[imp.a],
+            positions[imp.b],
+            positions[imp.c],
+            positions[imp.d],
+        ) else {
+            continue;
+        };
         let omega0 = deg_to_rad(p.psi0_deg);
         let mut domega = omega - omega0;
         while domega > std::f64::consts::PI {
@@ -282,7 +304,11 @@ mod tests {
         assert!(
             (an - numeric).abs() < tol,
             "{} atom {} axis {}: analytical={:.4}, numeric={:.4}",
-            label, atom_idx, axis, an, numeric
+            label,
+            atom_idx,
+            axis,
+            an,
+            numeric
         );
     }
 
@@ -311,7 +337,19 @@ mod tests {
         add_bond_forces(&positions, &g, ff, &atom_types, &mut forces);
         for i in 0..n.min(8) {
             for axis in 0..3 {
-                finite_diff_check(&s, &forces, i, axis, ff, &g, &atom_types, 1e-5, bond_energy, 1e-2, "bond");
+                finite_diff_check(
+                    &s,
+                    &forces,
+                    i,
+                    axis,
+                    ff,
+                    &g,
+                    &atom_types,
+                    1e-5,
+                    bond_energy,
+                    1e-2,
+                    "bond",
+                );
             }
         }
     }
@@ -375,8 +413,17 @@ mod tests {
         for &sg in &sg_indices {
             for axis in 0..3 {
                 finite_diff_check(
-                    &s, &forces, sg, axis, ff, &g, &atom_types,
-                    1e-5, bond_energy, 2.0, "disulfide-bond",
+                    &s,
+                    &forces,
+                    sg,
+                    axis,
+                    ff,
+                    &g,
+                    &atom_types,
+                    1e-5,
+                    bond_energy,
+                    2.0,
+                    "disulfide-bond",
                 );
             }
         }
@@ -394,7 +441,19 @@ mod tests {
         add_angle_forces(&positions, &g, ff, &atom_types, &mut forces);
         for i in 0..n.min(8) {
             for axis in 0..3 {
-                finite_diff_check(&s, &forces, i, axis, ff, &g, &atom_types, 1e-5, angle_energy, 1e-1, "angle");
+                finite_diff_check(
+                    &s,
+                    &forces,
+                    i,
+                    axis,
+                    ff,
+                    &g,
+                    &atom_types,
+                    1e-5,
+                    angle_energy,
+                    1e-1,
+                    "angle",
+                );
             }
         }
     }
@@ -415,12 +474,10 @@ mod tests {
             for axis in 0..3 {
                 let mut p = [pa, pb, pc, pd];
                 p[atom_idx][axis] += eps;
-                let (_, _, _, _, phi_plus) =
-                    dihedral_gradient(p[0], p[1], p[2], p[3]).unwrap();
+                let (_, _, _, _, phi_plus) = dihedral_gradient(p[0], p[1], p[2], p[3]).unwrap();
                 let mut p = [pa, pb, pc, pd];
                 p[atom_idx][axis] -= eps;
-                let (_, _, _, _, phi_minus) =
-                    dihedral_gradient(p[0], p[1], p[2], p[3]).unwrap();
+                let (_, _, _, _, phi_minus) = dihedral_gradient(p[0], p[1], p[2], p[3]).unwrap();
                 let mut numeric = (phi_plus - phi_minus) / (2.0 * eps);
                 // Wrap differences > π to handle the atan2 branch cut.
                 if numeric > std::f64::consts::PI {
@@ -433,7 +490,10 @@ mod tests {
                 assert!(
                     (an - numeric).abs() < 1e-3,
                     "dihedral gradient mismatch atom {} axis {}: analytical={:.4}, numeric={:.4}",
-                    atom_idx, axis, an, numeric
+                    atom_idx,
+                    axis,
+                    an,
+                    numeric
                 );
             }
         }
@@ -451,7 +511,19 @@ mod tests {
         add_dihedral_forces(&positions, &g, ff, &atom_types, &mut forces);
         for i in 0..n.min(8) {
             for axis in 0..3 {
-                finite_diff_check(&s, &forces, i, axis, ff, &g, &atom_types, 1e-5, dihedral_energy, 1e-1, "dihedral");
+                finite_diff_check(
+                    &s,
+                    &forces,
+                    i,
+                    axis,
+                    ff,
+                    &g,
+                    &atom_types,
+                    1e-5,
+                    dihedral_energy,
+                    1e-1,
+                    "dihedral",
+                );
             }
         }
     }
@@ -468,7 +540,19 @@ mod tests {
         add_improper_forces(&positions, &g, ff, &atom_types, &mut forces);
         for i in 0..n.min(8) {
             for axis in 0..3 {
-                finite_diff_check(&s, &forces, i, axis, ff, &g, &atom_types, 1e-5, improper_energy, 1e-1, "improper");
+                finite_diff_check(
+                    &s,
+                    &forces,
+                    i,
+                    axis,
+                    ff,
+                    &g,
+                    &atom_types,
+                    1e-5,
+                    improper_energy,
+                    1e-1,
+                    "improper",
+                );
             }
         }
     }
@@ -477,15 +561,23 @@ mod tests {
     fn bond_force_zero_at_equilibrium() {
         // Two atoms exactly at CHARMM r₀ for some bond pair: force should be zero.
         // Use the N-CA bond (NH1-CT1) with r₀ = 1.430 Å.
-        use geom::structure::{PlacedAtom, PlacedResidue};
         use chem::Element;
+        use geom::structure::{PlacedAtom, PlacedResidue};
         let r0 = 1.430;
         let s = geom::Structure {
             residues: vec![PlacedResidue {
                 monomer: geom::structure::Monomer::Protein(AminoAcid::Ala),
                 atoms: vec![
-                    PlacedAtom { name: "N", element: Element::N, position: Vec3::zeros() },
-                    PlacedAtom { name: "CA", element: Element::C, position: Vec3::new(r0, 0.0, 0.0) },
+                    PlacedAtom {
+                        name: "N",
+                        element: Element::N,
+                        position: Vec3::zeros(),
+                    },
+                    PlacedAtom {
+                        name: "CA",
+                        element: Element::C,
+                        position: Vec3::new(r0, 0.0, 0.0),
+                    },
                 ],
                 chain: 'A',
             }],
@@ -521,7 +613,8 @@ mod tests {
         let total: Vec3 = forces.iter().fold(Vec3::zeros(), |acc, f| acc + f);
         assert!(
             total.norm() < 1e-6,
-            "net bonded force should be zero, got {} kJ/mol/Å", total.norm()
+            "net bonded force should be zero, got {} kJ/mol/Å",
+            total.norm()
         );
     }
 }

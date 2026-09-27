@@ -120,8 +120,7 @@ fn bounded_area(
     // Gauss-Bonnet on a sphere), summing over all components:
     //   χ = Σ (2 − L_F) = 2c − L_total
     let chi = 2 * c as i64 - l as i64;
-    let area =
-        r_sq * (2.0 * std::f64::consts::PI * chi as f64 - total_arc_sum - total_vertex_sum);
+    let area = r_sq * (2.0 * std::f64::consts::PI * chi as f64 - total_arc_sum - total_vertex_sum);
     area.clamp(0.0, four_pi_r2)
 }
 
@@ -169,8 +168,7 @@ fn walk_faces_summing_vertices(arcs: &[BoundaryArc], caps: &[SmallCircle]) -> Wa
             // then if it's the same as `start`, the loop has closed.
             let candidates: Vec<usize> = (0..n)
                 .filter(|&i| {
-                    !arcs[i].is_full_circle
-                        && (arcs[i].start - end_pt).norm_squared() < eps_sq
+                    !arcs[i].is_full_circle && (arcs[i].start - end_pt).norm_squared() < eps_sq
                 })
                 .collect();
             if candidates.is_empty() {
@@ -459,10 +457,18 @@ mod tests {
         let boundary = find_boundary(&caps);
         let area = accessible_area(r, &caps, &boundary);
         assert!(area > 0.0, "area should be positive, got {}", area);
-        assert!(area < 4.0 * std::f64::consts::PI, "area exceeds full sphere");
+        assert!(
+            area < 4.0 * std::f64::consts::PI,
+            "area exceeds full sphere"
+        );
         // Two intersecting caps cover MORE area than one alone, so the
         // accessible area should be LESS than the single-cap accessible area.
         let single = 2.0 * std::f64::consts::PI * (1.0 + 0.3);
-        assert!(area < single, "two caps should bury more than one: {} vs {}", area, single);
+        assert!(
+            area < single,
+            "two caps should bury more than one: {} vs {}",
+            area,
+            single
+        );
     }
 }

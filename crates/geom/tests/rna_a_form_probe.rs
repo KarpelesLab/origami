@@ -15,8 +15,14 @@ use geom::{build_a_form_rna_chain, build_extended_rna_chain, measure};
 #[ignore]
 fn probe_chi_offset() {
     for (label, s) in [
-        ("extended", build_extended_rna_chain(&[Nucleotide::Adenine]).unwrap()),
-        ("A-form  ", build_a_form_rna_chain(&[Nucleotide::Adenine]).unwrap()),
+        (
+            "extended",
+            build_extended_rna_chain(&[Nucleotide::Adenine]).unwrap(),
+        ),
+        (
+            "A-form  ",
+            build_a_form_rna_chain(&[Nucleotide::Adenine]).unwrap(),
+        ),
     ] {
         let r = &s.residues[0];
         let o4 = r.position("O4'").unwrap();
@@ -38,32 +44,53 @@ fn probe_a_form_helix() {
     use std::f64::consts::PI;
     let deg = |d: f64| d * PI / 180.0;
     // 10-residue chain so helix params resolve cleanly.
-    let block = [Nucleotide::Adenine, Nucleotide::Uracil,
-                 Nucleotide::Guanine, Nucleotide::Cytosine];
+    let block = [
+        Nucleotide::Adenine,
+        Nucleotide::Uracil,
+        Nucleotide::Guanine,
+        Nucleotide::Cytosine,
+    ];
     let seq: Vec<_> = block.iter().cloned().cycle().take(10).collect();
 
     // Several candidate torsion sets to compare.
     let a_form = geom::builder::rna_ic::RnaTorsionSet::a_form();
     let saenger = geom::builder::rna_ic::RnaTorsionSet {
-        alpha: deg(-50.0), beta: deg(172.0), gamma: deg(41.0),
-        delta: deg(79.0), epsilon: deg(-146.0), zeta: deg(-78.0),
+        alpha: deg(-50.0),
+        beta: deg(172.0),
+        gamma: deg(41.0),
+        delta: deg(79.0),
+        epsilon: deg(-146.0),
+        zeta: deg(-78.0),
         ..a_form
     };
     let amber_nab = geom::builder::rna_ic::RnaTorsionSet {
-        alpha: deg(-75.0), beta: deg(175.0), gamma: deg(47.0),
-        delta: deg(79.0), epsilon: deg(-147.0), zeta: deg(-75.0),
+        alpha: deg(-75.0),
+        beta: deg(175.0),
+        gamma: deg(47.0),
+        delta: deg(79.0),
+        epsilon: deg(-147.0),
+        zeta: deg(-75.0),
         ..a_form
     };
 
     for (label, s) in [
-        ("extended",  build_extended_rna_chain(&seq).unwrap()),
+        ("extended", build_extended_rna_chain(&seq).unwrap()),
         ("A (Olson)", build_a_form_rna_chain(&seq).unwrap()),
-        ("A (Saenger)", build_rna_chain_with_torsions(&seq, saenger).unwrap()),
-        ("A (AMBER NAB)", build_rna_chain_with_torsions(&seq, amber_nab).unwrap()),
+        (
+            "A (Saenger)",
+            build_rna_chain_with_torsions(&seq, saenger).unwrap(),
+        ),
+        (
+            "A (AMBER NAB)",
+            build_rna_chain_with_torsions(&seq, amber_nab).unwrap(),
+        ),
     ] {
         eprintln!("\n=== {label} 10-nt chain ===");
-        let p: Vec<_> = s.residues.iter()
-            .map(|r| r.position("P").unwrap()).collect();
+        let p: Vec<_> = s
+            .residues
+            .iter()
+            .map(|r| r.position("P").unwrap())
+            .collect();
 
         // ---- helix-axis fit via best-fit line through P atoms ----
         // Crude PCA: axis = principal eigenvector of the covariance
@@ -83,15 +110,14 @@ fn probe_a_form_helix() {
         }
 
         // ---- helix radius (mean P distance from axis line through centroid) ----
-        let radii: Vec<f64> = centred.iter()
+        let radii: Vec<f64> = centred
+            .iter()
             .map(|v| (v - axis * v.dot(&axis)).norm())
             .collect();
         let mean_radius = radii.iter().sum::<f64>() / radii.len() as f64;
 
         // ---- rise per residue (along axis) ----
-        let mut rises: Vec<f64> = (1..p.len())
-            .map(|i| (p[i] - p[i-1]).dot(&axis))
-            .collect();
+        let mut rises: Vec<f64> = (1..p.len()).map(|i| (p[i] - p[i - 1]).dot(&axis)).collect();
         // Sign: align so rise is positive.
         let mean_rise_signed = rises.iter().sum::<f64>() / rises.len() as f64;
         if mean_rise_signed < 0.0 {
@@ -115,11 +141,15 @@ fn probe_a_form_helix() {
         }
         let mean_twist = twists.iter().sum::<f64>() / twists.len() as f64;
 
-        eprintln!("  mean P-P (along bond) = {:.2} Å",
-            (1..p.len()).map(|i| (p[i] - p[i-1]).norm()).sum::<f64>() / (p.len() - 1) as f64);
+        eprintln!(
+            "  mean P-P (along bond) = {:.2} Å",
+            (1..p.len()).map(|i| (p[i] - p[i - 1]).norm()).sum::<f64>() / (p.len() - 1) as f64
+        );
         eprintln!("  helix radius (P to axis) = {mean_radius:.2} Å  (canonical A-form: ~9.4 Å)");
         eprintln!("  rise per residue (axial) = {mean_rise:.2} Å    (canonical A-form: 2.81 Å)");
-        eprintln!("  twist per residue (around axis) = {mean_twist:.1}°  (canonical A-form: +32.7°)");
+        eprintln!(
+            "  twist per residue (around axis) = {mean_twist:.1}°  (canonical A-form: +32.7°)"
+        );
 
         // ---- ring closure ----
         let mut max_ring_err = 0.0_f64;
@@ -139,10 +169,7 @@ fn probe_a_form_helix() {
                 let (rj, aj) = atoms[j];
                 let d = (ai.position - aj.position).norm();
                 if d < 1.5 {
-                    close_pairs.push((d,
-                        format!("{ri}/{}", ai.name),
-                        format!("{rj}/{}", aj.name),
-                    ));
+                    close_pairs.push((d, format!("{ri}/{}", ai.name), format!("{rj}/{}", aj.name)));
                 }
             }
         }

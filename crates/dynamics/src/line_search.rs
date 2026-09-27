@@ -79,7 +79,13 @@ pub fn backtracking(
             *s = alpha * p;
         }
         apply_displacement(structure, &step);
-        let e_new = total_energy_with_options(structure, graph, ff, options.include_sasa, options.include_cmap);
+        let e_new = total_energy_with_options(
+            structure,
+            graph,
+            ff,
+            options.include_sasa,
+            options.include_cmap,
+        );
         // Undo the step so the caller sees the structure unchanged.
         for s in step.iter_mut() {
             *s = -*s;

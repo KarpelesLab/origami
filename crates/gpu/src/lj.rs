@@ -127,12 +127,30 @@ pub fn lj_force_gpu(ctx: &GpuContext, input: LjInput) -> Vec<[f32; 3]> {
         label: Some("lj_bind_group"),
         layout: &bind_group_layout,
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: positions_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: type_index_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: lj_table_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 4, resource: exclusions_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 5, resource: forces_buf.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: positions_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: type_index_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: lj_table_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: exclusions_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: forces_buf.as_entire_binding(),
+            },
         ],
     });
 
@@ -160,7 +178,9 @@ pub fn lj_force_gpu(ctx: &GpuContext, input: LjInput) -> Vec<[f32; 3]> {
         let _ = tx.send(r);
     });
     let _ = device.poll(wgpu::Maintain::Wait);
-    rx.recv().expect("map_async sender dropped").expect("buffer map");
+    rx.recv()
+        .expect("map_async sender dropped")
+        .expect("buffer map");
     let data = slice.get_mapped_range();
     let padded: &[[f32; 4]] = bytemuck::cast_slice(&data);
     let out: Vec<[f32; 3]> = padded.iter().map(|v| [v[0], v[1], v[2]]).collect();

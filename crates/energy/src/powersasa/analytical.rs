@@ -23,9 +23,7 @@
 
 use geom::Vec3;
 
-use super::arrangement::{
-    build_caps, find_boundary, AtomBoundary, BoundaryVertex,
-};
+use super::arrangement::{build_caps, find_boundary, AtomBoundary, BoundaryVertex};
 use super::derivatives::{
     arc_theta_jvp, cos_alpha_directional, identify_root_sign, vertex_epsilon_jvp, RootSign,
 };
@@ -227,9 +225,7 @@ fn compute_loop_count(
     for (i, arc) in arcs.iter().enumerate() {
         if arc.is_full_circle {
             full_circle_count += 1;
-        } else if arc.start_vertex_local != usize::MAX
-            && arc.end_vertex_local != usize::MAX
-        {
+        } else if arc.start_vertex_local != usize::MAX && arc.end_vertex_local != usize::MAX {
             vertexed_arcs.push(i);
         }
     }
@@ -257,7 +253,10 @@ fn compute_loop_count(
                 end_v.incoming_cap_local
             };
             let next = vertexed_arcs.iter().position(|&ai| {
-                !visited[vertexed_arcs.iter().position(|&x| x == ai).unwrap_or(usize::MAX)]
+                !visited[vertexed_arcs
+                    .iter()
+                    .position(|&x| x == ai)
+                    .unwrap_or(usize::MAX)]
                     && arcs[ai].cap_local == next_cap_local
                     && arcs[ai].start_vertex_local == arc.end_vertex_local
             });
@@ -368,10 +367,8 @@ fn directional_area_derivative(
         // - Reference vertex position = vertex_point(caps[incoming], caps[outgoing], v.sign).
         // - To use in arc_theta_jvp, which expects vertex_point(arc_cap, OTHER, sign_in_that_order),
         //   we swap if needed.
-        let (vs_other_local, vs_sign) =
-            arc_other_cap_and_sign(arc.cap_local, vs);
-        let (ve_other_local, ve_sign) =
-            arc_other_cap_and_sign(arc.cap_local, ve);
+        let (vs_other_local, vs_sign) = arc_other_cap_and_sign(arc.cap_local, vs);
+        let (ve_other_local, ve_sign) = arc_other_cap_and_sign(arc.cap_local, ve);
 
         let l_atom = cache.cap_owners[vs_other_local];
         let m_atom = cache.cap_owners[ve_other_local];
@@ -406,10 +403,8 @@ fn directional_area_derivative(
         // Convention in derivatives.rs: vertex_epsilon_jvp's
         // `incoming_is_k` selects which of the two caps is "incoming".
         // Our cache stores incoming as cap p_k, so `incoming_is_k = true`.
-        let deps = vertex_epsilon_jvp(
-            p_i, p_k, p_l, r_i, r_k, r_l, v.sign, true, dr_i, dr_k, dr_l,
-        )
-        .unwrap_or(0.0);
+        let deps = vertex_epsilon_jvp(p_i, p_k, p_l, r_i, r_k, r_l, v.sign, true, dr_i, dr_k, dr_l)
+            .unwrap_or(0.0);
         sum_vert += deps;
     }
 
@@ -472,8 +467,13 @@ pub fn add_sasa_forces_analytical_with_scratch_and_gammas(
     let n = structure.atom_count();
     assert_eq!(forces.len(), n);
     assert_eq!(scratch.n, n);
-    assert_eq!(gammas.len(), n,
-        "gammas length {} != atom count {}", gammas.len(), n);
+    assert_eq!(
+        gammas.len(),
+        n,
+        "gammas length {} != atom count {}",
+        gammas.len(),
+        n
+    );
 
     // Flatten positions + radii from the structure.
     let mut positions: Vec<Vec3> = Vec::with_capacity(n);
@@ -612,8 +612,13 @@ pub fn add_sasa_forces_analytical_with_gammas(
 ) {
     let n = structure.atom_count();
     assert_eq!(forces.len(), n);
-    assert_eq!(gammas.len(), n,
-        "gammas length {} != atom count {}", gammas.len(), n);
+    assert_eq!(
+        gammas.len(),
+        n,
+        "gammas length {} != atom count {}",
+        gammas.len(),
+        n
+    );
     let mut positions: Vec<Vec3> = Vec::with_capacity(n);
     let mut radii: Vec<f64> = Vec::with_capacity(n);
     for residue in &structure.residues {
@@ -693,9 +698,13 @@ mod tests {
         use chem::{standard_ff, AminoAcid};
         use geom::{build_extended_chain, build_topology_graph};
         let s = build_extended_chain(&[
-            AminoAcid::Ala, AminoAcid::Gly, AminoAcid::Ala,
-            AminoAcid::Lys, AminoAcid::Glu,
-        ]).unwrap();
+            AminoAcid::Ala,
+            AminoAcid::Gly,
+            AminoAcid::Ala,
+            AminoAcid::Lys,
+            AminoAcid::Glu,
+        ])
+        .unwrap();
         let n = s.atom_count();
         let ff = standard_ff();
         let g = build_topology_graph(&s);
@@ -709,7 +718,10 @@ mod tests {
 
         for (a, b) in baseline.iter().zip(&fast) {
             let d = (*a - *b).norm();
-            assert!(d < 1e-6, "scratch path diverges: {a:?} vs {b:?} (Δ={d:.2e})");
+            assert!(
+                d < 1e-6,
+                "scratch path diverges: {a:?} vs {b:?} (Δ={d:.2e})"
+            );
         }
     }
 
@@ -720,10 +732,8 @@ mod tests {
     #[test]
     fn with_gammas_default_matches_default_path() {
         use chem::{standard_ff, AminoAcid};
-        use geom::{build_extended_chain};
-        let s = build_extended_chain(&[
-            AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala,
-        ]).unwrap();
+        use geom::build_extended_chain;
+        let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
         let n = s.atom_count();
         let ff = standard_ff();
         let mut default_f = vec![Vec3::zeros(); n];
@@ -734,8 +744,10 @@ mod tests {
         add_sasa_forces_analytical_with_gammas(&s, ff, &gammas, &mut explicit_f);
 
         for (a, b) in default_f.iter().zip(&explicit_f) {
-            assert!((*a - *b).norm() < 1e-12,
-                "default and with_gammas paths disagree: {a:?} vs {b:?}");
+            assert!(
+                (*a - *b).norm() < 1e-12,
+                "default and with_gammas paths disagree: {a:?} vs {b:?}"
+            );
         }
     }
 
@@ -745,9 +757,7 @@ mod tests {
     fn doubled_gammas_doubles_forces() {
         use chem::{standard_ff, AminoAcid};
         use geom::build_extended_chain;
-        let s = build_extended_chain(&[
-            AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala,
-        ]).unwrap();
+        let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
         let n = s.atom_count();
         let ff = standard_ff();
         let gammas_1 = super::super::default_sasa_gammas(&s);
@@ -759,10 +769,14 @@ mod tests {
         add_sasa_forces_analytical_with_gammas(&s, ff, &gammas_2, &mut f2);
 
         for (a, b) in f1.iter().zip(&f2) {
-            if a.norm() < 1e-12 { continue; }
+            if a.norm() < 1e-12 {
+                continue;
+            }
             let scaled = *a * 2.0;
-            assert!((scaled - *b).norm() < 1e-9 * a.norm().max(1.0),
-                "force not linear in γ: 2×{a:?} != {b:?}");
+            assert!(
+                (scaled - *b).norm() < 1e-9 * a.norm().max(1.0),
+                "force not linear in γ: 2×{a:?} != {b:?}"
+            );
         }
     }
 
@@ -774,9 +788,7 @@ mod tests {
     fn zeroing_half_gammas_removes_those_contributions() {
         use chem::{standard_ff, AminoAcid};
         use geom::build_extended_chain;
-        let s = build_extended_chain(&[
-            AminoAcid::Ala, AminoAcid::Lys, AminoAcid::Glu,
-        ]).unwrap();
+        let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Lys, AminoAcid::Glu]).unwrap();
         let n = s.atom_count();
         let ff = standard_ff();
         let mut gammas = super::super::default_sasa_gammas(&s);
@@ -802,8 +814,10 @@ mod tests {
         // Could be 0 if the atoms we zeroed had γ=0 originally
         // (polar) — in that case the assertion is trivially equal.
         // Otherwise we expect a real drop.
-        assert!(f_total <= f_full_total + 1e-9,
-            "zeroing γs should not INCREASE force magnitude (was {f_full_total}, now {f_total})");
+        assert!(
+            f_total <= f_full_total + 1e-9,
+            "zeroing γs should not INCREASE force magnitude (was {f_full_total}, now {f_total})"
+        );
     }
 
     #[test]
@@ -815,9 +829,13 @@ mod tests {
         use chem::{standard_ff, AminoAcid};
         use geom::{build_extended_chain, build_topology_graph};
         let s = build_extended_chain(&[
-            AminoAcid::Ala, AminoAcid::Gly, AminoAcid::Ala,
-            AminoAcid::Lys, AminoAcid::Glu,
-        ]).unwrap();
+            AminoAcid::Ala,
+            AminoAcid::Gly,
+            AminoAcid::Ala,
+            AminoAcid::Lys,
+            AminoAcid::Glu,
+        ])
+        .unwrap();
         let n = s.atom_count();
         let ff = standard_ff();
         let g = build_topology_graph(&s);
@@ -854,7 +872,11 @@ mod tests {
         let radii: Vec<f64> = s
             .residues
             .iter()
-            .flat_map(|r| r.atoms.iter().map(|a| crate::powersasa::vdw_radius(a.element) + crate::powersasa::PROBE_RADIUS_A))
+            .flat_map(|r| {
+                r.atoms.iter().map(|a| {
+                    crate::powersasa::vdw_radius(a.element) + crate::powersasa::PROBE_RADIUS_A
+                })
+            })
             .collect();
 
         // Build neighbour lists (atom -> neighbours within sum of radii).
@@ -963,11 +985,18 @@ mod tests {
                 assert!(
                     err < 0.5,
                     "atom {} axis {}: analytical={} numeric={} err={}",
-                    k, axis, analytical, numeric_force, err
+                    k,
+                    axis,
+                    analytical,
+                    numeric_force,
+                    err
                 );
             }
         }
-        eprintln!("max analytical-vs-numerical SASA force error: {} ({})", max_err, max_label);
+        eprintln!(
+            "max analytical-vs-numerical SASA force error: {} ({})",
+            max_err, max_label
+        );
     }
 
     fn bump(s: &mut geom::Structure, atom_idx: usize, axis: usize, eps: f64) {
@@ -1108,8 +1137,8 @@ mod tests {
         let radii = vec![3.0, 3.0]; // both vdW+probe (= 1.7 + 1.4 ish, but just round numbers)
         let neighbour_idx = vec![vec![1usize], vec![0usize]];
 
-        let cache_0 = build_atom_cache(0, &positions, &radii, &neighbour_idx[0])
-            .expect("cache atom 0");
+        let cache_0 =
+            build_atom_cache(0, &positions, &radii, &neighbour_idx[0]).expect("cache atom 0");
 
         // ∂A_0 / ∂r_x for x = 0 and x = 1 (axis 0, the bond axis).
         let mut grad = vec![Vec3::zeros(); 2];
@@ -1118,9 +1147,8 @@ mod tests {
         // Compute reference area as a function of (positions, radii) for
         // the central difference.
         let area_at = |pos: &[Vec3]| -> f64 {
-            let neighbours: Vec<(usize, Vec3, f64)> = (1..pos.len())
-                .map(|j| (j, pos[j], radii[j]))
-                .collect();
+            let neighbours: Vec<(usize, Vec3, f64)> =
+                (1..pos.len()).map(|j| (j, pos[j], radii[j])).collect();
             let (caps, _) = build_caps(pos[0], radii[0], &neighbours).unwrap();
             let boundary = find_boundary(&caps);
             accessible_area_with_components(radii[0], &caps, &boundary, Some(cache_0.c))

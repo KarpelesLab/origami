@@ -133,7 +133,9 @@ pub fn ss_counts(structure: &Structure) -> (usize, usize, usize) {
 mod tests {
     use super::*;
 
-    fn deg(d: f64) -> f64 { d.to_radians() }
+    fn deg(d: f64) -> f64 {
+        d.to_radians()
+    }
 
     #[test]
     fn alpha_helix_angles_classify_as_helix() {
@@ -160,5 +162,4 @@ mod tests {
         // H nor E.
         assert_eq!(classify(deg(60.0), deg(60.0)), SsType::Coil);
     }
-
 }

@@ -53,7 +53,9 @@ pub use sasa::{fibonacci_unit_sphere_f32, SasaPipeline, SasaSetup, SASA_N_DOTS};
 pub use sasa_smooth::{
     SasaSmoothPipeline, SasaSmoothSetup, SASA_SMOOTH_DEFAULT_SIGMA_A, SASA_SMOOTH_N_DOTS,
 };
-pub use shake::{build_per_x_shake_data, PerXShakeData, ShakeConstraint, ShakePipeline, MAX_H_PER_X};
+pub use shake::{
+    build_per_x_shake_data, PerXShakeData, ShakeConstraint, ShakePipeline, MAX_H_PER_X,
+};
 pub use spatial_sort::{morton_code, morton_permutation, TILE_SIZE};
 pub use tile_list::{build_tile_interaction_list, TileInteractionList};
 pub use tile_nonbonded::{TileNonbondedPipeline, TileNonbondedSetup};
