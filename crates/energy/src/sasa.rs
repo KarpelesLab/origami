@@ -199,7 +199,7 @@ fn fibonacci_unit_sphere(n: usize) -> Vec<Vec3> {
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
-    use chem::{standard_ff, AminoAcid};
+    use chem::{AminoAcid, standard_ff};
     use geom::{build_extended_chain, structure::PlacedAtom, structure::PlacedResidue};
 
     #[test]

@@ -8,8 +8,8 @@
 //! comparison diverge chaotically) — only that the GPU integrator hits
 //! a similar mean temperature and doesn't explode.
 
-use chem::{standard_ff, AminoAcid};
-use dynamics::{run_langevin, LangevinOptions};
+use chem::{AminoAcid, standard_ff};
+use dynamics::{LangevinOptions, run_langevin};
 use geom::{build_extended_chain, build_topology_graph};
 use gpu::GpuContext;
 

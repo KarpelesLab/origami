@@ -7,11 +7,11 @@
 //! recompute via `compute_born_inputs`, the GPU does the same via
 //! the gb_born kernel.
 
-use chem::{standard_ff, AminoAcid, Element};
+use chem::{AminoAcid, Element, standard_ff};
 use energy::forces_gb::GB_DEFAULT_CUTOFF_A_PUB;
-use energy::gb::{hct_scale_pub, intrinsic_radius_pub, BORN_RADIUS_CUTOFF_A_PUB, OBC_OFFSET_PUB};
-use geom::{build_extended_chain, build_topology_graph, Vec3};
-use gpu::{pair_list_to_csr, GbPipeline, GbSetup, GpuContext};
+use energy::gb::{BORN_RADIUS_CUTOFF_A_PUB, OBC_OFFSET_PUB, hct_scale_pub, intrinsic_radius_pub};
+use geom::{Vec3, build_extended_chain, build_topology_graph};
+use gpu::{GbPipeline, GbSetup, GpuContext, pair_list_to_csr};
 
 #[test]
 fn gpu_gb_matches_cpu_on_ala_lys_glu() {

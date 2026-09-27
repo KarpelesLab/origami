@@ -16,7 +16,7 @@ use std::f64::consts::PI;
 
 use crate::amino_acid::AminoAcid;
 use crate::element::Element;
-use crate::topology::{angle, bond, DihedralValue, ResidueTopology, SidechainAtom};
+use crate::topology::{DihedralValue, ResidueTopology, SidechainAtom, angle, bond};
 
 const fn d(deg: f64) -> f64 {
     deg * PI / 180.0

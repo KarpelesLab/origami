@@ -63,16 +63,16 @@ pub fn find_orfs(seq: &[u8], min_aa: usize) -> Vec<Orf> {
             let codon = match Codon::from_bytes(triplet) {
                 Ok(c) => c,
                 Err(_) => {
-                    if let Some((start, protein)) = current.take() {
-                        if protein.len() >= min_aa {
-                            out.push(Orf {
-                                frame,
-                                start,
-                                end: i,
-                                protein,
-                                terminated: false,
-                            });
-                        }
+                    if let Some((start, protein)) = current.take()
+                        && protein.len() >= min_aa
+                    {
+                        out.push(Orf {
+                            frame,
+                            start,
+                            end: i,
+                            protein,
+                            terminated: false,
+                        });
                     }
                     i += 3;
                     continue;
@@ -87,31 +87,31 @@ pub fn find_orfs(seq: &[u8], min_aa: usize) -> Vec<Orf> {
                     }
                 }
                 Translation::Stop => {
-                    if let Some((start, protein)) = current.take() {
-                        if protein.len() >= min_aa {
-                            out.push(Orf {
-                                frame,
-                                start,
-                                end: i + 3,
-                                protein,
-                                terminated: true,
-                            });
-                        }
+                    if let Some((start, protein)) = current.take()
+                        && protein.len() >= min_aa
+                    {
+                        out.push(Orf {
+                            frame,
+                            start,
+                            end: i + 3,
+                            protein,
+                            terminated: true,
+                        });
                     }
                 }
             }
             i += 3;
         }
-        if let Some((start, protein)) = current.take() {
-            if protein.len() >= min_aa {
-                out.push(Orf {
-                    frame,
-                    start,
-                    end: seq.len(),
-                    protein,
-                    terminated: false,
-                });
-            }
+        if let Some((start, protein)) = current.take()
+            && protein.len() >= min_aa
+        {
+            out.push(Orf {
+                frame,
+                start,
+                end: seq.len(),
+                protein,
+                terminated: false,
+            });
         }
     }
     out
@@ -144,21 +144,24 @@ mod tests {
         // out-of-frame Met at position 5 in +2 (→MV, unterminated).
         let orfs = find_orfs(b"AUGGCAUGGUAA", 1);
         assert_eq!(orfs.len(), 2);
-        assert!(orfs
-            .iter()
-            .any(|o| o.frame == Frame::Plus0 && o.protein.len() == 3));
-        assert!(orfs
-            .iter()
-            .any(|o| o.frame == Frame::Plus2 && o.protein.len() == 2));
+        assert!(
+            orfs.iter()
+                .any(|o| o.frame == Frame::Plus0 && o.protein.len() == 3)
+        );
+        assert!(
+            orfs.iter()
+                .any(|o| o.frame == Frame::Plus2 && o.protein.len() == 2)
+        );
     }
 
     #[test]
     fn finds_orf_with_leading_utr() {
         // CC-AUG-GCA-UAA: Met-Ala then stop, in frame +2
         let orfs = find_orfs(b"CCAUGGCAUAA", 1);
-        assert!(orfs
-            .iter()
-            .any(|o| o.frame == Frame::Plus2 && o.protein.len() == 2));
+        assert!(
+            orfs.iter()
+                .any(|o| o.frame == Frame::Plus2 && o.protein.len() == 2)
+        );
     }
 
     #[test]

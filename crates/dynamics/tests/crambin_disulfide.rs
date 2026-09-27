@@ -14,9 +14,9 @@
 //!      broken (wrong params, or the bond wasn't added at all) the
 //!      chain would unfold in 1-2 ps.
 
-use chem::standard_ff;
 use chem::AminoAcid;
-use dynamics::{run_langevin, LangevinOptions};
+use chem::standard_ff;
+use dynamics::{LangevinOptions, run_langevin};
 use geom::{build_topology_graph, rmsd_ca};
 use io::read_pdb;
 
@@ -38,10 +38,10 @@ fn cys_sg_indices(s: &geom::Structure) -> Vec<(usize, usize)> {
             }
             atom_idx += 1;
         }
-        if r.monomer.as_amino_acid() == Some(AminoAcid::Cys) {
-            if let Some(idx) = sg {
-                out.push((ri + 1, idx));
-            }
+        if r.monomer.as_amino_acid() == Some(AminoAcid::Cys)
+            && let Some(idx) = sg
+        {
+            out.push((ri + 1, idx));
         }
     }
     out

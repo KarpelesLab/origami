@@ -25,7 +25,7 @@
 //!   - bit 0: excluded (1-2 or 1-3 pair, skip non-bonded)
 //!   - bit 1: 1-4 pair (apply scaled LJ params + scaled Coulomb)
 
-use chem::{classify_atom, AtomType, ForceField, Monomer};
+use chem::{AtomType, ForceField, Monomer, classify_atom};
 use geom::{Structure, TopologyGraph};
 
 pub const EXCLUDED_BIT: u8 = 1 << 0;

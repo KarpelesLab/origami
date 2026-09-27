@@ -10,9 +10,9 @@
 
 use std::time::Instant;
 
-use chem::{standard_ff, AminoAcid};
+use chem::{AminoAcid, standard_ff};
 use dynamics::full_gpu_integrator::FullGpuIntegrator;
-use geom::{build_extended_chain, build_topology_graph, Vec3};
+use geom::{Vec3, build_extended_chain, build_topology_graph};
 use gpu::GpuContext;
 
 #[test]

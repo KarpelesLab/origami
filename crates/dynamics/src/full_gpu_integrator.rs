@@ -28,22 +28,22 @@
 //! correct.  At the trajectory scales the existing CPU integrator runs,
 //! that's typically true for batches of 20-50 steps at dt = 1 fs.
 
-use chem::{classify_atom, AtomType, Element, ForceField};
+use chem::{AtomType, Element, ForceField, classify_atom};
+use energy::DEFAULT_CUTOFF_A;
 use energy::forces_gb::GB_DEFAULT_CUTOFF_A_PUB;
 use energy::forces_nonbonded::ensure_verlet_list;
 use energy::gb::{
-    ensure_gb_verlet_list, hct_scale_pub, intrinsic_radius_pub, BORN_RADIUS_CUTOFF_A_PUB,
-    OBC_OFFSET_PUB,
+    BORN_RADIUS_CUTOFF_A_PUB, OBC_OFFSET_PUB, ensure_gb_verlet_list, hct_scale_pub,
+    intrinsic_radius_pub,
 };
 use energy::scratch::ForceScratch;
 use energy::units::{deg_to_rad, kcal_to_kj};
-use energy::DEFAULT_CUTOFF_A;
 use geom::{Structure, TopologyGraph, Vec3};
 use gpu::{
-    build_tile_interaction_list, morton_permutation, pair_list_to_csr, AngleTerm, BondTerm,
-    BondedSetup, DihedralTerm, GbSetup, GpuContext, ImproperTerm, IntegratorPipeline,
-    PerXShakeData, PeriodicTerm, SasaSmoothSetup, TileNonbondedSetup, VerletNonbondedSetup,
-    SASA_SMOOTH_DEFAULT_SIGMA_A,
+    AngleTerm, BondTerm, BondedSetup, DihedralTerm, GbSetup, GpuContext, ImproperTerm,
+    IntegratorPipeline, PerXShakeData, PeriodicTerm, SASA_SMOOTH_DEFAULT_SIGMA_A, SasaSmoothSetup,
+    TileNonbondedSetup, VerletNonbondedSetup, build_tile_interaction_list, morton_permutation,
+    pair_list_to_csr,
 };
 
 const KCAL_TO_KJ: f32 = 4.184;
@@ -126,8 +126,8 @@ impl FullGpuIntegrator {
         let ctx = GpuContext::get()?;
         let n = structure.atom_count();
         let atom_types = build_atom_types(structure); // CPU-indexed
-                                                      // First pass: gather per-atom data + initial positions in CPU
-                                                      // order — the same order `structure.residues` walks.
+        // First pass: gather per-atom data + initial positions in CPU
+        // order — the same order `structure.residues` walks.
         let mut masses_cpu: Vec<f32> = Vec::with_capacity(n);
         let mut charges_cpu: Vec<f32> = Vec::with_capacity(n);
         let mut rho_cpu: Vec<f32> = Vec::with_capacity(n);

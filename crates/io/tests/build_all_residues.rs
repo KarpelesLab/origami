@@ -1,4 +1,4 @@
-use chem::{classify, AminoAcid};
+use chem::{AminoAcid, classify};
 use geom::{build_extended_chain, measure};
 use io::write_pdb;
 

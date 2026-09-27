@@ -18,8 +18,8 @@
 //! each residue. The two structures must have identical residue
 //! sequences for the alignment to make sense.
 
-use crate::structure::Structure;
 use crate::Vec3;
+use crate::structure::Structure;
 use nalgebra::Matrix3;
 
 /// Cα RMSD between two structures whose residue sequences agree atom-

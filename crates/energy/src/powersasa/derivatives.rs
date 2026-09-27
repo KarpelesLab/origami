@@ -919,7 +919,7 @@ mod tests {
     /// given a reference position.
     #[test]
     fn vertex_point_matches_intersect_circles() {
-        use crate::powersasa::geometry::{intersect_circles, CircleIntersection};
+        use crate::powersasa::geometry::{CircleIntersection, intersect_circles};
         // Two caps at a generic configuration.
         let c1 = SmallCircle::new(Vec3::new(0.3, 0.5, 1.0), 0.4);
         let c2 = SmallCircle::new(Vec3::new(1.0, 0.2, -0.3), 0.3);

@@ -33,14 +33,14 @@
 use std::ops::Range;
 
 use chem::ForceField;
-use energy::{bonded::bonded_energy, gb_energy, nonbonded_energy, DEFAULT_CUTOFF_A};
-use energy::{total_force_with_scratch, ForceScratch};
+use energy::{DEFAULT_CUTOFF_A, bonded::bonded_energy, gb_energy, nonbonded_energy};
+use energy::{ForceScratch, total_force_with_scratch};
 use geom::{Structure, TopologyGraph, Vec3};
 use rayon::prelude::*;
 
 use crate::langevin::{
-    initialise_velocities_for_new_atoms, kinetic_energy_kj_mol, ACCEL_FACTOR,
-    BOLTZMANN_KJ_PER_MOL_K,
+    ACCEL_FACTOR, BOLTZMANN_KJ_PER_MOL_K, initialise_velocities_for_new_atoms,
+    kinetic_energy_kj_mol,
 };
 use crate::rng::Xoshiro256pp;
 use crate::shake;

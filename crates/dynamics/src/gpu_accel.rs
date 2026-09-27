@@ -26,18 +26,18 @@
 //! ~3000 atoms the GPU wins.  The `LangevinOptions::use_gpu` flag is
 //! a manual opt-in for now — auto-thresholding is step 3g.
 
-use chem::{classify_atom, AtomType, ForceField};
+use chem::{AtomType, ForceField, classify_atom};
 use energy::forces_gb::GB_DEFAULT_CUTOFF_A_PUB;
 use energy::forces_nonbonded::ensure_verlet_list;
 use energy::gb::{
-    ensure_gb_verlet_list, hct_scale_pub, intrinsic_radius_pub, BORN_RADIUS_CUTOFF_A_PUB,
-    OBC_OFFSET_PUB,
+    BORN_RADIUS_CUTOFF_A_PUB, OBC_OFFSET_PUB, ensure_gb_verlet_list, hct_scale_pub,
+    intrinsic_radius_pub,
 };
-use energy::scratch::{ForceScratch, EXCLUDED_BIT, ONE_FOUR_BIT};
+use energy::scratch::{EXCLUDED_BIT, ForceScratch, ONE_FOUR_BIT};
 use geom::Structure;
 use gpu::{
-    pair_list_to_csr, GbPipeline, GbSetup, GpuContext, VerletNonbondedPipeline,
-    VerletNonbondedSetup,
+    GbPipeline, GbSetup, GpuContext, VerletNonbondedPipeline, VerletNonbondedSetup,
+    pair_list_to_csr,
 };
 
 const KCAL_TO_KJ: f32 = 4.184;

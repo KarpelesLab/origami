@@ -72,17 +72,17 @@ fn write_atoms_and_ter<W: Write>(
         // reader doesn't auto-fuse the previous chain's last residue
         // to the next chain's first residue with a phantom peptide
         // bond (insulin needs this — A21's C must not bond to B1's N).
-        if let Some(prev) = prev_chain {
-            if prev != residue.chain {
-                writeln!(
-                    writer,
-                    "TER   {:>5}      {:>3} {chain}{res_seq:>4}",
-                    serial,
-                    "",
-                    chain = prev,
-                    res_seq = res_idx as u32,
-                )?;
-            }
+        if let Some(prev) = prev_chain
+            && prev != residue.chain
+        {
+            writeln!(
+                writer,
+                "TER   {:>5}      {:>3} {chain}{res_seq:>4}",
+                serial,
+                "",
+                chain = prev,
+                res_seq = res_idx as u32,
+            )?;
         }
         let res_seq = (res_idx + 1) as u32;
         // Per-monomer-kind residue name: proteins get ALA/ARG/…, RNA

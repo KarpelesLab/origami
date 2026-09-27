@@ -10,9 +10,9 @@
 //! ~10-second exploratory search, not an acceptance test.
 
 use chem::{Element, Nucleotide};
+use geom::Vec3;
 use geom::nerf::place_atom;
 use geom::structure::Monomer;
-use geom::Vec3;
 use std::f64::consts::PI;
 
 #[test]
@@ -77,7 +77,7 @@ fn grid_search_branch_torsions_for_ring_closure() {
                     let c1 = place_atom(c4, c3, c2, c2_c1, c3_c2_c1, deg(c1_t));
                     let dist = (c1 - o4).norm();
                     let err = (dist - 1.414).abs();
-                    if best.map_or(true, |b: (f64, f64, f64, f64)| err < b.3) {
+                    if best.is_none_or(|b: (f64, f64, f64, f64)| err < b.3) {
                         best = Some((o4_t, c2_t, c1_t, err));
                     }
                 }
@@ -183,7 +183,7 @@ fn grid_search_op_torsions_for_no_h3_op_clash() {
             let d_op1 = (h3_0 - op1).norm();
             let d_op2 = (h3_0 - op2).norm();
             let min_d = d_op1.min(d_op2);
-            if best.map_or(true, |b: (f64, f64, f64, f64)| min_d > b.2) {
+            if best.is_none_or(|b: (f64, f64, f64, f64)| min_d > b.2) {
                 best = Some((t1, t2, min_d, d_op1.max(d_op2)));
             }
             t2 += step;
@@ -245,7 +245,7 @@ fn grid_search_o2_torsion_for_no_o2_c1_clash() {
     while t <= 180.0 {
         let o2 = place_atom(c4, c3, c2, c2_o2, c3_c2_o2, deg(t));
         let d = (o2 - c1).norm();
-        if best.map_or(true, |b| d > b.1) {
+        if best.is_none_or(|b| d > b.1) {
             best = Some((t, d));
         }
         t += step;

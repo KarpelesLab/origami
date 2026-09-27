@@ -4,8 +4,8 @@
 //! we just check that the gradient remains well-behaved (no NaN, no
 //! explosion, energy still drops).
 
-use chem::{standard_ff, AminoAcid};
-use dynamics::{minimize, Algorithm, MinimizeOptions};
+use chem::{AminoAcid, standard_ff};
+use dynamics::{Algorithm, MinimizeOptions, minimize};
 use geom::{build_extended_chain, build_topology_graph};
 
 #[test]

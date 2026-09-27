@@ -9,7 +9,7 @@
 //! where q ∈ {r, θ, φ, ω}, then distribute it across atoms via the chain
 //! rule for q.
 
-use chem::{classify_atom, AtomType, ForceField};
+use chem::{AtomType, ForceField, classify_atom};
 use geom::{Structure, TopologyGraph, Vec3};
 
 use crate::units::{deg_to_rad, kcal_to_kj};
@@ -262,9 +262,9 @@ pub fn add_improper_forces(
 mod tests {
     use super::*;
     use crate::bonded::{
-        angle_energy, bond_energy, dihedral_energy, improper_energy, BondedBreakdown,
+        BondedBreakdown, angle_energy, bond_energy, dihedral_energy, improper_energy,
     };
-    use chem::{standard_ff, AminoAcid};
+    use chem::{AminoAcid, standard_ff};
     use geom::{build_extended_chain, build_topology_graph};
 
     /// Compare an analytical force component to a central-difference

@@ -15,8 +15,8 @@
 //!
 //! Falls back to a no-op early-return if no GPU adapter is available.
 
-use chem::{standard_ff, AminoAcid};
-use dynamics::{run_langevin, LangevinOptions};
+use chem::{AminoAcid, standard_ff};
+use dynamics::{LangevinOptions, run_langevin};
 use geom::{build_extended_chain, build_topology_graph};
 use gpu::GpuContext;
 

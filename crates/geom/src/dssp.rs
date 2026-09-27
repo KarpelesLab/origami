@@ -22,8 +22,8 @@
 //! for SS assignment; we still keep the Ramachandran version around
 //! as a fallback for structures without explicit hydrogens.
 
-use crate::structure::Structure;
 use crate::Vec3;
+use crate::structure::Structure;
 
 /// Kabsch-Sander H-bond energy threshold (kcal/mol).
 const HBOND_E_THRESHOLD: f64 = -0.5;

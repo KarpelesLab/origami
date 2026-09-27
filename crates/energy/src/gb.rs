@@ -408,7 +408,7 @@ fn pairwise_descreening(r: f64, rho_i_tilde: f64, s_rho_j_tilde: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chem::{standard_ff, AminoAcid};
+    use chem::{AminoAcid, standard_ff};
     use geom::build_extended_chain;
 
     #[test]

@@ -13,11 +13,11 @@
 
 use std::time::Instant;
 
-use chem::{standard_ff, AminoAcid, Element};
+use chem::{AminoAcid, Element, standard_ff};
 use energy::powersasa::powersasa_energy;
 use energy::sasa::sasa_per_atom_with_dots;
-use geom::{build_extended_chain, Vec3};
-use gpu::{GpuContext, SasaPipeline, SasaSetup, SASA_N_DOTS};
+use geom::{Vec3, build_extended_chain};
+use gpu::{GpuContext, SASA_N_DOTS, SasaPipeline, SasaSetup};
 
 const PROBE_RADIUS_A: f64 = 1.4;
 
@@ -160,7 +160,11 @@ fn bench_gpu_sasa_vs_cpu() {
 
         eprintln!(
             "{n_residues:3} residues / {n:5} atoms  |  GPU dot: {:7.3} ms  |  CPU dot: {:7.3} ms  |  CPU analytical: {:7.3} ms  |  GPU vs CPU dot: {:.1}×  |  GPU vs CPU analytical: {:.1}×",
-            gpu_ms, cpu_dot_ms, cpu_ana_ms, cpu_dot_ms / gpu_ms, cpu_ana_ms / gpu_ms,
+            gpu_ms,
+            cpu_dot_ms,
+            cpu_ana_ms,
+            cpu_dot_ms / gpu_ms,
+            cpu_ana_ms / gpu_ms,
         );
     }
 }

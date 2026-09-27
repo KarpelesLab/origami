@@ -1,9 +1,9 @@
 //! M6 acceptance: cotranslate grows a chain residue-by-residue, stays
 //! finite, and produces a multi-frame trajectory.
 
-use chem::{standard_ff, AminoAcid};
+use chem::{AminoAcid, standard_ff};
 use dynamics::{
-    run_cotranslate, CylindricalTunnel, ExternalPotential, LangevinOptions, UniformRibosome,
+    CylindricalTunnel, ExternalPotential, LangevinOptions, UniformRibosome, run_cotranslate,
 };
 use geom::Vec3;
 

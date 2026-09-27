@@ -9,9 +9,9 @@
 //! `record_all` chain (zero → bond → angle → dihedral → improper)
 //! produces the sum.
 
-use chem::{classify_atom, standard_ff, AminoAcid, AtomType, ForceField};
+use chem::{AminoAcid, AtomType, ForceField, classify_atom, standard_ff};
 use energy::units::{deg_to_rad, kcal_to_kj};
-use geom::{build_extended_chain, build_topology_graph, Structure, TopologyGraph, Vec3};
+use geom::{Structure, TopologyGraph, Vec3, build_extended_chain, build_topology_graph};
 use gpu::{
     AngleTerm, BondTerm, BondedPipeline, BondedSetup, DihedralTerm, GpuContext, ImproperTerm,
     PeriodicTerm,

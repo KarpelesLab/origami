@@ -4,8 +4,8 @@
 
 use chem::{AminoAcid, Element};
 use energy::sasa::sasa_per_atom_with_dots;
-use geom::{build_extended_chain, Vec3};
-use gpu::{GpuContext, SasaPipeline, SasaSetup, SASA_N_DOTS};
+use geom::{Vec3, build_extended_chain};
+use gpu::{GpuContext, SASA_N_DOTS, SasaPipeline, SasaSetup};
 
 const PROBE_RADIUS_A: f64 = 1.4;
 

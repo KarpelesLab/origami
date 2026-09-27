@@ -15,9 +15,9 @@
 //!   3. Per-step rise stays positive and per-step twist stays
 //!      positive (helix didn't flip to left-handed or extend out).
 
-use chem::{standard_ff, Nucleotide};
-use dynamics::{minimize, run_langevin, Algorithm, LangevinOptions, MinimizeOptions};
-use geom::{build_a_form_rna_chain, build_topology_graph, rmsd_p, Vec3};
+use chem::{Nucleotide, standard_ff};
+use dynamics::{Algorithm, LangevinOptions, MinimizeOptions, minimize, run_langevin};
+use geom::{Vec3, build_a_form_rna_chain, build_topology_graph, rmsd_p};
 
 fn fit_helix_axis(p: &[Vec3]) -> (Vec3, Vec3) {
     // Power iteration on the (3×3) variance matrix Σ (p_i - c)(p_i - c)ᵀ.

@@ -4,12 +4,12 @@
 //! pipeline (Monomer dispatch → CHARMM27 typing → CHARMM27 parameters
 //! → bonded + LJ + Coulomb + GB → integrator) is wired correctly.
 
-use chem::{standard_ff, Nucleotide};
+use chem::{Nucleotide, standard_ff};
 use dynamics::energy_eval::total_energy;
-use dynamics::{minimize, run_langevin, Algorithm, LangevinOptions, MinimizeOptions};
+use dynamics::{Algorithm, LangevinOptions, MinimizeOptions, minimize, run_langevin};
 use energy::bonded::bonded_energy;
 use energy::gb::gb_energy;
-use energy::nonbonded::{nonbonded_energy, DEFAULT_CUTOFF_A};
+use energy::nonbonded::{DEFAULT_CUTOFF_A, nonbonded_energy};
 use geom::{build_extended_rna_chain, build_topology_graph};
 
 /// Build a 4-residue UCAG, compute its energy, and assert every term

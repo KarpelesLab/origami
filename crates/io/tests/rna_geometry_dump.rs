@@ -2,7 +2,7 @@
 //! chain — C1'-C1' distance, base-centroid distance, etc.
 
 use chem::Nucleotide;
-use geom::{build_extended_rna_chain, Vec3};
+use geom::{Vec3, build_extended_rna_chain};
 
 #[test]
 fn dump_inter_residue_distances() {

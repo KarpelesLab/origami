@@ -10,7 +10,7 @@ use geom::{Structure, TopologyGraph};
 use crate::energy_eval::{
     apply_displacement, flatten_vec3, linf_norm, total_energy_with_options, total_force_opts,
 };
-use crate::line_search::{backtracking, LineSearchOptions};
+use crate::line_search::{LineSearchOptions, backtracking};
 
 #[derive(Debug, Clone, Copy)]
 pub struct SdOptions {
@@ -158,9 +158,9 @@ pub fn steepest_descent(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chem::{standard_ff, AminoAcid, Element};
+    use chem::{AminoAcid, Element, standard_ff};
     use geom::structure::{PlacedAtom, PlacedResidue};
-    use geom::{build_extended_chain, build_topology_graph, Vec3};
+    use geom::{Vec3, build_extended_chain, build_topology_graph};
 
     #[test]
     fn two_atoms_relax_to_equilibrium() {

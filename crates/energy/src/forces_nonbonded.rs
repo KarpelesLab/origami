@@ -4,7 +4,7 @@
 //! exactly: 1-2 and 1-3 pairs are skipped, 1-4 pairs use the special CHARMM
 //! 1-4 LJ parameters when present, full Coulomb strength is applied.
 
-use chem::{classify_atom, AtomType, ForceField};
+use chem::{AtomType, ForceField, classify_atom};
 use geom::{CellList, Structure, TopologyGraph, Vec3};
 use rayon::prelude::*;
 
@@ -331,7 +331,7 @@ mod tests {
     use super::*;
     use crate::nonbonded::nonbonded_energy;
     use chem::Element;
-    use chem::{standard_ff, AminoAcid};
+    use chem::{AminoAcid, standard_ff};
     use geom::{
         build_extended_chain, build_topology_graph, structure::PlacedAtom, structure::PlacedResidue,
     };

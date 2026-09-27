@@ -2,19 +2,19 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
-use chem::{standard_ff, AminoAcid, Nucleotide};
+use anyhow::{Context, Result, anyhow};
+use chem::{AminoAcid, Nucleotide, standard_ff};
 use clap::{Parser, Subcommand, ValueEnum};
 use dynamics::{
-    minimize, run_cotranslate, run_langevin, Algorithm, CylindricalTunnel, LangevinOptions,
-    MinimizeOptions, Ribosome, UniformRibosome,
+    Algorithm, CylindricalTunnel, LangevinOptions, MinimizeOptions, Ribosome, UniformRibosome,
+    minimize, run_cotranslate, run_langevin,
 };
-use energy::{bonded::bonded_energy, gb_energy, nonbonded_energy, sasa_energy, DEFAULT_CUTOFF_A};
+use energy::{DEFAULT_CUTOFF_A, bonded::bonded_energy, gb_energy, nonbonded_energy, sasa_energy};
 use geom::Vec3;
 use geom::{build_extended_chain, build_extended_rna_chain, build_topology_graph};
 use io::{
-    read_pdb, read_pdb_trajectory, render, structure_bounds, write_pdb, write_pdb_trajectory,
-    RenderOptions,
+    RenderOptions, read_pdb, read_pdb_trajectory, render, structure_bounds, write_pdb,
+    write_pdb_trajectory,
 };
 use translate::translate::{one_letter_string, three_letter_string};
 use translate::{find_orfs, parse_fasta, translate_codons};
@@ -900,10 +900,7 @@ fn run_cotranslate_cmd(
         temperature_k,
         friction_ps_inv,
         if with_tunnel {
-            format!(
-                ", tunnel(R={} Å L={} Å)",
-                tunnel_radius_a, tunnel_length_a
-            )
+            format!(", tunnel(R={} Å L={} Å)", tunnel_radius_a, tunnel_length_a)
         } else {
             String::new()
         },
@@ -1252,10 +1249,10 @@ fn run_analyze(
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_default()
                 ));
-                if let Some(parent) = p.parent() {
-                    if !parent.as_os_str().is_empty() {
-                        fs::create_dir_all(parent).ok();
-                    }
+                if let Some(parent) = p.parent()
+                    && !parent.as_os_str().is_empty()
+                {
+                    fs::create_dir_all(parent).ok();
                 }
                 let mut f =
                     fs::File::create(&p).with_context(|| format!("creating {}", p.display()))?;

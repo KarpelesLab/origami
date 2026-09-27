@@ -3,11 +3,11 @@
 //! extended-NeRF builder.  Locks in the win the A-form torsion set
 //! gives us as an RNA dynamics starting point.
 
-use chem::{standard_ff, Nucleotide};
+use chem::{Nucleotide, standard_ff};
 use dynamics::energy_eval::total_energy;
 use energy::bonded::bonded_energy;
 use energy::gb::gb_energy;
-use energy::nonbonded::{nonbonded_energy, DEFAULT_CUTOFF_A};
+use energy::nonbonded::{DEFAULT_CUTOFF_A, nonbonded_energy};
 use geom::{build_a_form_rna_chain, build_extended_rna_chain, build_topology_graph};
 
 fn breakdown(label: &str, s: &geom::Structure, g: &geom::TopologyGraph, ff: &chem::ForceField) {

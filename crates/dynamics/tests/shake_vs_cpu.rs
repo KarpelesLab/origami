@@ -8,10 +8,10 @@
 
 use std::sync::Arc;
 
-use chem::{classify_atom, standard_ff, AminoAcid, AtomType, Element};
-use dynamics::shake::{build_h_bond_constraints, shake_iterate, Constraint as CpuConstraint};
-use geom::{build_extended_chain, build_topology_graph, Vec3};
-use gpu::{build_per_x_shake_data, GpuContext, ShakeConstraint, ShakePipeline};
+use chem::{AminoAcid, AtomType, Element, classify_atom, standard_ff};
+use dynamics::shake::{Constraint as CpuConstraint, build_h_bond_constraints, shake_iterate};
+use geom::{Vec3, build_extended_chain, build_topology_graph};
+use gpu::{GpuContext, ShakeConstraint, ShakePipeline, build_per_x_shake_data};
 
 fn atom_types_for(s: &geom::Structure) -> Vec<AtomType> {
     let mut out = Vec::with_capacity(s.atom_count());

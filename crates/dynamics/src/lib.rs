@@ -22,12 +22,12 @@ pub use full_gpu_integrator::FullGpuIntegrator;
 pub use gpu_accel::GpuAccelerator;
 
 pub use cotranslate::{
-    run_cotranslate, CodonPacedRibosome, CotranslateFrame, CylindricalTunnel, ExternalPotential,
-    MrnaParseError, Ribosome, UniformRibosome,
+    CodonPacedRibosome, CotranslateFrame, CylindricalTunnel, ExternalPotential, MrnaParseError,
+    Ribosome, UniformRibosome, run_cotranslate,
 };
 pub use langevin::{
-    initialise_velocities_for_new_atoms, instant_temperature_k, run_langevin, LangevinFrame,
-    LangevinOptions, LangevinSummary, BOLTZMANN_KJ_PER_MOL_K,
+    BOLTZMANN_KJ_PER_MOL_K, LangevinFrame, LangevinOptions, LangevinSummary,
+    initialise_velocities_for_new_atoms, instant_temperature_k, run_langevin,
 };
-pub use minimize::{minimize, Algorithm, MinimizationResult, MinimizeOptions};
+pub use minimize::{Algorithm, MinimizationResult, MinimizeOptions, minimize};
 pub use rng::Xoshiro256pp;

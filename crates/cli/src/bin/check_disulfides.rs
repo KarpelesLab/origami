@@ -36,11 +36,11 @@ fn main() {
     let mut detected = 0;
     for (i, (ri, sgi)) in sg_per_res.iter().enumerate() {
         for (rj, sgj) in sg_per_res.iter().skip(i + 1) {
-            if let (Some(a), Some(b)) = (sgi, sgj) {
-                if g.is_bonded(*a, *b) {
-                    println!("  detected disulfide: Cys{} -- Cys{}", ri + 1, rj + 1);
-                    detected += 1;
-                }
+            if let (Some(a), Some(b)) = (sgi, sgj)
+                && g.is_bonded(*a, *b)
+            {
+                println!("  detected disulfide: Cys{} -- Cys{}", ri + 1, rj + 1);
+                detected += 1;
             }
         }
     }

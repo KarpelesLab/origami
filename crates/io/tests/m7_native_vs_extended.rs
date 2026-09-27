@@ -8,7 +8,7 @@
 
 use chem::standard_ff;
 use energy::bonded::bonded_energy;
-use energy::{gb_energy, nonbonded_energy, DEFAULT_CUTOFF_A};
+use energy::{DEFAULT_CUTOFF_A, gb_energy, nonbonded_energy};
 use geom::{build_extended_chain, build_topology_graph};
 use io::read_pdb;
 

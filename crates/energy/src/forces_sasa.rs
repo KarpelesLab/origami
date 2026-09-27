@@ -17,7 +17,7 @@ use geom::{Structure, Vec3};
 
 use crate::powersasa::area::accessible_area_with_components;
 use crate::powersasa::arrangement::{build_caps, count_accessible_components, find_boundary};
-use crate::powersasa::{surface_tension_kcal, vdw_radius, PROBE_RADIUS_A};
+use crate::powersasa::{PROBE_RADIUS_A, surface_tension_kcal, vdw_radius};
 use crate::units::kcal_to_kj;
 
 /// Central-difference step in Å. 1e-4 keeps both terms within float
@@ -181,8 +181,8 @@ fn compute_atom_area(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chem::{standard_ff, AminoAcid};
-    use geom::{build_extended_chain, structure::PlacedAtom, structure::PlacedResidue, Structure};
+    use chem::{AminoAcid, standard_ff};
+    use geom::{Structure, build_extended_chain, structure::PlacedAtom, structure::PlacedResidue};
 
     #[test]
     fn isolated_atom_has_zero_sasa_force() {

@@ -3,8 +3,8 @@
 use chem::ForceField;
 use geom::{Structure, TopologyGraph};
 
-use crate::lbfgs::{lbfgs, LbfgsOptions, LbfgsResult};
-use crate::steepest_descent::{steepest_descent, SdOptions, SdResult};
+use crate::lbfgs::{LbfgsOptions, LbfgsResult, lbfgs};
+use crate::steepest_descent::{SdOptions, SdResult, steepest_descent};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Algorithm {

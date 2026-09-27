@@ -19,7 +19,7 @@
 //!     before MD.
 
 use chem::standard_ff;
-use dynamics::{minimize, run_langevin, Algorithm, LangevinOptions, MinimizeOptions};
+use dynamics::{Algorithm, LangevinOptions, MinimizeOptions, minimize, run_langevin};
 use geom::{build_topology_graph, rmsd_p};
 use io::read_pdb;
 

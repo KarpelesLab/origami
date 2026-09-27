@@ -7,9 +7,9 @@
 //! Run with `cargo test -p gpu --release --test nonbonded_bench --
 //! --ignored --nocapture`.
 
-use chem::{classify_atom, standard_ff, AminoAcid, AtomType};
+use chem::{AminoAcid, AtomType, classify_atom, standard_ff};
 use geom::{build_extended_chain, build_topology_graph};
-use gpu::{nonbonded_force_gpu, GpuContext, NonbondedPipeline, NonbondedSetup};
+use gpu::{GpuContext, NonbondedPipeline, NonbondedSetup, nonbonded_force_gpu};
 use std::time::Instant;
 
 const KCAL_TO_KJ: f32 = 4.184;

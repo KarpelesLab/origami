@@ -6,7 +6,7 @@
 //!
 //! Run with: `cargo test -p io --release --test rna_clash_audit -- --nocapture`
 
-use chem::{classify_atom, standard_ff, Nucleotide};
+use chem::{Nucleotide, classify_atom, standard_ff};
 use geom::{build_extended_rna_chain, build_topology_graph};
 
 #[test]

@@ -16,8 +16,8 @@ use std::io::{BufRead, BufReader, Read};
 use chem::{AminoAcid, Element, Monomer, Nucleotide};
 use thiserror::Error;
 
-use geom::structure::{PlacedAtom, PlacedResidue, Structure};
 use geom::Vec3;
+use geom::structure::{PlacedAtom, PlacedResidue, Structure};
 
 #[derive(Debug, Error)]
 pub enum PdbReadError {
@@ -25,7 +25,9 @@ pub enum PdbReadError {
     Io(#[from] std::io::Error),
     #[error("line {0}: malformed ATOM record: {1}")]
     Malformed(usize, String),
-    #[error("line {0}: residue name {1:?} is not one of the 20 standard amino acids or 4 ribonucleotides")]
+    #[error(
+        "line {0}: residue name {1:?} is not one of the 20 standard amino acids or 4 ribonucleotides"
+    )]
     UnknownResidue(usize, String),
     #[error("line {0}: atom {1:?} is not part of residue {2:?}")]
     UnknownAtom(usize, String, Monomer),

@@ -231,7 +231,7 @@ pub fn add_gb_forces_with_cutoff(
 mod tests {
     use super::*;
     use crate::gb::gb_energy;
-    use chem::{standard_ff, AminoAcid};
+    use chem::{AminoAcid, standard_ff};
     use geom::build_extended_chain;
 
     #[test]

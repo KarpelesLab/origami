@@ -3,8 +3,8 @@
 //!
 //! All return values in kJ/mol.
 
-use chem::{classify_atom, AtomType, ForceField};
-use geom::{measure, Structure, TopologyGraph};
+use chem::{AtomType, ForceField, classify_atom};
+use geom::{Structure, TopologyGraph, measure};
 
 use crate::units::{deg_to_rad, kcal_to_kj};
 
@@ -211,7 +211,7 @@ pub fn improper_energy(
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
-    use chem::{standard_ff, AminoAcid};
+    use chem::{AminoAcid, standard_ff};
     use geom::{build_extended_chain, build_topology_graph};
 
     #[test]

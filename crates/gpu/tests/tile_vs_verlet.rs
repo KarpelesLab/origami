@@ -9,12 +9,12 @@
 //!
 //! Runs both kernels on the same input, compares per-atom forces.
 
-use chem::{classify_atom, standard_ff, AminoAcid, AtomType};
+use chem::{AminoAcid, AtomType, classify_atom, standard_ff};
 use energy::DEFAULT_CUTOFF_A;
 use geom::{build_extended_chain, build_topology_graph};
 use gpu::{
-    build_tile_interaction_list, morton_permutation, pair_list_to_csr, GpuContext,
-    TileNonbondedPipeline, TileNonbondedSetup, VerletNonbondedPipeline, VerletNonbondedSetup,
+    GpuContext, TileNonbondedPipeline, TileNonbondedSetup, VerletNonbondedPipeline,
+    VerletNonbondedSetup, build_tile_interaction_list, morton_permutation, pair_list_to_csr,
 };
 
 const KCAL_TO_KJ: f32 = 4.184;

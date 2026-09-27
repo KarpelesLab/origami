@@ -40,24 +40,24 @@ pub mod spatial_sort;
 pub mod tile_list;
 pub mod tile_nonbonded;
 
-pub use baoab::{make_rng_state, BaoabPipeline};
+pub use baoab::{BaoabPipeline, make_rng_state};
 pub use bonded::{
     AngleTerm, BondTerm, BondedPipeline, BondedSetup, DihedralTerm, ImproperTerm, PeriodicTerm,
 };
 pub use context::GpuContext;
 pub use gb::{GbPipeline, GbSetup};
 pub use integrator::IntegratorPipeline;
-pub use nonbonded::{nonbonded_force_gpu, NonbondedPipeline, NonbondedSetup};
-pub use nonbonded_verlet::{pair_list_to_csr, VerletNonbondedPipeline, VerletNonbondedSetup};
-pub use sasa::{fibonacci_unit_sphere_f32, SasaPipeline, SasaSetup, SASA_N_DOTS};
+pub use nonbonded::{NonbondedPipeline, NonbondedSetup, nonbonded_force_gpu};
+pub use nonbonded_verlet::{VerletNonbondedPipeline, VerletNonbondedSetup, pair_list_to_csr};
+pub use sasa::{SASA_N_DOTS, SasaPipeline, SasaSetup, fibonacci_unit_sphere_f32};
 pub use sasa_smooth::{
-    SasaSmoothPipeline, SasaSmoothSetup, SASA_SMOOTH_DEFAULT_SIGMA_A, SASA_SMOOTH_N_DOTS,
+    SASA_SMOOTH_DEFAULT_SIGMA_A, SASA_SMOOTH_N_DOTS, SasaSmoothPipeline, SasaSmoothSetup,
 };
 pub use shake::{
-    build_per_x_shake_data, PerXShakeData, ShakeConstraint, ShakePipeline, MAX_H_PER_X,
+    MAX_H_PER_X, PerXShakeData, ShakeConstraint, ShakePipeline, build_per_x_shake_data,
 };
-pub use spatial_sort::{morton_code, morton_permutation, TILE_SIZE};
-pub use tile_list::{build_tile_interaction_list, TileInteractionList};
+pub use spatial_sort::{TILE_SIZE, morton_code, morton_permutation};
+pub use tile_list::{TileInteractionList, build_tile_interaction_list};
 pub use tile_nonbonded::{TileNonbondedPipeline, TileNonbondedSetup};
 /// Re-export the wgpu crate so downstream consumers (e.g.
 /// `dynamics::GpuAccelerator`) can record into our pipelines'

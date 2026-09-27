@@ -25,7 +25,7 @@
 //! the cutoff (no impulse / energy drift). The short-r limit recovers
 //! bare Coulomb up to a constant offset.
 
-use chem::{classify_atom, AtomType, ForceField};
+use chem::{AtomType, ForceField, classify_atom};
 use geom::{CellList, Structure, TopologyGraph, Vec3};
 
 use crate::units::kcal_to_kj;
@@ -181,7 +181,7 @@ pub fn nonbonded_energy(
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
-    use chem::{standard_ff, AminoAcid};
+    use chem::{AminoAcid, standard_ff};
     use geom::{build_extended_chain, build_topology_graph};
 
     #[test]

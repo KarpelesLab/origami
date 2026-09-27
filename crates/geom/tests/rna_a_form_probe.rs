@@ -33,7 +33,9 @@ fn probe_chi_offset() {
         let c2 = r.position("C2'").unwrap();
         let chi_canon = measure::dihedral(o4, c1, n9, c4).to_degrees();
         let chi_internal = measure::dihedral(c3, c2, c1, n9).to_degrees();
-        eprintln!("{label}: internal C3'-C2'-C1'-N9 = {chi_internal:.1}°, canonical O4'-C1'-N9-C4 = {chi_canon:.1}°");
+        eprintln!(
+            "{label}: internal C3'-C2'-C1'-N9 = {chi_internal:.1}°, canonical O4'-C1'-N9-C4 = {chi_canon:.1}°"
+        );
     }
 }
 

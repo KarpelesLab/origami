@@ -8,8 +8,8 @@
 //! peptide-bond geometry and side chains have variable size; Cα tracks
 //! tertiary motion cleanly.
 
-use crate::structure::Structure;
 use crate::Vec3;
+use crate::structure::Structure;
 
 /// Radius of gyration computed from Cα positions:
 ///   Rg² = (1/N) Σ |r_i − r_centroid|²

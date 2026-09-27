@@ -12,9 +12,9 @@
 //! Bit-by-bit agreement with CPU is impossible (different RNG +
 //! f32 accumulation), so we only assert statistical sanity.
 
-use chem::{classify_atom, standard_ff, AminoAcid, AtomType, Element, ForceField};
+use chem::{AminoAcid, AtomType, Element, ForceField, classify_atom, standard_ff};
 use energy::units::{deg_to_rad, kcal_to_kj};
-use geom::{build_extended_chain, build_topology_graph, Structure, TopologyGraph};
+use geom::{Structure, TopologyGraph, build_extended_chain, build_topology_graph};
 use gpu::{
     AngleTerm, BondTerm, BondedSetup, DihedralTerm, GbSetup, GpuContext, ImproperTerm,
     IntegratorPipeline, PeriodicTerm, VerletNonbondedSetup,

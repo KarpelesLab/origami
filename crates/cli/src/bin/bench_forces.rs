@@ -13,7 +13,7 @@ use energy::forces_gb::add_gb_forces;
 use energy::forces_nonbonded::add_nonbonded_forces;
 use energy::forces_sasa::add_sasa_forces;
 use energy::nonbonded::DEFAULT_CUTOFF_A;
-use geom::{build_topology_graph, Vec3};
+use geom::{Vec3, build_topology_graph};
 use io::read_pdb;
 
 fn timeit<F: FnMut()>(label: &str, n_iter: usize, mut f: F) {

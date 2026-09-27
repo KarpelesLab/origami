@@ -6,9 +6,9 @@
 //! even though the smooth area itself is an approximation of the
 //! true SASA.
 
-use chem::{standard_ff, AminoAcid, Element};
-use geom::{build_extended_chain, Vec3};
-use gpu::{GpuContext, SasaSmoothPipeline, SasaSmoothSetup, SASA_SMOOTH_DEFAULT_SIGMA_A};
+use chem::{AminoAcid, Element, standard_ff};
+use geom::{Vec3, build_extended_chain};
+use gpu::{GpuContext, SASA_SMOOTH_DEFAULT_SIGMA_A, SasaSmoothPipeline, SasaSmoothSetup};
 
 const PROBE_RADIUS_A: f64 = 1.4;
 

@@ -142,7 +142,7 @@ mod tests {
     use crate::gb::compute_born_inputs;
     use crate::nonbonded::nonbonded_energy;
     use crate::units::kcal_to_kj;
-    use chem::{standard_ff, AminoAcid};
+    use chem::{AminoAcid, standard_ff};
     use geom::{build_extended_chain, build_topology_graph};
 
     fn bump(s: &mut Structure, atom_idx: usize, axis: usize, eps: f64) {

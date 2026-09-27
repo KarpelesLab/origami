@@ -26,7 +26,7 @@
 //! continuous gradients can come later if the cutoff ringing turns
 //! out to matter for a quantity we care about.
 
-use chem::{classify_atom, AtomType, CmapGrid, ForceField};
+use chem::{AtomType, CmapGrid, ForceField, classify_atom};
 use geom::{Structure, TopologyGraph};
 
 use crate::units::kcal_to_kj;
@@ -295,7 +295,7 @@ pub fn add_cmap_forces(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chem::{standard_ff, AminoAcid};
+    use chem::{AminoAcid, standard_ff};
     use geom::build_extended_chain;
 
     #[test]

@@ -246,10 +246,9 @@ pub fn build_topology_graph(structure: &Structure) -> TopologyGraph {
                 if ri > 0
                     && structure.residues[ri - 1].chain == res.chain
                     && structure.residues[ri - 1].monomer.is_rna()
+                    && let (Some(prev_o3), Some(p)) = (lookup(ri - 1, "O3'"), lookup(ri, "P"))
                 {
-                    if let (Some(prev_o3), Some(p)) = (lookup(ri - 1, "O3'"), lookup(ri, "P")) {
-                        add_bond(&mut bonds, prev_o3, p);
-                    }
+                    add_bond(&mut bonds, prev_o3, p);
                 }
             }
         }

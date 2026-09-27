@@ -13,9 +13,9 @@
 
 use std::time::Instant;
 
-use chem::{standard_ff, AminoAcid};
-use dynamics::{full_gpu_integrator::FullGpuIntegrator, run_langevin, LangevinOptions};
-use geom::{build_extended_chain, build_topology_graph, Vec3};
+use chem::{AminoAcid, standard_ff};
+use dynamics::{LangevinOptions, full_gpu_integrator::FullGpuIntegrator, run_langevin};
+use geom::{Vec3, build_extended_chain, build_topology_graph};
 use gpu::GpuContext;
 
 fn build_chain(n_residues: usize) -> geom::Structure {

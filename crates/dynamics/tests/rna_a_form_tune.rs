@@ -16,9 +16,9 @@
 //! shift with γ via the Δγ-rotation-around-C5'-C4' rule the builder
 //! comment explains.
 
-use chem::{standard_ff, Nucleotide};
+use chem::{Nucleotide, standard_ff};
 use geom::builder::rna_ic::RnaTorsionSet;
-use geom::{build_rna_chain_with_torsions, build_topology_graph, Vec3};
+use geom::{Vec3, build_rna_chain_with_torsions, build_topology_graph};
 use std::f64::consts::PI;
 
 fn deg(d: f64) -> f64 {
@@ -132,7 +132,7 @@ fn grid_search_gamma_epsilon_for_canonical_a_form() {
     let ff = standard_ff();
     let total_energy = |s: &geom::Structure| -> f64 {
         use energy::bonded::bonded_energy;
-        use energy::{gb_energy, nonbonded_energy, DEFAULT_CUTOFF_A};
+        use energy::{DEFAULT_CUTOFF_A, gb_energy, nonbonded_energy};
         let g = build_topology_graph(s);
         let b = bonded_energy(s, &g, ff);
         let nb = nonbonded_energy(s, &g, ff, DEFAULT_CUTOFF_A);

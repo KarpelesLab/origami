@@ -17,8 +17,8 @@
 
 use chem::standard_ff;
 use dynamics::full_gpu_integrator::FullGpuIntegrator;
-use dynamics::{minimize, Algorithm, MinimizeOptions};
-use geom::{build_topology_graph, rmsd_p, Vec3};
+use dynamics::{Algorithm, MinimizeOptions, minimize};
+use geom::{Vec3, build_topology_graph, rmsd_p};
 use gpu::GpuContext;
 use io::read_pdb;
 

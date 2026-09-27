@@ -9,11 +9,11 @@
 //! verifies the `GpuAccelerator` wiring (CSR upload, position pack,
 //! force readback + accumulate).
 
-use chem::{standard_ff, AminoAcid};
+use chem::{AminoAcid, standard_ff};
+use energy::DEFAULT_CUTOFF_A;
 use energy::forces_gb::add_gb_forces_soa;
 use energy::forces_nonbonded::add_nonbonded_forces_soa;
 use energy::scratch::ForceScratch;
-use energy::DEFAULT_CUTOFF_A;
 use geom::{build_extended_chain, build_topology_graph};
 
 #[test]

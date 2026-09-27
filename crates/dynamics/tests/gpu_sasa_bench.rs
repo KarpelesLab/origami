@@ -9,9 +9,9 @@
 
 use std::time::Instant;
 
-use chem::{standard_ff, AminoAcid};
+use chem::{AminoAcid, standard_ff};
 use dynamics::full_gpu_integrator::FullGpuIntegrator;
-use geom::{build_extended_chain, build_topology_graph, Vec3};
+use geom::{Vec3, build_extended_chain, build_topology_graph};
 use gpu::GpuContext;
 
 fn build_chain(n_residues: usize) -> geom::Structure {
@@ -73,7 +73,10 @@ fn bench_gpu_integrator_with_sasa() {
         let sasa = time_path(&s, &g, ff, true, warmup, timed).unwrap_or(f64::NAN);
         eprintln!(
             "{n_residues:3} residues / {n:5} atoms  |  no SASA: {:6.3} ms/step  |  with SASA: {:7.3} ms/step  |  SASA overhead: +{:5.3} ms/step ({:.1}×)",
-            no_sasa, sasa, sasa - no_sasa, sasa / no_sasa,
+            no_sasa,
+            sasa,
+            sasa - no_sasa,
+            sasa / no_sasa,
         );
     }
 }

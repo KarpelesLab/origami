@@ -8,10 +8,10 @@
 //! positions / velocities stay finite.  No comparison to the CPU
 //! path yet — that comes in the next test.
 
-use chem::{standard_ff, Nucleotide};
+use chem::{Nucleotide, standard_ff};
 use dynamics::full_gpu_integrator::FullGpuIntegrator;
-use dynamics::{minimize, Algorithm, MinimizeOptions};
-use geom::{build_extended_rna_chain, build_topology_graph, Vec3};
+use dynamics::{Algorithm, MinimizeOptions, minimize};
+use geom::{Vec3, build_extended_rna_chain, build_topology_graph};
 use gpu::GpuContext;
 
 #[test]

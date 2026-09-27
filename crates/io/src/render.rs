@@ -7,7 +7,7 @@
 //! which is everything we currently handle.
 
 use chem::Element;
-use geom::{build_topology_graph, Structure, Vec3};
+use geom::{Structure, Vec3, build_topology_graph};
 use image::{Rgba, RgbaImage};
 
 #[derive(Debug, Clone)]
@@ -180,13 +180,14 @@ pub fn render(structure: &Structure, opts: &RenderOptions) -> RgbaImage {
             let mut best_color = [0.0_f64; 3];
             // Atom spheres.
             for atom in &atoms {
-                if let Some(t) = intersect_sphere(&ray, atom.center, atom.radius) {
-                    if t > 1e-4 && t < best_t {
-                        best_t = t;
-                        let hit = ray.origin + ray.direction * t;
-                        best_normal = (hit - atom.center) / atom.radius;
-                        best_color = atom.color;
-                    }
+                if let Some(t) = intersect_sphere(&ray, atom.center, atom.radius)
+                    && t > 1e-4
+                    && t < best_t
+                {
+                    best_t = t;
+                    let hit = ray.origin + ray.direction * t;
+                    best_normal = (hit - atom.center) / atom.radius;
+                    best_color = atom.color;
                 }
             }
             // Bond cylinders — half-coloured by which endpoint is closer
@@ -194,16 +195,16 @@ pub fn render(structure: &Structure, opts: &RenderOptions) -> RgbaImage {
             for bond in &bonds {
                 if let Some((t, normal, frac)) =
                     intersect_cylinder(&ray, bond.a, bond.b, bond.radius)
+                    && t > 1e-4
+                    && t < best_t
                 {
-                    if t > 1e-4 && t < best_t {
-                        best_t = t;
-                        best_normal = normal;
-                        best_color = if frac < 0.5 {
-                            bond.color_a
-                        } else {
-                            bond.color_b
-                        };
-                    }
+                    best_t = t;
+                    best_normal = normal;
+                    best_color = if frac < 0.5 {
+                        bond.color_a
+                    } else {
+                        bond.color_b
+                    };
                 }
             }
             let px = if best_t.is_finite() {

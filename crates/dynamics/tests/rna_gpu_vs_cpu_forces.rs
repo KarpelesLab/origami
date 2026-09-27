@@ -18,11 +18,11 @@
 //! same atom tuple.  After the fix the residual error is f32
 //! cancellation noise on charged atoms (mainly P, q ≈ +1.5 e).
 
-use chem::{standard_ff, Nucleotide};
+use chem::{Nucleotide, standard_ff};
 use dynamics::full_gpu_integrator::FullGpuIntegrator;
-use dynamics::{minimize, Algorithm, MinimizeOptions};
+use dynamics::{Algorithm, MinimizeOptions, minimize};
 use energy::total_force;
-use geom::{build_extended_rna_chain, build_topology_graph, Vec3};
+use geom::{Vec3, build_extended_rna_chain, build_topology_graph};
 use gpu::GpuContext;
 
 const DT_FS: f64 = 0.5;

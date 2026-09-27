@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 
-use chem::{classify, standard_ff, AminoAcid, AtomType};
+use chem::{AminoAcid, AtomType, classify, standard_ff};
 use geom::{build_extended_chain, build_topology_graph};
 
 /// Run with: `cargo test -p io --test enumerate_ff_tuples -- --nocapture`

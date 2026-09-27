@@ -5,7 +5,7 @@
 //! we just want a defensible helical starting point for dynamics.
 
 use chem::Nucleotide;
-use geom::{build_a_form_rna_chain, measure, Vec3};
+use geom::{Vec3, build_a_form_rna_chain, measure};
 
 /// Fit the helix axis to a sequence of P positions by power iteration
 /// on the principal eigenvector of Σ (p_i - centroid)(p_i - centroid)ᵀ.

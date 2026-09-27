@@ -146,7 +146,7 @@ pub fn powersasa_energy(structure: &Structure, _ff: &ForceField) -> PowerSasaRes
 #[allow(unused_variables, unused_assignments, unused_mut, dead_code)]
 mod tests {
     use super::*;
-    use chem::{standard_ff, AminoAcid};
+    use chem::{AminoAcid, standard_ff};
     use geom::{build_extended_chain, structure::PlacedAtom, structure::PlacedResidue};
 
     #[test]
@@ -295,8 +295,18 @@ mod tests {
                     arc_sum += contrib;
                     eprintln!(
                         "  arc {:>2}: cap={} cos_α={:+.4} θ={:+.4} contrib={:+.4} fc={} start=({:+.3},{:+.3},{:+.3}) end=({:+.3},{:+.3},{:+.3})",
-                        i, arc.cap_idx, cap.cos_alpha, arc.theta, contrib, arc.is_full_circle,
-                        arc.start.x, arc.start.y, arc.start.z, arc.end.x, arc.end.y, arc.end.z,
+                        i,
+                        arc.cap_idx,
+                        cap.cos_alpha,
+                        arc.theta,
+                        contrib,
+                        arc.is_full_circle,
+                        arc.start.x,
+                        arc.start.y,
+                        arc.start.z,
+                        arc.end.x,
+                        arc.end.y,
+                        arc.end.z,
                     );
                 }
                 let mut vert_sum = 0.0;

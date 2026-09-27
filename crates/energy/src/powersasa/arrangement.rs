@@ -11,7 +11,7 @@
 
 use geom::Vec3;
 
-use super::geometry::{intersect_circles, CircleIntersection, SmallCircle};
+use super::geometry::{CircleIntersection, SmallCircle, intersect_circles};
 
 /// One arc on the boundary of the accessible region.
 #[derive(Debug, Clone, Copy)]

@@ -35,7 +35,7 @@
 
 use chem::ForceField;
 use energy::DEFAULT_CUTOFF_A;
-use energy::{total_force_with_scratch, ForceScratch};
+use energy::{ForceScratch, total_force_with_scratch};
 use geom::{Structure, TopologyGraph, Vec3};
 
 use crate::rng::Xoshiro256pp;
@@ -809,7 +809,7 @@ fn initialise_maxwell_boltzmann(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chem::{standard_ff, AminoAcid};
+    use chem::{AminoAcid, standard_ff};
     use geom::{build_extended_chain, build_topology_graph};
 
     #[test]

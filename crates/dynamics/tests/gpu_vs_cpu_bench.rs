@@ -19,12 +19,12 @@
 
 use std::time::Instant;
 
-use chem::{classify_atom, standard_ff, AminoAcid, AtomType, Element};
+use chem::{AminoAcid, AtomType, Element, classify_atom, standard_ff};
 use dynamics::full_gpu_integrator::FullGpuIntegrator;
 use dynamics::shake::build_h_bond_constraints;
-use dynamics::{minimize, run_langevin, Algorithm, LangevinOptions, MinimizeOptions};
-use geom::{build_extended_chain, build_topology_graph, Vec3};
-use gpu::{build_per_x_shake_data, GpuContext, ShakeConstraint};
+use dynamics::{Algorithm, LangevinOptions, MinimizeOptions, minimize, run_langevin};
+use geom::{Vec3, build_extended_chain, build_topology_graph};
+use gpu::{GpuContext, ShakeConstraint, build_per_x_shake_data};
 use io::read_pdb;
 
 fn read_fixture(path: &str) -> geom::Structure {
@@ -182,7 +182,8 @@ fn bench_tile_arm(
     let ms_per_step = secs * 1000.0 / timed as f64;
     eprintln!(
         "  GPU (TILE nb, dt=1 fs, bare step_batch): {timed} steps in {:.2} s — {:.3} ms/step  (vs Verlet GPU full: {:.2}×, vs CPU: {:.2}×)",
-        secs, ms_per_step,
+        secs,
+        ms_per_step,
         // The earlier "GPU full integrator" line ran the Verlet path
         // through run_langevin — different overheads.  The tile is a
         // bare step_batch, so the comparable baseline is the bare
@@ -260,7 +261,9 @@ fn bench_shake_arm(
     let no_shake_ms_per_step = no_shake_secs * 1000.0 / timed as f64;
     eprintln!(
         "  GPU (no SHAKE, dt=1 fs, bare step_batch): {timed} steps in {:.2} s — {:.3} ms/step = {:.3} ms/fs",
-        no_shake_secs, no_shake_ms_per_step, no_shake_ms_per_step / 1.0
+        no_shake_secs,
+        no_shake_ms_per_step,
+        no_shake_ms_per_step / 1.0
     );
 
     let mut full = match FullGpuIntegrator::new(s, g, ff, 2.0, 2.0, 310.0, 1) {

@@ -18,7 +18,7 @@
 //! `step_n` orchestrator); they only verify the BAOAB kernel + RNG
 //! kernel in isolation.
 
-use gpu::{make_rng_state, BaoabPipeline, GpuContext};
+use gpu::{BaoabPipeline, GpuContext, make_rng_state};
 
 const ACCEL_FACTOR: f64 = 1.0e-4;
 

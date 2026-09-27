@@ -6,10 +6,10 @@
 //! (only 1-2 and 1-3 excluded; 1-4 pairs counted with specials), same
 //! parameter table.  Production-CPU vs GPU agreement.
 
-use chem::{classify_atom, standard_ff, AtomType};
+use chem::{AtomType, classify_atom, standard_ff};
 use energy::DEFAULT_CUTOFF_A;
-use geom::{build_extended_chain, build_topology_graph, Vec3};
-use gpu::{nonbonded_force_gpu, GpuContext, NonbondedSetup};
+use geom::{Vec3, build_extended_chain, build_topology_graph};
+use gpu::{GpuContext, NonbondedSetup, nonbonded_force_gpu};
 
 const KCAL_TO_KJ: f32 = 4.184;
 

@@ -179,10 +179,10 @@ impl FromStr for AminoAcid {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let trimmed = s.trim();
-        if trimmed.len() == 1 {
-            if let Some(aa) = Self::from_one_letter(trimmed.chars().next().unwrap()) {
-                return Ok(aa);
-            }
+        if trimmed.len() == 1
+            && let Some(aa) = Self::from_one_letter(trimmed.chars().next().unwrap())
+        {
+            return Ok(aa);
         }
         if let Some(aa) = Self::from_three_letter(trimmed) {
             return Ok(aa);

@@ -11,9 +11,9 @@
 //! Tolerance: 1e-3 kJ/mol/Å absolute, per atom-axis (f32 round-trip
 //! through the GPU + sqrt() accumulation).
 
-use chem::{classify_atom, standard_ff, AtomType};
-use geom::{build_extended_chain, build_topology_graph, Vec3};
-use gpu::{lj::lj_force_gpu, lj::LjInput, GpuContext};
+use chem::{AtomType, classify_atom, standard_ff};
+use geom::{Vec3, build_extended_chain, build_topology_graph};
+use gpu::{GpuContext, lj::LjInput, lj::lj_force_gpu};
 
 const KCAL_TO_KJ: f32 = 4.184;
 const CUTOFF_A: f32 = 10.0;

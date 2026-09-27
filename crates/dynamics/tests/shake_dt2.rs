@@ -5,7 +5,7 @@
 //! per simulated picosecond drops ~2×.
 
 use chem::standard_ff;
-use dynamics::{run_langevin, LangevinOptions};
+use dynamics::{LangevinOptions, run_langevin};
 use geom::build_topology_graph;
 use io::read_pdb;
 

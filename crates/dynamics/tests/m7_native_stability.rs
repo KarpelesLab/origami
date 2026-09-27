@@ -11,7 +11,7 @@
 //! breathe more during short MD — included with a looser RMSD bound.
 
 use chem::standard_ff;
-use dynamics::{run_langevin, LangevinOptions};
+use dynamics::{LangevinOptions, run_langevin};
 use geom::{build_topology_graph, rmsd_ca};
 use io::read_pdb;
 

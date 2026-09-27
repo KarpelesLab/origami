@@ -19,15 +19,15 @@ pub mod sasa;
 pub mod scratch;
 pub mod units;
 
-pub use bonded::{angle_energy, bond_energy, dihedral_energy, improper_energy, BondedBreakdown};
+pub use bonded::{BondedBreakdown, angle_energy, bond_energy, dihedral_energy, improper_energy};
 pub use cmap::{add_cmap_forces, cmap_energy};
 pub use forces::{
     total_force, total_force_with_cutoff, total_force_with_options, total_force_with_scratch,
 };
-pub use gb::{gb_energy, GbBreakdown};
-pub use nonbonded::{nonbonded_energy, NonbondedBreakdown, DEFAULT_CUTOFF_A};
-pub use powersasa::{default_sasa_gammas, powersasa_energy, surface_tension_kcal, PowerSasaResult};
-pub use sasa::{sasa_energy, sasa_energy_with_dots, SasaBreakdown};
+pub use gb::{GbBreakdown, gb_energy};
+pub use nonbonded::{DEFAULT_CUTOFF_A, NonbondedBreakdown, nonbonded_energy};
+pub use powersasa::{PowerSasaResult, default_sasa_gammas, powersasa_energy, surface_tension_kcal};
+pub use sasa::{SasaBreakdown, sasa_energy, sasa_energy_with_dots};
 pub use scratch::ForceScratch;
 
 /// Convenience aggregator returned by the bonded-energy entry point.

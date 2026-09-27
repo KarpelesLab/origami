@@ -19,7 +19,7 @@
 
 use std::sync::Arc;
 
-use crate::baoab::{make_rng_state, BaoabPipeline};
+use crate::baoab::{BaoabPipeline, make_rng_state};
 use crate::bonded::{BondedPipeline, BondedSetup};
 use crate::context::GpuContext;
 use crate::gb::{GbPipeline, GbSetup};

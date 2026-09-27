@@ -3,8 +3,8 @@
 //! fully-extended chain. This validates that our hand-assembled force
 //! field has the right qualitative behaviour: folding is favourable.
 
-use chem::{standard_ff, AminoAcid};
-use energy::{bonded::bonded_energy, gb_energy, nonbonded_energy, sasa_energy, DEFAULT_CUTOFF_A};
+use chem::{AminoAcid, standard_ff};
+use energy::{DEFAULT_CUTOFF_A, bonded::bonded_energy, gb_energy, nonbonded_energy, sasa_energy};
 use geom::{build_extended_chain, build_topology_graph};
 use io::read_pdb;
 

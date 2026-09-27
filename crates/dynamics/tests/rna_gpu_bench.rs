@@ -11,10 +11,10 @@
 
 use std::time::Instant;
 
-use chem::{standard_ff, Nucleotide};
+use chem::{Nucleotide, standard_ff};
 use dynamics::full_gpu_integrator::FullGpuIntegrator;
-use dynamics::{minimize, Algorithm, MinimizeOptions};
-use geom::{build_extended_rna_chain, build_topology_graph, Vec3};
+use dynamics::{Algorithm, MinimizeOptions, minimize};
+use geom::{Vec3, build_extended_rna_chain, build_topology_graph};
 use gpu::GpuContext;
 
 fn build_rna(n: usize) -> geom::Structure {

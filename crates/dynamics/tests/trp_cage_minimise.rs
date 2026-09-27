@@ -4,8 +4,8 @@
 //! +23494 kJ/mol to under 200, confirming the atoms relax to CHARMM
 //! equilibrium values.
 
-use chem::{standard_ff, AminoAcid};
-use dynamics::{minimize, Algorithm, MinimizeOptions};
+use chem::{AminoAcid, standard_ff};
+use dynamics::{Algorithm, MinimizeOptions, minimize};
 use energy::bonded::bonded_energy;
 use geom::{build_extended_chain, build_topology_graph};
 

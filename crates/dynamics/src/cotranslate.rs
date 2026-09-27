@@ -31,17 +31,17 @@
 //!     forces directly.
 
 use chem::{AminoAcid, ForceField};
-use energy::{total_force_with_scratch, ForceScratch, DEFAULT_CUTOFF_A};
+use energy::{DEFAULT_CUTOFF_A, ForceScratch, total_force_with_scratch};
 use geom::{
-    append_residue, build_topology_graph, Structure, Vec3, DEFAULT_OMEGA, DEFAULT_PHI, DEFAULT_PSI,
+    DEFAULT_OMEGA, DEFAULT_PHI, DEFAULT_PSI, Structure, Vec3, append_residue, build_topology_graph,
 };
 
 use crate::langevin::{
-    initialise_velocities_for_new_atoms, kinetic_energy_kj_mol, ACCEL_FACTOR,
-    BOLTZMANN_KJ_PER_MOL_K,
+    ACCEL_FACTOR, BOLTZMANN_KJ_PER_MOL_K, initialise_velocities_for_new_atoms,
+    kinetic_energy_kj_mol,
 };
 use crate::rng::Xoshiro256pp;
-use crate::{minimize, Algorithm, LangevinOptions, MinimizeOptions};
+use crate::{Algorithm, LangevinOptions, MinimizeOptions, minimize};
 
 /// A source of amino-acid residues + emission timings.
 ///
@@ -180,11 +180,11 @@ pub enum MrnaParseError {
 
 fn parse_mrna_codons(mrna: &str) -> Result<Vec<chem::Codon>, MrnaParseError> {
     let bytes: Vec<u8> = mrna.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-    if bytes.len() % 3 != 0 {
+    if !bytes.len().is_multiple_of(3) {
         return Err(MrnaParseError::NotTripletAligned(bytes.len()));
     }
     let mut codons = Vec::with_capacity(bytes.len() / 3);
-    for (i, chunk) in bytes.chunks_exact(3).enumerate() {
+    for (i, chunk) in bytes.as_chunks::<3>().0.iter().enumerate() {
         let codon = chem::Codon::from_bytes(chunk).map_err(|_| {
             let bad_offset = i * 3
                 + chunk

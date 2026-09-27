@@ -1,8 +1,8 @@
 //! M5 acceptance: BAOAB Langevin holds an Ala₃ chain near 310 K and
 //! preserves equipartition.
 
-use chem::{standard_ff, AminoAcid};
-use dynamics::{run_langevin, LangevinOptions, BOLTZMANN_KJ_PER_MOL_K};
+use chem::{AminoAcid, standard_ff};
+use dynamics::{BOLTZMANN_KJ_PER_MOL_K, LangevinOptions, run_langevin};
 use geom::{build_extended_chain, build_topology_graph};
 
 #[test]

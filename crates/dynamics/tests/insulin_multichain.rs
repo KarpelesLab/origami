@@ -53,10 +53,10 @@ fn insulin_three_disulfides_detected() {
             }
             atom_idx += 1;
         }
-        if r.monomer.as_amino_acid() == Some(AminoAcid::Cys) {
-            if let Some(idx) = sg {
-                sg_indices.push((ri + 1, r.chain, idx));
-            }
+        if r.monomer.as_amino_acid() == Some(AminoAcid::Cys)
+            && let Some(idx) = sg
+        {
+            sg_indices.push((ri + 1, r.chain, idx));
         }
     }
     assert_eq!(sg_indices.len(), 6, "insulin has 6 cysteines");

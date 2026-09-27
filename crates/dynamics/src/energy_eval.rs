@@ -8,7 +8,7 @@ use energy::cmap::cmap_energy;
 use energy::gb::gb_energy;
 use energy::nonbonded::nonbonded_energy;
 use energy::powersasa::powersasa_energy;
-use energy::{total_force_with_options, DEFAULT_CUTOFF_A};
+use energy::{DEFAULT_CUTOFF_A, total_force_with_options};
 use geom::{Structure, TopologyGraph, Vec3};
 
 /// Total potential energy used in M4 minimisation (no SASA, no CMAP).

@@ -23,9 +23,9 @@
 
 use geom::Vec3;
 
-use super::arrangement::{build_caps, find_boundary, AtomBoundary, BoundaryVertex};
+use super::arrangement::{AtomBoundary, BoundaryVertex, build_caps, find_boundary};
 use super::derivatives::{
-    arc_theta_jvp, cos_alpha_directional, identify_root_sign, vertex_epsilon_jvp, RootSign,
+    RootSign, arc_theta_jvp, cos_alpha_directional, identify_root_sign, vertex_epsilon_jvp,
 };
 use super::geometry::SmallCircle;
 
@@ -319,13 +319,7 @@ fn directional_area_derivative(
     basis: Vec3,
 ) -> f64 {
     // Helper: perturbation vector for atom y, given the perturbed atom is x_atom.
-    let dr_of = |y: usize| -> Vec3 {
-        if y == x_atom {
-            basis
-        } else {
-            Vec3::zeros()
-        }
-    };
+    let dr_of = |y: usize| -> Vec3 { if y == x_atom { basis } else { Vec3::zeros() } };
 
     let p_i = positions[cache.atom_idx];
     let r_i = cache.radius_i;
@@ -695,7 +689,7 @@ mod tests {
         // The Verlet+rayon scratch path must produce the same SASA
         // forces as the simple inline baseline, to floating-point
         // reduction-order precision.
-        use chem::{standard_ff, AminoAcid};
+        use chem::{AminoAcid, standard_ff};
         use geom::{build_extended_chain, build_topology_graph};
         let s = build_extended_chain(&[
             AminoAcid::Ala,
@@ -731,7 +725,7 @@ mod tests {
     /// path is a strict superset of the default path.
     #[test]
     fn with_gammas_default_matches_default_path() {
-        use chem::{standard_ff, AminoAcid};
+        use chem::{AminoAcid, standard_ff};
         use geom::build_extended_chain;
         let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
         let n = s.atom_count();
@@ -755,7 +749,7 @@ mod tests {
     /// the SASA energy is linear in γ.
     #[test]
     fn doubled_gammas_doubles_forces() {
-        use chem::{standard_ff, AminoAcid};
+        use chem::{AminoAcid, standard_ff};
         use geom::build_extended_chain;
         let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Ala, AminoAcid::Ala]).unwrap();
         let n = s.atom_count();
@@ -786,7 +780,7 @@ mod tests {
     /// apolar but get zeroed contribute nothing now.
     #[test]
     fn zeroing_half_gammas_removes_those_contributions() {
-        use chem::{standard_ff, AminoAcid};
+        use chem::{AminoAcid, standard_ff};
         use geom::build_extended_chain;
         let s = build_extended_chain(&[AminoAcid::Ala, AminoAcid::Lys, AminoAcid::Glu]).unwrap();
         let n = s.atom_count();
@@ -826,7 +820,7 @@ mod tests {
         // list, second reuses it. Both must give bit-identical
         // forces (no reduction-order ambiguity since we use the same
         // thread count).
-        use chem::{standard_ff, AminoAcid};
+        use chem::{AminoAcid, standard_ff};
         use geom::{build_extended_chain, build_topology_graph};
         let s = build_extended_chain(&[
             AminoAcid::Ala,
@@ -947,8 +941,8 @@ mod tests {
     /// `forces_sasa::sasa_forces_finite_difference_matches_total_e_sasa`.
     #[test]
     fn analytical_force_matches_central_difference_against_total_e_sasa() {
-        use chem::standard_ff;
         use chem::AminoAcid;
+        use chem::standard_ff;
         use geom::build_extended_chain;
 
         // Pick a chain with carbons/sulfurs (non-zero γ) and a few

@@ -219,19 +219,11 @@ impl ForceField {
 }
 
 fn canonical_pair(a: AtomType, b: AtomType) -> (AtomType, AtomType) {
-    if a <= b {
-        (a, b)
-    } else {
-        (b, a)
-    }
+    if a <= b { (a, b) } else { (b, a) }
 }
 
 fn canonical_triple(a: AtomType, b: AtomType, c: AtomType) -> (AtomType, AtomType, AtomType) {
-    if a <= c {
-        (a, b, c)
-    } else {
-        (c, b, a)
-    }
+    if a <= c { (a, b, c) } else { (c, b, a) }
 }
 
 fn canonical_quad(
@@ -579,30 +571,30 @@ fn parse_cmap_line(
     // header; otherwise it's a row of grid floats.
     let last_int = tokens.last().and_then(|s| s.parse::<usize>().ok());
     let first_atom = AtomType::from_charmm_name(tokens[0]);
-    if let (Some(grid_size), Some(_)) = (last_int, first_atom) {
-        if tokens.len() == 9 {
-            // Flush any previous in-flight grid before starting a new one.
-            commit_cmap_if_full(pending_key, buffer, ff);
-            // Extract the (CA, next-N) key from tokens[2] (column 3,
-            // 0-indexed) and tokens[7] (column 8). These are the two
-            // tokens that vary across CHARMM36m's six grids.
-            let ca = match AtomType::from_charmm_name(tokens[2]) {
-                Some(t) => t,
-                None => return, // Unknown atom type — skip block.
-            };
-            let next_n = match AtomType::from_charmm_name(tokens[7]) {
-                Some(t) => t,
-                None => return,
-            };
-            // Sanity: bail if grid size differs from our compile-time
-            // assumption (CHARMM has always used 24).
-            if grid_size != CmapGrid::GRID_SIZE {
-                return;
-            }
-            *pending_key = Some((ca, next_n));
-            buffer.clear();
+    if let (Some(grid_size), Some(_)) = (last_int, first_atom)
+        && tokens.len() == 9
+    {
+        // Flush any previous in-flight grid before starting a new one.
+        commit_cmap_if_full(pending_key, buffer, ff);
+        // Extract the (CA, next-N) key from tokens[2] (column 3,
+        // 0-indexed) and tokens[7] (column 8). These are the two
+        // tokens that vary across CHARMM36m's six grids.
+        let ca = match AtomType::from_charmm_name(tokens[2]) {
+            Some(t) => t,
+            None => return, // Unknown atom type — skip block.
+        };
+        let next_n = match AtomType::from_charmm_name(tokens[7]) {
+            Some(t) => t,
+            None => return,
+        };
+        // Sanity: bail if grid size differs from our compile-time
+        // assumption (CHARMM has always used 24).
+        if grid_size != CmapGrid::GRID_SIZE {
             return;
         }
+        *pending_key = Some((ca, next_n));
+        buffer.clear();
+        return;
     }
     // Otherwise: row of grid floats.
     if pending_key.is_some() {
@@ -623,12 +615,12 @@ fn commit_cmap_if_full(
     ff: &mut ForceField,
 ) {
     let n = CmapGrid::GRID_SIZE * CmapGrid::GRID_SIZE;
-    if buffer.len() == n {
-        if let Some(key) = pending_key.take() {
-            ff.cmap.entry(key).or_insert(CmapGrid {
-                data: std::mem::take(buffer),
-            });
-        }
+    if buffer.len() == n
+        && let Some(key) = pending_key.take()
+    {
+        ff.cmap.entry(key).or_insert(CmapGrid {
+            data: std::mem::take(buffer),
+        });
     }
 }
 

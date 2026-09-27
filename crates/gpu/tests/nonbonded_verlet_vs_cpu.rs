@@ -12,10 +12,10 @@
 //! the cutoff) and pass it via `pair_list_to_csr` — the same CSR layout
 //! the real integrator will use.
 
-use chem::{classify_atom, standard_ff, AminoAcid, AtomType};
+use chem::{AminoAcid, AtomType, classify_atom, standard_ff};
 use energy::DEFAULT_CUTOFF_A;
-use geom::{build_extended_chain, build_topology_graph, Vec3};
-use gpu::{pair_list_to_csr, GpuContext, VerletNonbondedPipeline, VerletNonbondedSetup};
+use geom::{Vec3, build_extended_chain, build_topology_graph};
+use gpu::{GpuContext, VerletNonbondedPipeline, VerletNonbondedSetup, pair_list_to_csr};
 
 const KCAL_TO_KJ: f32 = 4.184;
 

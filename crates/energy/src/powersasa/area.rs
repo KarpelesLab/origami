@@ -8,7 +8,7 @@
 //! signed central angle (sign by traversal); epsilon is the exterior angle
 //! at the vertex (positive = turn toward the accessible region).
 
-use super::arrangement::{count_accessible_components, AtomBoundary, BoundaryArc, BoundaryVertex};
+use super::arrangement::{AtomBoundary, BoundaryArc, BoundaryVertex, count_accessible_components};
 use super::geometry::SmallCircle;
 
 use geom::Vec3;

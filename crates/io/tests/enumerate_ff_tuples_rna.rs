@@ -8,7 +8,7 @@
 
 use std::collections::BTreeSet;
 
-use chem::{classify_rna, standard_ff, AtomType, Nucleotide};
+use chem::{AtomType, Nucleotide, classify_rna, standard_ff};
 use geom::{build_extended_rna_chain, build_topology_graph};
 
 #[test]

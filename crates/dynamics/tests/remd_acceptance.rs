@@ -8,8 +8,8 @@
 //!     acceptance ratio is comfortably above 0.2 (the conventional
 //!     "well-mixed" lower bound)
 
-use chem::{standard_ff, AminoAcid};
-use dynamics::remd::{run_remd, RemdOptions};
+use chem::{AminoAcid, standard_ff};
+use dynamics::remd::{RemdOptions, run_remd};
 use geom::{build_extended_chain, build_topology_graph};
 
 #[test]

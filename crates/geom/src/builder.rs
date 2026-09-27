@@ -9,12 +9,12 @@
 use std::f64::consts::PI;
 
 use chem::topology::angle as bb_angle;
-use chem::{classify_rna, standard_ff, AminoAcid, Element, ForceField};
+use chem::{AminoAcid, Element, ForceField, classify_rna, standard_ff};
 use thiserror::Error;
 
+use crate::Vec3;
 use crate::nerf::place_atom;
 use crate::structure::{PlacedAtom, PlacedResidue, Structure};
-use crate::Vec3;
 
 /// Default backbone torsions for an extended (β-strand-like) chain.
 pub const DEFAULT_PHI: f64 = -120.0 * PI / 180.0;
@@ -253,10 +253,10 @@ fn lookup(
     // Allow references to the previous residue's atoms if needed (currently
     // the side-chain templates only reference same-residue atoms, but this
     // future-proofs for cross-residue refs e.g. disulfides or ring closures).
-    if idx > 0 {
-        if let Some(p) = structure.residues[idx - 1].position(name) {
-            return Ok(p);
-        }
+    if idx > 0
+        && let Some(p) = structure.residues[idx - 1].position(name)
+    {
+        return Ok(p);
     }
     Err(BuildError::MissingAtom(idx, name.to_owned()))
 }
@@ -298,7 +298,7 @@ pub mod rna_ic {
     pub const C2_C1: f64 = 1.450; // CN7B-CN7B (RNA-specific short bond)
     pub const C1_N: f64 = 1.456; // CN7B-NN2 / NN2B glycosidic
     pub const O3_P: f64 = 1.600; // ON2-P inter-residue
-                                 // Bond angles.
+    // Bond angles.
     pub const O3_P_O5: f64 = deg(104.0);
     pub const C3_O3_P: f64 = deg(119.7);
     pub const P_O5_C5: f64 = deg(120.9);
@@ -474,9 +474,9 @@ pub mod rna_ic {
     pub const C2_N3_PUR: f64 = 1.337;
     #[allow(dead_code)]
     pub const N3_C4_PUR: f64 = 1.346; // 6-ring closure (target)
-                                      // Purine 5-ring interior angles (sum = 540°). The N9 vertex angle
-                                      // and the second N3-C4 ring-closure length are kept for the
-                                      // closure-bond test (they aren't directly placed).
+    // Purine 5-ring interior angles (sum = 540°). The N9 vertex angle
+    // and the second N3-C4 ring-closure length are kept for the
+    // closure-bond test (they aren't directly placed).
     #[allow(dead_code)]
     pub const ANG_C8_N9_C4: f64 = deg(105.8);
     pub const ANG_N9_C8_N7: f64 = deg(113.6);
@@ -516,7 +516,7 @@ pub mod rna_ic {
     pub const C5_C6_PYR: f64 = 1.337;
     #[allow(dead_code)]
     pub const C6_N1_PYR: f64 = 1.367; // 6-ring closure (implicit)
-                                      // Pyrimidine 6-ring interior angles (sum = 720°).
+    // Pyrimidine 6-ring interior angles (sum = 720°).
     pub const ANG_N1_C2_N3_PYR: f64 = deg(120.4);
     pub const ANG_C2_N3_C4_PYR: f64 = deg(119.6);
     pub const ANG_N3_C4_C5_PYR: f64 = deg(121.8);
@@ -524,8 +524,8 @@ pub mod rna_ic {
     pub const ANG_C5_C6_N1_PYR: f64 = deg(120.5);
     #[allow(dead_code)]
     pub const ANG_C2_N1_C6_PYR: f64 = deg(120.3); // closure
-                                                  // Pyrimidine glycosidic anchor — superseded by
-                                                  // `RnaTorsionSet::pyrimidine_chi_c2`.
+    // Pyrimidine glycosidic anchor — superseded by
+    // `RnaTorsionSet::pyrimidine_chi_c2`.
     #[allow(dead_code)]
     pub const PYRIMIDINE_CHI_C2: f64 = deg(-120.0);
     pub const ANG_C1P_N1_C2: f64 = deg(120.0);
