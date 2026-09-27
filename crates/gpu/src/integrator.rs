@@ -395,8 +395,8 @@ impl IntegratorPipeline {
     }
 
     /// One full force evaluation: zero the buffer, then accumulate
-    /// all-bonded (fused bond+angle+dihedral+improper) + nonbonded
-    /// + GB.  Records 4 compute passes (down from 7 pre-fusion —
+    /// all-bonded (fused bond+angle+dihedral+improper), nonbonded and
+    /// GB.  Records 4 compute passes (down from 7 pre-fusion —
     /// see `PERF.gpu.14`).  If tile-mode has been enabled via
     /// [`enable_tile_nb`], the tile kernel is dispatched instead of
     /// the Verlet kernel.

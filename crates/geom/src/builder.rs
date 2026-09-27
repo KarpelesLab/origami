@@ -1307,7 +1307,7 @@ fn add_rna_residue_hydrogens(
     };
 
     let push_base_pyrimidines = |emit: &mut dyn FnMut(&'static str, Option<Vec3>)| {
-        let n1 = pos("N1");
+        let _n1 = pos("N1");
         let _c2b = pos("C2");
         let n3 = pos("N3");
         let c4b = pos("C4");
@@ -1391,7 +1391,6 @@ fn add_rna_residue_hydrogens(
         Nucleotide::Cytosine | Nucleotide::Uracil => push_base_pyrimidines(&mut emit),
     }
 
-    drop(emit);
     for (name, position) in to_add {
         res.atoms.push(PlacedAtom {
             name,
@@ -1401,8 +1400,8 @@ fn add_rna_residue_hydrogens(
     }
 }
 
-/// Build an extended RNA chain (sugar-phosphate backbone + ribose ring
-/// + glycosidic nitrogen + base ring + all hydrogens) from a
+/// Build an extended RNA chain (sugar-phosphate backbone + ribose
+/// ring + glycosidic nitrogen + base ring + all hydrogens) from a
 /// nucleotide sequence. Every residue is a `Monomer::Rna`.
 ///
 /// "Extended" here means γ = 180° (trans) — a near-linear single-strand

@@ -2,7 +2,7 @@
 //! `sasa_per_atom_with_dots` (same algorithm, same dot count, same
 //! Fibonacci pattern → must agree to f32 round-trip noise).
 
-use chem::{standard_ff, AminoAcid, Element};
+use chem::{AminoAcid, Element};
 use energy::sasa::sasa_per_atom_with_dots;
 use geom::{build_extended_chain, Vec3};
 use gpu::{GpuContext, SasaPipeline, SasaSetup, SASA_N_DOTS};

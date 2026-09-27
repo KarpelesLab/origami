@@ -1135,7 +1135,7 @@ mod tests {
         // other, producing a single full-circle boundary loop.
         let positions = vec![Vec3::zeros(), Vec3::new(3.0, 0.0, 0.0)];
         let radii = vec![3.0, 3.0]; // both vdW+probe (= 1.7 + 1.4 ish, but just round numbers)
-        let neighbour_idx = vec![vec![1usize], vec![0usize]];
+        let neighbour_idx = [vec![1usize], vec![0usize]];
 
         let cache_0 =
             build_atom_cache(0, &positions, &radii, &neighbour_idx[0]).expect("cache atom 0");

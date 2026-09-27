@@ -408,12 +408,11 @@ fn canonical_rna_atom_name(nt: Nucleotide, name: &str) -> Option<&'static str> {
         // v3.3 throughout and never hits this branch.
         _ => name,
     };
-    for (canon, _) in nt.all_atoms() {
-        if canon == translated {
-            return Some(canon);
-        }
-    }
-    None
+    nt.all_atoms()
+        .into_iter()
+        .map(|(canon, _)| canon)
+        .find(|&canon| canon == translated)
+        .map(|v| v as _)
 }
 
 /// Look up the canonical wwPDB v3.3 atom name (returning a `&'static str` so

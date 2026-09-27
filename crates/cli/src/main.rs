@@ -228,7 +228,7 @@ enum Command {
         shake_h: bool,
         /// Route the LJ + Coulomb + GB pair-loop work through the GPU
         /// compute kernels.  At small N (≲1000 atoms) the GPU dispatch
-        /// + readback overhead outweighs what it saves; the flag pays
+        /// and readback overhead outweighs what it saves; the flag pays
         /// off above ~3000 atoms.  Falls back to CPU with a warning
         /// if no GPU adapter is available.
         #[arg(long)]
@@ -553,7 +553,7 @@ fn run_render(
         let mut per_frame: Vec<(Vec3, f64)> = Vec::with_capacity(frames.len());
         for s in &frames {
             let b = structure_bounds(s, show_hydrogens, opts.atom_scale);
-            centroid_sum = centroid_sum + b.0;
+            centroid_sum += b.0;
             per_frame.push(b);
         }
         let global_centroid = centroid_sum / frames.len().max(1) as f64;
@@ -1292,12 +1292,11 @@ fn run_analyze(
         let rmsd = reference
             .as_ref()
             .and_then(|r| geom::rmsd_ca(r, frame))
-            .map(|v| {
+            .inspect(|&v| {
                 if v < min_rmsd {
                     min_rmsd = v;
                     min_rmsd_idx = idx;
                 }
-                v
             });
         let rg = geom::radius_of_gyration_ca(frame);
         let e2e = geom::end_to_end_ca(frame);

@@ -18,6 +18,13 @@ rust-version = "1.80"
 license = "MIT"
 repository = "https://github.com/KarpelesLab/origami"
 
+[workspace.lints.clippy]
+# Numeric kernels index several parallel arrays (positions, forces,
+# masses, …) by atom; iterator rewrites obscure that without gain.
+needless_range_loop = "allow"
+# Physics entry points legitimately take many scalar parameters.
+too_many_arguments = "allow"
+
 [workspace.dependencies]
 anyhow = "1"
 thiserror = "2"

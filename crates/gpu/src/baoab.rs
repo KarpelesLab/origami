@@ -19,8 +19,10 @@
 //!
 //! This module ships only the integrator kernels.  To actually replace
 //! the CPU integrator end-to-end, the caller also needs:
+//!
 //!   - bonded forces summed into `forces_total` on the GPU
 //!   - per-step neighbour-list maintenance staying on the GPU
+//!
 //! Neither is part of this commit — they're the next chunks of the
 //! integrator-on-GPU arc.
 
@@ -78,8 +80,11 @@ pub struct BaoabPipeline {
     params_buf: wgpu::Buffer,
     positions_buf: Arc<wgpu::Buffer>,
     velocities_buf: Arc<wgpu::Buffer>,
+    // Only referenced through `bind_group`; held so ownership is explicit.
+    #[allow(dead_code)]
     masses_buf: wgpu::Buffer,
     forces_buf: Arc<wgpu::Buffer>,
+    #[allow(dead_code)]
     rng_state_buf: wgpu::Buffer,
     pos_readback_buf: wgpu::Buffer,
     vel_readback_buf: wgpu::Buffer,

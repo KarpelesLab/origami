@@ -11,11 +11,13 @@
 //! the per-atom CSR participation lists.  See `BondedSetup`.
 //!
 //! Per-step usage:
+//!
 //!   1. `record_zero`        — wipe the shared forces buffer
 //!   2. `record_bond`        — add bond contributions
 //!   3. `record_angle`       — add angle contributions
 //!   4. `record_dihedral`    — add dihedral contributions
 //!   5. `record_improper`    — add improper contributions
+//!
 //! All into the same encoder.  Pair forces (nonbonded + GB) then
 //! accumulate into the same buffer.
 

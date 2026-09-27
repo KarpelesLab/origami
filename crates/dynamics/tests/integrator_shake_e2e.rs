@@ -12,8 +12,6 @@
 //! Doesn't bit-compare against CPU — different RNG between
 //! xoshiro128++ (GPU) and xoshiro256++ (CPU) makes that impossible.
 
-use std::sync::Arc;
-
 use chem::{classify_atom, standard_ff, AminoAcid, AtomType, Element};
 use dynamics::full_gpu_integrator::FullGpuIntegrator;
 use dynamics::shake::build_h_bond_constraints;
@@ -32,7 +30,7 @@ fn atom_types_for(s: &geom::Structure) -> Vec<AtomType> {
 
 #[test]
 fn integrator_shake_holds_h_bond_lengths_at_dt_2fs() {
-    let ctx = match GpuContext::get() {
+    let _ctx = match GpuContext::get() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("GPU unavailable: {e}");

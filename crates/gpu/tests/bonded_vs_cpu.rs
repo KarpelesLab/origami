@@ -316,6 +316,7 @@ fn setup_and_run(
 }
 
 mod wgpu_lite {
+    #[allow(dead_code)]
     pub struct PositionsForces {
         pub positions_buf: gpu::wgpu::Buffer,
         pub forces_buf: gpu::wgpu::Buffer,

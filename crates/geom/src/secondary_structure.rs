@@ -85,10 +85,10 @@ pub fn classify(phi_rad: f64, psi_rad: f64) -> SsType {
     if (-90.0..=-30.0).contains(&p) && (-77.0..=-7.0).contains(&q) {
         return SsType::Helix;
     }
-    if (-180.0..=-45.0).contains(&p) {
-        if (90.0..=180.0).contains(&q) || (-180.0..=-160.0).contains(&q) {
-            return SsType::Strand;
-        }
+    if (-180.0..=-45.0).contains(&p)
+        && ((90.0..=180.0).contains(&q) || (-180.0..=-160.0).contains(&q))
+    {
+        return SsType::Strand;
     }
     SsType::Coil
 }

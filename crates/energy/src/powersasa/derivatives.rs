@@ -36,10 +36,14 @@
 //!   (3) V_e moves with r_i, r_k, r_m. The total derivative is the sum of
 //!   the partial derivatives along each motion mode. (TODO.)
 //!
-//! - **Exterior angle.** At vertex V = cap_K ∩ cap_L,
-//!     t_in  = V × ω_K  (tangent on cap K at V, going CW around ω_K)
-//!     t_out = V × ω_L  (tangent on cap L at V, going CW around ω_L)
-//!     ε = atan2(V · (t_in × t_out), t_in · t_out)
+//! - **Exterior angle.** At vertex V = cap_K ∩ cap_L:
+//!
+//!   ```text
+//!   t_in  = V × ω_K  (tangent on cap K at V, going CW around ω_K)
+//!   t_out = V × ω_L  (tangent on cap L at V, going CW around ω_L)
+//!   ε = atan2(V · (t_in × t_out), t_in · t_out)
+//!   ```
+//!
 //!   Depends on r_i, r_k, r_l (via V and the two cone axes). (TODO.)
 //!
 //! # Implementation status — all shipped (see commits `66903ea`, `e9374a4`)

@@ -140,7 +140,9 @@ fn grid_search_gamma_epsilon_for_canonical_a_form() {
         b.total_kj_mol() + nb.lj_kj_mol + nb.coulomb_kj_mol + gb.gb_kj_mol
     };
 
-    let mut all: Vec<(f64, f64, f64, f64, f64, f64, f64, f64, f64, f64)> = Vec::new();
+    // (combined, α, γ, ε, ζ, rise, twist, radius, geom_score, energy)
+    type Row = (f64, f64, f64, f64, f64, f64, f64, f64, f64, f64);
+    let mut all: Vec<Row> = Vec::new();
     let mut tried = 0usize;
     let mut rejected_ring = 0usize;
     for &a_deg in &alpha_range {

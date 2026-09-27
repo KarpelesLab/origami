@@ -419,7 +419,7 @@ where
 #[allow(clippy::too_many_arguments)]
 fn run_slice<F>(
     structure: &mut Structure,
-    velocities: &mut Vec<Vec3>,
+    velocities: &mut [Vec3],
     ff: &ForceField,
     rng: &mut Xoshiro256pp,
     opts: LangevinOptions,

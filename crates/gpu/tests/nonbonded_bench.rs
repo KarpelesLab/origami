@@ -13,7 +13,7 @@ use gpu::{nonbonded_force_gpu, GpuContext, NonbondedPipeline, NonbondedSetup};
 use std::time::Instant;
 
 const KCAL_TO_KJ: f32 = 4.184;
-const COULOMB_K_KJ: f32 = 1389.354_55;
+const COULOMB_K_KJ: f32 = 1_389.354_5;
 const CUTOFF_A: f32 = 10.0;
 
 fn cpu_nonbonded(

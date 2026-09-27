@@ -79,7 +79,7 @@ fn gpu_force_eval_matches_cpu_on_rna_chain() {
         .residues
         .iter()
         .flat_map(|r| r.atoms.iter())
-        .map(|a| a.element.mass_da() as f64)
+        .map(|a| a.element.mass_da())
         .collect();
 
     let mut max_abs = 0.0_f64;

@@ -156,7 +156,7 @@ mod tests {
     fn every_sense_codon_has_a_finite_rarity() {
         for codon in Codon::all() {
             let f = ecoli_k12_rarity_factor(codon);
-            assert!(f.is_finite() && f >= 1.0 && f <= 5.0, "{codon:?}: {f}");
+            assert!(f.is_finite() && (1.0..=5.0).contains(&f), "{codon:?}: {f}");
         }
     }
 

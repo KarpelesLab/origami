@@ -16,3 +16,6 @@ image.workspace = true
 [dev-dependencies]
 energy = { path = "../energy" }
 dynamics = { path = "../dynamics" }
+
+[lints]
+workspace = true

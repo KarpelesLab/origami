@@ -238,7 +238,7 @@ impl ForceScratch {
     pub fn rebuild_exclusions(&mut self, graph: &TopologyGraph) {
         let n = self.n;
         self.excl.fill(0);
-        let mut set_pair = |excl: &mut [u8], i: usize, j: usize, mask: u8| {
+        let set_pair = |excl: &mut [u8], i: usize, j: usize, mask: u8| {
             // Symmetric — exclusion (i, j) implies (j, i).
             // 1-4 takes precedence only when not already excluded;
             // we OR in so a pair that's both 1-3 and 1-4 (e.g. in a

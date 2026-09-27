@@ -3,13 +3,15 @@
 //! f32 reorder noise) since they implement the same physics.
 //!
 //! Builds Ala-Lys-Glu, applies Morton sort, builds both:
+//!
 //!   - Verlet pair list (existing infrastructure)
 //!   - Tile interaction list (new)
+//!
 //! Runs both kernels on the same input, compares per-atom forces.
 
 use chem::{classify_atom, standard_ff, AminoAcid, AtomType};
 use energy::DEFAULT_CUTOFF_A;
-use geom::{build_extended_chain, build_topology_graph, Vec3};
+use geom::{build_extended_chain, build_topology_graph};
 use gpu::{
     build_tile_interaction_list, morton_permutation, pair_list_to_csr, GpuContext,
     TileNonbondedPipeline, TileNonbondedSetup, VerletNonbondedPipeline, VerletNonbondedSetup,

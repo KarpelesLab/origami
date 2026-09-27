@@ -20,3 +20,6 @@ dynamics = { path = "../dynamics" }
 io = { path = "../io" }
 anyhow.workspace = true
 clap.workspace = true
+
+[lints]
+workspace = true

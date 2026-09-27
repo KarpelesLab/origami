@@ -868,6 +868,7 @@ fn parse_rtf_rna_charges(text: &str, ff: &mut ForceField) {
 ///   1. `O1P` / `O2P` → `OP1` / `OP2` (PDB convention).
 ///   2. `H2'` (CHARMM: proton on the 2'-hydroxyl O2') → `HO2'`.
 ///   3. `H2''` (CHARMM: proton on C2') → `H2'`.
+///
 /// Other atoms (P, O5', H5', H5'', C4', H4', O4', C1', H1', C3', H3',
 /// O3', C2', O2', N9, C8, N7, …) already use the PDB v3.3 spelling.
 fn charmm_to_pdb_rna_name(charmm: &str) -> &'static str {

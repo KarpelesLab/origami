@@ -624,7 +624,7 @@ impl FullGpuIntegrator {
                             // kernel walks neighbour lists in GPU
                             // space, same as nb / GB.
                             per_atom_nbrs[self.cpu_to_gpu[cpu_i] as usize]
-                                .push(self.cpu_to_gpu[cpu_j] as u32);
+                                .push(self.cpu_to_gpu[cpu_j]);
                         }
                     }
                 }

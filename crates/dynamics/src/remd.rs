@@ -212,7 +212,7 @@ where
     // Build all replicas.
     let mut replicas: Vec<Replica> = Vec::with_capacity(n_rep);
     for (i, &t) in temps.iter().enumerate() {
-        let mut rep_structure = structure.clone();
+        let rep_structure = structure.clone();
         let masses = crate::langevin::collect_masses_pub(&rep_structure);
         let inv_masses: Vec<f64> = masses.iter().map(|m| 1.0 / m).collect();
         let mut rng =
@@ -222,7 +222,7 @@ where
         let mut scratch = ForceScratch::new(&rep_structure, graph, ff);
         let mut forces: Vec<Vec3> = Vec::with_capacity(n);
         total_force_with_scratch(
-            &mut rep_structure,
+            &rep_structure,
             graph,
             ff,
             DEFAULT_CUTOFF_A,
@@ -375,7 +375,7 @@ where
                 }
                 // Recompute force at new positions.
                 total_force_with_scratch(
-                    &mut rep.structure,
+                    &rep.structure,
                     graph,
                     ff,
                     DEFAULT_CUTOFF_A,
