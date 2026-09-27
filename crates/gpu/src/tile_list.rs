@@ -4,9 +4,11 @@
 //! Given Morton-sorted atom positions (so atoms in the same tile are
 //! spatially close) and a cutoff, returns a CSR layout:
 //!
-//!   tile_count[i_tile]  : how many j_tiles atom `i_tile` interacts with
-//!   tile_start[i_tile]  : offset into tile_indices for atom `i_tile`'s list
-//!   tile_indices[]      : flat j_tile indices
+//! ```text
+//! tile_count[i_tile]  : how many j_tiles atom `i_tile` interacts with
+//! tile_start[i_tile]  : offset into tile_indices for atom `i_tile`'s list
+//! tile_indices[]      : flat j_tile indices
+//! ```
 //!
 //! Algorithm:
 //!   1. For each i_tile, compute its axis-aligned bbox over the 64

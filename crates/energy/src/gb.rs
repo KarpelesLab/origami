@@ -30,7 +30,7 @@ const OBC_BETA: f64 = 0.8;
 const OBC_GAMMA: f64 = 4.85;
 /// Born radius offset (Å). Subtracted from ρ to give ρ̃.
 const OBC_OFFSET: f64 = 0.09;
-/// Public alias of [`OBC_OFFSET`] for the SoA Born-radius cache (see
+/// Public alias of `OBC_OFFSET` for the SoA Born-radius cache (see
 /// `energy::scratch`) which precomputes ρ̃ = ρ − OBC_OFFSET once.
 pub const OBC_OFFSET_PUB: f64 = OBC_OFFSET;
 

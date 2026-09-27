@@ -234,7 +234,7 @@ impl AtomType {
         }
     }
 
-    /// Reverse of [`charmm_name`]. Returns `None` for atom types we don't
+    /// Reverse of [`charmm_name`](Self::charmm_name). Returns `None` for atom types we don't
     /// model (e.g. CHARMM's NP for N-terminal proline, OS for ester O,
     /// CS / SS for thiolate, SM for disulfide).
     pub fn from_charmm_name(name: &str) -> Option<Self> {

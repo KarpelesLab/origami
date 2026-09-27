@@ -414,7 +414,7 @@ fn directional_area_derivative(
 /// For each atom i with non-zero surface tension γ_i:
 ///   - Build its boundary topology cache.
 ///   - Compute ∂A_i/∂r_x as a 3-vector for every affected atom x.
-///   - Accumulate forces[x] -= γ_i · ∂A_i/∂r_x  (F = −∇E_SASA, and
+///   - Accumulate forces\[x\] -= γ_i · ∂A_i/∂r_x  (F = −∇E_SASA, and
 ///     E_SASA = Σ_i γ_i · A_i).
 ///
 /// This replaces the numerical central-difference scheme in

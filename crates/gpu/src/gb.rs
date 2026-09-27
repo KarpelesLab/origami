@@ -443,7 +443,7 @@ impl GbPipeline {
         encoder.copy_buffer_to_buffer(&self.forces_buf, 0, &self.readback_buf, 0, self.forces_size);
     }
 
-    /// See [`VerletNonbondedPipeline::begin_readback`].
+    /// See [`VerletNonbondedPipeline::begin_readback`](crate::VerletNonbondedPipeline::begin_readback).
     pub fn begin_readback(&self) -> std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>> {
         let slice = self.readback_buf.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
@@ -453,7 +453,7 @@ impl GbPipeline {
         rx
     }
 
-    /// See [`VerletNonbondedPipeline::take_readback`].
+    /// See [`VerletNonbondedPipeline::take_readback`](crate::VerletNonbondedPipeline::take_readback).
     pub fn take_readback(&self) -> Vec<[f32; 3]> {
         let slice = self.readback_buf.slice(..);
         let data = slice.get_mapped_range();

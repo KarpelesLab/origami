@@ -31,7 +31,7 @@ const EPSILON_SOLUTE: f64 = 1.0;
 /// cut off at this distance). Using the same cutoff for both keeps
 /// the two electrostatic terms self-consistent.
 const GB_DEFAULT_CUTOFF_A: f64 = DEFAULT_CUTOFF_A;
-/// Public re-export of [`GB_DEFAULT_CUTOFF_A`] for the integrator path
+/// Public re-export of `GB_DEFAULT_CUTOFF_A` for the integrator path
 /// (`energy::forces::total_force_with_scratch`).
 pub const GB_DEFAULT_CUTOFF_A_PUB: f64 = GB_DEFAULT_CUTOFF_A;
 

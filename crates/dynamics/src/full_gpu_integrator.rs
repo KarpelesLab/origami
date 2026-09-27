@@ -497,7 +497,7 @@ impl FullGpuIntegrator {
     }
 
     /// Enable SHAKE on the underlying integrator pipeline.  After
-    /// this, [`step_batch_shake`] is callable.
+    /// this, [`step_batch_shake`](Self::step_batch_shake) is callable.
     ///
     /// **Important**: the caller passes `shake_data` constructed from
     /// CPU-indexed atom indices (typical usage:
@@ -510,7 +510,7 @@ impl FullGpuIntegrator {
     }
 
     /// SHAKE-mode batched step.  Same drift-check + neighbour refresh
-    /// machinery as [`step_batch`]; calls `step_n_shake` instead of
+    /// machinery as [`step_batch`](Self::step_batch); calls `step_n_shake` instead of
     /// `step_n`.
     pub fn step_batch_shake(&mut self, n_steps: usize) {
         self.refresh_neighbour_lists();

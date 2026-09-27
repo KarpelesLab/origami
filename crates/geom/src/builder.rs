@@ -3,7 +3,7 @@
 //! The backbone (N, HN, CA, HA(s), C, O) is placed by this module using
 //! standard peptide geometry — these atoms are uniform across all residues
 //! (Gly has two HAs and no side chain; Pro has no amide H). Side-chain
-//! atoms are placed using each residue's [`ResidueTopology`] from the
+//! atoms are placed using each residue's [`ResidueTopology`](chem::ResidueTopology) from the
 //! `chem` crate.
 
 use std::f64::consts::PI;

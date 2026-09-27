@@ -30,8 +30,8 @@
 //! where `ACCEL_FACTOR = 1e-4` is the dimensional bridge derived from
 //! `kJ/mol/Å / Da → m/s² → Å/fs²`. Equivalently, the kinetic-energy
 //! conversion `Σ ½ m v² [Da·Å²/fs²] = KE[kJ/mol] · ACCEL_FACTOR` falls
-//! out of the same constants. The bookkeeping is collected in
-//! [`AccelConstants`] so the integrator inner loop stays clean.
+//! out of the same constants. The bookkeeping is folded into
+//! `ACCEL_FACTOR` so the integrator inner loop stays clean.
 
 use chem::ForceField;
 use energy::DEFAULT_CUTOFF_A;

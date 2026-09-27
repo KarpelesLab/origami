@@ -159,7 +159,7 @@ impl IntegratorPipeline {
 
     /// Enable smooth-coverage SASA forces.  After construction the
     /// caller uploads tile-list neighbour data via
-    /// [`update_sasa_neighbours`]; from then on every
+    /// [`update_sasa_neighbours`](Self::update_sasa_neighbours); from then on every
     /// `step_n` / `step_n_shake` includes the SASA force kernel in
     /// its per-step force evaluation.
     pub fn enable_sasa(&mut self, setup: SasaSmoothSetup) {
@@ -182,7 +182,7 @@ impl IntegratorPipeline {
 
     /// Enable the tile-based nonbonded kernel — replaces the Verlet
     /// kernel in subsequent `step_n` / `step_n_shake` calls.  After
-    /// this, the caller uses [`update_tile_nb_list`] instead of
+    /// this, the caller uses [`update_tile_nb_list`](Self::update_tile_nb_list) instead of
     /// `update_nb_neighbours`.
     ///
     /// Constructs a fresh `TileNonbondedPipeline` bound to the same
@@ -216,7 +216,7 @@ impl IntegratorPipeline {
 
     /// Enable the SHAKE-mode integrator path.  Compiles the SHAKE
     /// kernel, allocates the ref_positions buffer, enables the
-    /// granular BAOAB kernels.  After this returns, [`step_n_shake`]
+    /// granular BAOAB kernels.  After this returns, [`step_n_shake`](Self::step_n_shake)
     /// is callable.
     pub fn enable_shake(&mut self, shake_data: &PerXShakeData, max_iters: u32, tol_sq: f32) {
         let device = &self.ctx.device;

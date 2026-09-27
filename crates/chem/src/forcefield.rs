@@ -202,7 +202,8 @@ impl ForceField {
     }
 
     /// Dispatching partial-charge lookup — `Monomer::Protein(aa)` →
-    /// [`partial_charge`], `Monomer::Rna(nt)` → [`partial_charge_rna`].
+    /// [`partial_charge`](Self::partial_charge), `Monomer::Rna(nt)` →
+    /// [`partial_charge_rna`](Self::partial_charge_rna).
     pub fn partial_charge_for(&self, monomer: Monomer, atom_name: &str) -> Option<f64> {
         match monomer {
             Monomer::Protein(aa) => self.partial_charge(aa, atom_name),

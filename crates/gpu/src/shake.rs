@@ -263,7 +263,7 @@ impl ShakePipeline {
         unreachable!("ShakePipeline::set_params needs ctx — use the alternate signature");
     }
 
-    /// As [`set_params`], with explicit queue access.
+    /// As [`set_params`](Self::set_params), with explicit queue access.
     pub fn set_params_with_queue(&self, queue: &wgpu::Queue, max_iters: u32, tol_sq: f32) {
         let params = ShakeParams {
             n_atoms: self.n_atoms as u32,

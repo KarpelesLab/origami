@@ -17,7 +17,7 @@
 //! - [`NucleotideTopology`] mirroring `ResidueTopology` — each non-
 //!   anchor atom names its bonded parent so a NeRF placement pass
 //!   later can grow the molecule one atom at a time.
-//! - A [`Base`](crate::codon::Base) → [`Nucleotide`] conversion so
+//! - A [`Base`] → [`Nucleotide`] conversion so
 //!   the existing translation pipeline can produce RNA chains.
 //!
 //! ## What's not here yet

@@ -12,11 +12,14 @@
 //! - The pair-force inner loop, which *does* run every step, becomes
 //!   O(⟨neighbours⟩) per atom instead of O(N) — the actual hot path.
 //!
-//! API mirrors [`NonbondedPipeline`]:
-//!   1. construct once with [`new`](Self::new)
-//!   2. per skin-rebuild, call [`update_neighbours`](Self::update_neighbours)
-//!   3. per force eval, call [`update_positions`](Self::update_positions)
-//!      and [`compute`](Self::compute)
+//! API mirrors [`NonbondedPipeline`](crate::NonbondedPipeline):
+//!
+//!   1. construct once with [`new`](VerletNonbondedPipeline::new)
+//!   2. per skin-rebuild, call
+//!      [`update_neighbours`](VerletNonbondedPipeline::update_neighbours)
+//!   3. per force eval, call
+//!      [`update_positions`](VerletNonbondedPipeline::update_positions)
+//!      and [`compute`](VerletNonbondedPipeline::compute)
 //!
 //! Same kJ/mol/Å sign convention, same 1-4 LJ specials handling, same
 //! reaction-field Coulomb sign as `NonbondedPipeline`.
